@@ -1,7 +1,7 @@
 'use client';
 
 import {useCallback,useEffect,useRef,useState} from 'react';
-import {Pause,Play,Plus,Square,Trash2,Upload,Volume2,Clock,Calendar,Music,AlertCircle,CheckCircle,RefreshCw} from 'lucide-react';
+import {Pause,Play,Plus,Square,Trash2,Upload,Volume2,Clock,Calendar,Music} from 'lucide-react';
 import type {GymState,Operation} from './lib/domain';
 import type {Role} from './lib/access';
 import {audioQueue,calculateTimeline,delay,type AudioPart,type SequenceItem} from './lib/announcement-audio';
@@ -112,8 +112,6 @@ async function probeAudioDuration(file: File | Blob): Promise<number> {
 export default function Announcements({
   branch,
   owner,
-  ar,
-  role,
   visible
 }: {
   state: GymState;
@@ -127,8 +125,24 @@ export default function Announcements({
   mutate: (op: Omit<Operation, 'branch'> & {type: string}) => Promise<boolean>;
 }) {
   const scope = `${owner}|${branch}`;
-  const [items, setItems] = useState<Announcement[]>([]);
-  const [logs, setLogs] = useState<ExecutionLog[]>([]);
+  const [items, setItems] = useState<Announcement[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(storageKey(scope));
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [logs, setLogs] = useState<ExecutionLog[]>(() => {
+    if (typeof window === 'undefined') return [];
+    try {
+      const savedLogs = localStorage.getItem(logsKey(scope));
+      return savedLogs ? JSON.parse(savedLogs) : [];
+    } catch {
+      return [];
+    }
+  });
   const [editing, setEditing] = useState<Announcement | null>(null);
   const [timeInput, setTimeInput] = useState('');
   const [statusMessage, setStatusMessage] = useState<{text: string; type: 'success' | 'error' | 'info'} | null>(null);
@@ -175,17 +189,20 @@ export default function Announcements({
     createdAt: new Date().toISOString()
   });
 
-  // Load from local storage on mount/scope change
+  // Sync from local storage when scope changes
   useEffect(() => {
     if (!visible) return;
-    try {
-      const raw = localStorage.getItem(storageKey(scope));
-      if (raw) setItems(JSON.parse(raw));
-      const savedLogs = localStorage.getItem(logsKey(scope));
-      if (savedLogs) setLogs(JSON.parse(savedLogs));
-    } catch {
-      setStatusMessage({text: 'تعذر قراءة البيانات المحفوظة محليًا.', type: 'error'});
-    }
+    const timer = setTimeout(() => {
+      try {
+        const raw = localStorage.getItem(storageKey(scope));
+        setItems(raw ? JSON.parse(raw) : []);
+        const savedLogs = localStorage.getItem(logsKey(scope));
+        setLogs(savedLogs ? JSON.parse(savedLogs) : []);
+      } catch {
+        setStatusMessage({text: 'تعذر قراءة البيانات المحفوظة محليًا.', type: 'error'});
+      }
+    }, 0);
+    return () => clearTimeout(timer);
   }, [scope, visible]);
 
   // Persist announcements metadata to localStorage
@@ -479,6 +496,11 @@ export default function Announcements({
     setCurrentPlayback(null);
   };
 
+  const executeSequenceRef = useRef(executeSequence);
+  useEffect(() => {
+    executeSequenceRef.current = executeSequence;
+  });
+
   // Scheduled timer polling every second
   useEffect(() => {
     if (!visible) return;
@@ -513,7 +535,7 @@ export default function Announcements({
       dueItems.forEach(due => {
         const key = `${due.id}|${todayDate}|${currentTime}`;
         firedOccurrences.current.add(key);
-        void audioQueue.enqueue(() => executeSequence(due, true), false);
+        void audioQueue.enqueue(() => executeSequenceRef.current(due, true), false);
       });
     }, 1000);
 
