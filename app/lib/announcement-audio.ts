@@ -6,6 +6,13 @@ export type AudioPart = {
   blob?: Blob;
 };
 
+export const DEFAULT_CHIME_PART: AudioPart = {
+  id: 'default-chime',
+  name: 'نغمة النداء الافتراضية (Chime)',
+  size: 620038,
+  duration: 3.51
+};
+
 export type SequenceItem = {
   id: string;
   name: string;

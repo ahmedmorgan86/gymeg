@@ -4,7 +4,8 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 import {Pause,Play,Plus,Square,Trash2,Upload,Volume2,Clock,Calendar,Music} from 'lucide-react';
 import type {GymState,Operation} from './lib/domain';
 import type {Role} from './lib/access';
-import {audioQueue,calculateTimeline,delay,type AudioPart,type SequenceItem} from './lib/announcement-audio';
+import {audioQueue,calculateTimeline,delay,DEFAULT_CHIME_PART,type AudioPart,type SequenceItem} from './lib/announcement-audio';
+import {DEFAULT_CHIME_BASE64} from './lib/default-chime-data';
 
 export type Announcement = SequenceItem & {
   branch: string;
@@ -59,6 +60,20 @@ async function persistBlob(part: AudioPart): Promise<void> {
 }
 
 async function retrieveBlob(id: string): Promise<Blob | undefined> {
+  if (id === DEFAULT_CHIME_PART.id) {
+    try {
+      const res = await fetch('/audio/default-announcement-chime.wav');
+      if (res.ok) return await res.blob();
+    } catch {
+      // fallback to embedded base64
+    }
+    try {
+      const res = await fetch(DEFAULT_CHIME_BASE64);
+      return await res.blob();
+    } catch {
+      // fallback to database
+    }
+  }
   const db = await openAudioDb();
   return new Promise<Blob | undefined>((resolve, reject) => {
     const tx = db.transaction('audio_blobs', 'readonly');
@@ -168,13 +183,15 @@ export default function Announcements({
     mainVolume: 100,
     mainRepeats: 1,
     mainGap: 0,
-    beforeEnabled: false,
+    before: { ...DEFAULT_CHIME_PART },
+    beforeEnabled: true,
     beforeVolume: 80,
     beforeRepeats: 1,
     beforeGap: 3,
     beforeFadeIn: 0,
     beforeFadeOut: 0,
-    afterEnabled: false,
+    after: { ...DEFAULT_CHIME_PART },
+    afterEnabled: true,
     afterVolume: 80,
     afterRepeats: 1,
     afterGap: 2,
@@ -720,15 +737,24 @@ export default function Announcements({
               </div>
               {editing.beforeEnabled ? (
                 <div>
-                  <label className="button secondary" style={{display: 'inline-block', margin: '0.5rem 0', cursor: 'pointer'}}>
-                    <Upload size={16} /> {editing.before ? 'تغيير ملف الموسيقى' : 'رفع ملف موسيقى'}
-                    <input
-                      type="file"
-                      accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav,.m4a,.aac"
-                      hidden
-                      onChange={e => e.target.files?.[0] && void handleFileUpload('before', e.target.files[0])}
-                    />
-                  </label>
+                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0'}}>
+                    <label className="button secondary" style={{display: 'inline-block', cursor: 'pointer'}}>
+                      <Upload size={16} /> {editing.before ? 'تغيير ملف الموسيقى' : 'رفع ملف موسيقى'}
+                      <input
+                        type="file"
+                        accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav,.m4a,.aac"
+                        hidden
+                        onChange={e => e.target.files?.[0] && void handleFileUpload('before', e.target.files[0])}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => handleUpdateEditing('before', { ...DEFAULT_CHIME_PART })}
+                    >
+                      استخدام النغمة الافتراضية
+                    </button>
+                  </div>
                   {editing.before && (
                     <div style={{fontSize: '0.875rem', margin: '0.5rem 0'}}>
                       <p><strong>الملف:</strong> {editing.before.name}</p>
@@ -889,15 +915,24 @@ export default function Announcements({
               </div>
               {editing.afterEnabled ? (
                 <div>
-                  <label className="button secondary" style={{display: 'inline-block', margin: '0.5rem 0', cursor: 'pointer'}}>
-                    <Upload size={16} /> {editing.after ? 'تغيير ملف الموسيقى' : 'رفع ملف موسيقى'}
-                    <input
-                      type="file"
-                      accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav,.m4a,.aac"
-                      hidden
-                      onChange={e => e.target.files?.[0] && void handleFileUpload('after', e.target.files[0])}
-                    />
-                  </label>
+                  <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.5rem 0'}}>
+                    <label className="button secondary" style={{display: 'inline-block', cursor: 'pointer'}}>
+                      <Upload size={16} /> {editing.after ? 'تغيير ملف الموسيقى' : 'رفع ملف موسيقى'}
+                      <input
+                        type="file"
+                        accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav,.m4a,.aac"
+                        hidden
+                        onChange={e => e.target.files?.[0] && void handleFileUpload('after', e.target.files[0])}
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      onClick={() => handleUpdateEditing('after', { ...DEFAULT_CHIME_PART })}
+                    >
+                      استخدام النغمة الافتراضية
+                    </button>
+                  </div>
                   {editing.after && (
                     <div style={{fontSize: '0.875rem', margin: '0.5rem 0'}}>
                       <p><strong>الملف:</strong> {editing.after.name}</p>
