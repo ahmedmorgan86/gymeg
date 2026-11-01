@@ -86,10 +86,12 @@ class AudioUnlockerManager {
       }
 
       // Also create and play an empty audio element to unlock HTMLAudioElement
-      const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
-      silentAudio.volume = 0.01;
-      await silentAudio.play().catch(() => {});
-      silentAudio.pause();
+      if (typeof Audio !== 'undefined') {
+        const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+        silentAudio.volume = 0.01;
+        await silentAudio.play().catch(() => {});
+        silentAudio.pause();
+      }
 
       this.unlocked = true;
       this.notifyListeners(true);
