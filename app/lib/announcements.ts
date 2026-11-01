@@ -132,11 +132,16 @@ export function announcementOccurrence(a:Announcement,now:number):string|null{
   // If modern schedule is present
   if(a.times&&a.times.length){
     const parts=localParts(now,a.timezone??'Africa/Cairo');
-    if(!a.times.includes(parts.clock))return null;
+    const normTimes = a.times.map(t => {
+      const tr = String(t).trim();
+      const [h, m] = tr.split(':');
+      return h && m ? `${h.padStart(2, '0')}:${m.padStart(2, '0')}` : tr;
+    });
+    if(!normTimes.includes(parts.clock))return null;
     if(a.startDate&&parts.day<a.startDate)return null;
     if(a.endDate&&parts.day>a.endDate)return null;
     const nowDay=new Date(now).getDay();
-    if(a.schedule==='once'&&a.date!==parts.day)return null;
+    if(a.schedule==='once'&&(a.date??a.startDate)!==parts.day)return null;
     if(a.schedule==='weekly'&&a.days&&!a.days.includes(nowDay))return null;
     if(a.schedule==='interval'&&a.interval&&a.startDate){
       const diff=Math.round((Date.parse(parts.day+'T12:00:00Z')-Date.parse(a.startDate+'T12:00:00Z'))/86400000);

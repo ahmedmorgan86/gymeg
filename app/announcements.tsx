@@ -20,6 +20,28 @@ export type Announcement = SequenceItem & {
   createdAt: string;
 };
 
+function getLocalDateStr(d: Date = new Date()): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function getLocalTimeStr(d: Date = new Date()): string {
+  const h = String(d.getHours()).padStart(2, '0');
+  const m = String(d.getMinutes()).padStart(2, '0');
+  return `${h}:${m}`;
+}
+
+function normalizeTimeStr(t: string): string {
+  const tr = String(t).trim();
+  const [h, m] = tr.split(':');
+  if (h && m) {
+    return `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+  }
+  return tr;
+}
+
 export type ExecutionLog = {
   id: string;
   announcementId: string;
@@ -208,15 +230,14 @@ export default function Announcements({
     schedule: 'daily',
     days: [0, 1, 2, 3, 4, 5, 6],
     times: ['08:00'],
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: getLocalDateStr(),
     interval: 1,
     enabled: true,
     createdAt: new Date().toISOString()
   });
 
-  // Sync from local storage when scope changes
+  // Sync from local storage when scope changes (active in background)
   useEffect(() => {
-    if (!visible) return;
     const timer = setTimeout(() => {
       try {
         const raw = localStorage.getItem(storageKey(scope));
@@ -224,11 +245,11 @@ export default function Announcements({
         const savedLogs = localStorage.getItem(logsKey(scope));
         setLogs(savedLogs ? JSON.parse(savedLogs) : []);
       } catch {
-        setStatusMessage({text: 'تعذر قراءة البيانات المحفوظة محليًا.', type: 'error'});
+        // storage fallback
       }
     }, 0);
     return () => clearTimeout(timer);
-  }, [scope, visible]);
+  }, [scope]);
 
   // Persist announcements metadata to localStorage
   const saveToStorage = useCallback((updated: Announcement[]) => {
@@ -537,18 +558,24 @@ export default function Announcements({
     executeSequenceRef.current = executeSequence;
   });
 
-  // Scheduled timer polling every second
+  const itemsRef = useRef(items);
   useEffect(() => {
-    if (!visible) return;
+    itemsRef.current = items;
+  }, [items]);
+
+  // Scheduled timer polling every second (continuous background scheduler)
+  useEffect(() => {
     const interval = setInterval(() => {
       const now = new Date();
       const todayIndex = now.getDay();
-      const todayDate = now.toISOString().slice(0, 10);
-      const currentTime = now.toTimeString().slice(0, 5);
+      const todayDate = getLocalDateStr(now);
+      const currentTime = getLocalTimeStr(now);
 
-      const dueItems = items.filter(item => {
+      const dueItems = itemsRef.current.filter(item => {
         if (!item.enabled || !item.main) return false;
-        if (!item.times.includes(currentTime)) return false;
+
+        const matchesTime = (item.times || []).some(t => normalizeTimeStr(t) === currentTime);
+        if (!matchesTime) return false;
 
         const occurrenceKey = `${item.id}|${todayDate}|${currentTime}`;
         if (firedOccurrences.current.has(occurrenceKey)) return false;
@@ -557,13 +584,13 @@ export default function Announcements({
         if (item.endDate && todayDate > item.endDate) return false;
 
         if (item.schedule === 'daily') return true;
-        if (item.schedule === 'weekly') return item.days.includes(todayIndex);
+        if (item.schedule === 'weekly') return (item.days || []).includes(todayIndex);
         if (item.schedule === 'once') return (item.date ?? item.startDate) === todayDate;
         if (item.schedule === 'interval') {
           const startMs = Date.parse((item.startDate ?? todayDate) + 'T12:00:00Z');
           const currentMs = Date.parse(todayDate + 'T12:00:00Z');
           const diffDays = Math.round((currentMs - startMs) / 86400000);
-          return diffDays >= 0 && diffDays % Math.max(1, item.interval) === 0;
+          return diffDays >= 0 && diffDays % Math.max(1, item.interval || 1) === 0;
         }
         return false;
       });
@@ -576,7 +603,7 @@ export default function Announcements({
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [items, visible]);
+  }, []);
 
   // Form helpers
   const handleUpdateEditing = <K extends keyof Announcement>(field: K, val: Announcement[K]) => {
@@ -604,8 +631,40 @@ export default function Announcements({
     }
   };
 
+  const handleAddTime = (val?: string) => {
+    if (!editing) return;
+    const target = (val ?? timeInput).trim();
+    if (!target) return;
+    const match = target.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+    if (!match) {
+      setStatusMessage({text: 'يرجى إدخال وقت صحيح بصيغة 24 ساعة (مثال: 08:30 أو 15:45)', type: 'error'});
+      return;
+    }
+    const formatted = `${match[1].padStart(2, '0')}:${match[2]}`;
+    if (!editing.times.map(normalizeTimeStr).includes(formatted)) {
+      handleUpdateEditing('times', [...editing.times, formatted].sort());
+      setTimeInput('');
+      setStatusMessage({text: `تمت إضافة الموعد: ${formatted}`, type: 'info'});
+    } else {
+      setTimeInput('');
+    }
+  };
+
   const handleSave = async () => {
     if (!editing) return;
+
+    const finalTimes = [...editing.times];
+    if (timeInput.trim()) {
+      const match = timeInput.trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+      if (match) {
+        const formatted = `${match[1].padStart(2, '0')}:${match[2]}`;
+        if (!finalTimes.map(normalizeTimeStr).includes(formatted)) {
+          finalTimes.push(formatted);
+          finalTimes.sort();
+        }
+      }
+    }
+
     if (!editing.name.trim()) {
       setStatusMessage({text: 'يرجى إدخال اسم النداء أولاً.', type: 'error'});
       return;
@@ -614,15 +673,21 @@ export default function Announcements({
       setStatusMessage({text: 'يرجى رفع ملف النداء الأساسي الإلزامي.', type: 'error'});
       return;
     }
-    if (!editing.times || editing.times.length === 0) {
+    if (finalTimes.length === 0) {
       setStatusMessage({text: 'يرجى تحديد موعد تشغيل واحد على الأقل.', type: 'error'});
       return;
     }
 
-    const exists = items.some(x => x.id === editing.id);
-    const updated = exists ? items.map(x => x.id === editing.id ? editing : x) : [...items, editing];
+    const toSave: Announcement = {
+      ...editing,
+      times: finalTimes
+    };
+
+    const exists = items.some(x => x.id === toSave.id);
+    const updated = exists ? items.map(x => x.id === toSave.id ? toSave : x) : [...items, toSave];
     saveToStorage(updated);
     setEditing(null);
+    setTimeInput('');
     setStatusMessage({text: 'تم حفظ إعدادات النداء وجدولته بنجاح.', type: 'success'});
   };
 
@@ -646,19 +711,6 @@ export default function Announcements({
 
     if (toDelete.length) await deleteBlobs(toDelete);
     setStatusMessage({text: 'تم حذف النداء وتنظيف الملفات غير المستخدمة.', type: 'info'});
-  };
-
-  const handleAddTime = () => {
-    if (!editing) return;
-    const clean = timeInput.trim();
-    if (!/^([01]\d|2[0-3]):([0-5]\d)$/.test(clean)) {
-      setStatusMessage({text: 'يرجى إدخال وقت صحيح بصيغة 24 ساعة (مثال: 08:30)', type: 'error'});
-      return;
-    }
-    if (!editing.times.includes(clean)) {
-      handleUpdateEditing('times', [...editing.times, clean].sort());
-      setTimeInput('');
-    }
   };
 
   const handleRemoveTime = (t: string) => {
@@ -1131,16 +1183,44 @@ export default function Announcements({
             {/* Times Selector (Multiple Times Supported) */}
             <div style={{margin: '1rem 0'}}>
               <p style={{fontWeight: 'bold', marginBottom: '0.5rem'}}>أوقات التشغيل (ساعات ودقائق):</p>
-              <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '0.5rem'}}>
+              <div style={{display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem'}}>
                 <input
                   type="time"
                   value={timeInput}
                   onChange={e => setTimeInput(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddTime();
+                    }
+                  }}
                   style={{padding: '0.5rem'}}
                 />
-                <button type="button" className="button secondary" onClick={handleAddTime}>
+                <button type="button" className="button secondary" onClick={() => handleAddTime()}>
                   + إضافة موعد
                 </button>
+                <button
+                  type="button"
+                  className="button secondary"
+                  style={{fontSize: '0.8rem'}}
+                  onClick={() => handleAddTime(getLocalTimeStr())}
+                >
+                  موعد الآن ({getLocalTimeStr()})
+                </button>
+              </div>
+              <div style={{display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem'}}>
+                <span style={{fontSize: '0.8rem', color: '#94a3b8', alignSelf: 'center'}}>مواعيد مقترحة:</span>
+                {['09:00', '12:00', '15:00', '18:00', '21:00'].map(preset => (
+                  <button
+                    key={preset}
+                    type="button"
+                    className="button secondary"
+                    style={{padding: '0.15rem 0.45rem', fontSize: '0.78rem'}}
+                    onClick={() => handleAddTime(preset)}
+                  >
+                    {preset}
+                  </button>
+                ))}
               </div>
               <div style={{display: 'flex', gap: '0.5rem', flexWrap: 'wrap'}}>
                 {editing.times.map(t => (
