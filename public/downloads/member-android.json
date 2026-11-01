@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
-  "versionCode": 4,
-  "url": "/downloads/GymEG-Members-Legacy-Android-1.0.3.apk",
+  "version": "1.0.4",
+  "versionCode": 5,
+  "url": "/downloads/GymEG-Members-Legacy-Android-1.0.4.apk",
   "package": "com.gymos.members",
   "origin": "https://gymeg.vercel.app",
   "home": "/member",
@@ -9,13 +9,13 @@
   "sha256": "9b8e91a70c3d51aaad762911fbde1e01fb1065f7a9a2e391b5f57d3831334d5e",
   "bytes": 79187,
   "certificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
-  "builtAt": "2026-10-29T04:41:34.077607+00:00",
+  "builtAt": "2026-11-01T19:34:12.573947+00:00",
   "independentApplication": true,
   "requiresReinstallFromPreviousBrand": false,
   "upgradeFromCertificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "bfe607a561bb74c11ee49058873598de31312681f60717e6cd2353bde6f2b8ca",
+    "AndroidManifest.xml": "117ddc913e8c90b5b5e8afaf9151714991438eef14f61a97daf376f5eb28df6c",
     "res/drawable/ic_launcher_foreground.xml": "f9032c2e575ed2801facf1a880241a1adfcca40789be2e0b464d924d365f60fc",
     "res/drawable/ic_monochrome.xml": "6a7942e7bc55f3545ca53bc9bb7d55bed951ef94e756e302d356739976518557",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -31,6 +31,6 @@
     "res/values/styles.xml": "518120ebd6daceedbbfe68c93a5a5c4565623db89b57f8ec6e8ec8115ea91e3b",
     "res/xml/data_extraction_rules.xml": "66c2d7c6ac2a3c03200235a556e0f410620cae5bdfedd4ebdf18528fcbc42886",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
-    "src/com/gymos/members/MainActivity.java": "a4a44d5f7b187cb67aa9b217e5124202dc3c77ca0e5935d947d18f8803237201"
+    "src/com/gymos/members/MainActivity.java": "6c38ac3c2d347d2400c755e9c1de83839f8501a3e2d6d2ebbe0b500d1a05499c"
   }
 }

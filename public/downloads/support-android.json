@@ -1,7 +1,7 @@
 {
-  "version": "1.0.3",
-  "versionCode": 4,
-  "url": "/downloads/GymEG-Support-Android-1.0.3.apk",
+  "version": "1.0.4",
+  "versionCode": 5,
+  "url": "/downloads/GymEG-Support-Android-1.0.4.apk",
   "package": "com.gymos.support",
   "origin": "https://gymeg.vercel.app",
   "home": "/support-login",
@@ -9,13 +9,13 @@
   "sha256": "59265c4ef12bd6ed02264cd8c5d61fcc196a5e305677d58002daf764b7403186",
   "bytes": 79187,
   "certificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
-  "builtAt": "2026-10-29T23:53:17.462140+00:00",
+  "builtAt": "2026-11-01T19:34:12.563019+00:00",
   "independentApplication": true,
   "requiresReinstallFromPreviousBrand": false,
   "upgradeFromCertificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "3b710cfcdd8416d794dd67e88f3656728376cd8be3e30a473ddbfdfe3d9658d0",
+    "AndroidManifest.xml": "b79dd22c4f0338bf1d655c2622c396ed95fd668b280693431b51d7e075e6eda8",
     "res/drawable/ic_launcher_foreground.xml": "14bd2fab06cc69266c7d3bf8ce8379e006ab70c48efa452fdcd9dd5cc77091d2",
     "res/drawable/ic_monochrome.xml": "9da54cea29b8591b399949c64ee3cb629d76172c0b65fd91ce5adca74ef1d83d",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -32,6 +32,8 @@
     "res/values-ar/strings.xml": "453122f3d8da619722c0db6e2179ad7064fcbf9fb311f90b4b967997f07986bd",
     "res/xml/data_extraction_rules.xml": "66c2d7c6ac2a3c03200235a556e0f410620cae5bdfedd4ebdf18528fcbc42886",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
-    "src/com/gymos/support/MainActivity.java": "37d50ca618d1b6e754ec96cd48ca77ab2f59c02111ed9448c2e940d7046ecb9e"
+    "src/com/gymos/support/AnnouncementBridge.java": "3f04c50a253e894bedcea3145f5b646ed5a5e8d3e7e533124696da5db8a98087",
+    "src/com/gymos/support/AnnouncementReceiver.java": "017975e8daaeaf3c9d1b32e68ae1ab12200f6a34f5d68ef5e9e3d95700f07c2c",
+    "src/com/gymos/support/MainActivity.java": "90c77ac8f96424a59b3b496c1617e361af8b3adf041a28fdf1e2fac56ba37775"
   }
 }

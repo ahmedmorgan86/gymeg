@@ -193,6 +193,17 @@ async function probeAudioDuration(file: File | Blob): Promise<number> {
   });
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const buf = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
 /**
  * Synchronize announcements state with native host platforms:
  * 1. Windows WPF WebView2 (chrome.webview)
@@ -202,60 +213,77 @@ async function probeAudioDuration(file: File | Blob): Promise<number> {
 function syncWithNativePlatforms(itemsList: Announcement[]): void {
   if (typeof window === 'undefined') return;
 
-  const payload = itemsList.map(item => ({
-    id: item.id,
-    name: item.name,
-    enabled: item.enabled,
-    schedule: item.schedule,
-    days: item.days,
-    times: item.times,
-    date: item.date,
-    startDate: item.startDate,
-    endDate: item.endDate,
-    interval: item.interval,
-    totalDurationSeconds: item.totalDurationSeconds ?? calculateTimeline(item).totalSeconds,
-    composedId: item.composedId
-  }));
-
-  // 1. Windows WPF Host
-  try {
-    const winHost = (window as unknown as { chrome?: { webview?: { postMessage: (msg: unknown) => void } } }).chrome?.webview;
-    if (winHost?.postMessage) {
-      winHost.postMessage({
-        type: 'gymos-desktop',
-        action: 'announcementsSync',
-        items: payload
-      });
-    }
-  } catch {}
-
-  // 2. Android Host (via trusted WebView request interception or native bridge)
-  try {
-    const jsonStr = JSON.stringify(payload);
-    const androidBridge = (window as unknown as { GymOSAndroid?: { syncAnnouncements: (json: string) => void } }).GymOSAndroid;
-    if (androidBridge?.syncAnnouncements) {
-      androidBridge.syncAnnouncements(jsonStr);
-    } else if (typeof navigator !== 'undefined' && /GymOSManagerAndroid|GymEGManagerAndroid/i.test(navigator.userAgent)) {
-      void fetch(`/__native_announcements__?payload=${encodeURIComponent(jsonStr)}`).catch(() => {});
-    }
-  } catch {}
-
-  // 3. iOS Host
-  try {
-    const iosBridge = (window as unknown as {
-      webkit?: {
-        messageHandlers?: {
-          gymosAnnouncementBridge?: { postMessage: (msg: unknown) => void };
+  void (async () => {
+    const payload = await Promise.all(
+      itemsList.map(async item => {
+        let wavBase64: string | undefined;
+        try {
+          const cid = item.composedId || `comp_${item.id}`;
+          const composedBlob = await retrieveBlob(cid);
+          if (composedBlob) {
+            wavBase64 = await blobToBase64(composedBlob);
+          }
+        } catch {}
+        return {
+          id: item.id,
+          name: item.name,
+          branch: item.branch,
+          enabled: item.enabled,
+          schedule: item.schedule,
+          days: item.days,
+          times: item.times,
+          date: item.date,
+          startDate: item.startDate,
+          endDate: item.endDate,
+          interval: item.interval,
+          totalDurationSeconds: item.totalDurationSeconds ?? calculateTimeline(item).totalSeconds,
+          composedId: item.composedId,
+          wavBase64
         };
-      };
-    }).webkit?.messageHandlers?.gymosAnnouncementBridge;
-    if (iosBridge?.postMessage) {
-      iosBridge.postMessage({
-        action: 'sync',
-        items: payload
-      });
-    }
-  } catch {}
+      })
+    );
+
+    // 1. Windows WPF Host
+    try {
+      const winHost = (window as unknown as { chrome?: { webview?: { postMessage: (msg: unknown) => void } } }).chrome?.webview;
+      if (winHost?.postMessage) {
+        winHost.postMessage({
+          type: 'gymos-desktop',
+          action: 'announcementsSync',
+          items: payload
+        });
+      }
+    } catch {}
+
+    // 2. Android Host (via trusted WebView request interception or native bridge)
+    try {
+      const jsonStr = JSON.stringify(payload);
+      const androidBridge = (window as unknown as { GymOSAndroid?: { syncAnnouncements: (json: string) => void } }).GymOSAndroid;
+      if (androidBridge?.syncAnnouncements) {
+        androidBridge.syncAnnouncements(jsonStr);
+      } else if (typeof navigator !== 'undefined' && /GymOSManagerAndroid|GymEGManagerAndroid/i.test(navigator.userAgent)) {
+        const strippedPayload = payload.map(item => ({ ...item, wavBase64: undefined }));
+        void fetch(`/__native_announcements__?payload=${encodeURIComponent(JSON.stringify(strippedPayload))}`).catch(() => {});
+      }
+    } catch {}
+
+    // 3. iOS Host
+    try {
+      const iosBridge = (window as unknown as {
+        webkit?: {
+          messageHandlers?: {
+            gymosAnnouncementBridge?: { postMessage: (msg: unknown) => void };
+          };
+        };
+      }).webkit?.messageHandlers?.gymosAnnouncementBridge;
+      if (iosBridge?.postMessage) {
+        iosBridge.postMessage({
+          action: 'sync',
+          items: payload
+        });
+      }
+    } catch {}
+  })();
 }
 
 export default function Announcements({
@@ -745,6 +773,10 @@ export default function Announcements({
     audioQueue.cancelCurrent();
     setCurrentPlayback(null);
     if (typeof window !== 'undefined') {
+      try {
+        const winHost = (window as unknown as { chrome?: { webview?: { postMessage: (msg: unknown) => void } } }).chrome?.webview;
+        winHost?.postMessage({ type: 'gymos-desktop', action: 'announcementStop' });
+      } catch {}
       window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: '*', active: false } }));
     }
   };
