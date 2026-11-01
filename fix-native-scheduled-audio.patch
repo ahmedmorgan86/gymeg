@@ -2557,23 +2557,31 @@ index 516d695..2754e33 100644
  }
 -
 diff --git a/app/club-hub.tsx b/app/club-hub.tsx
-index 82feb9d..f30a9ae 100644
+index 82feb9d..787d266 100644
 --- a/app/club-hub.tsx
 +++ b/app/club-hub.tsx
-@@ -16,7 +16,7 @@ export default function ClubHub({data,ar,busy,message,failed,onAction,onLanguage
+@@ -2,6 +2,7 @@
+ import {useRef,useState,type FormEvent} from 'react';
+ import Link from 'next/link';
+ import type {CommercialDirectory as Directory,CommercialClub,Order} from './lib/commercial-types';
++import {androidAppVariants,supportInstallPath} from './lib/support-release';
+ import Copyright from './copyright';
+ type Action=(body:Record<string,unknown>,endpoint?:string)=>Promise<void>;
+ export default function ClubHub({data,ar,busy,message,failed,onAction,onLanguage}:{data:Directory;ar:boolean;busy:boolean;message:string;failed:boolean;onAction:Action;onLanguage:()=>void}){
+@@ -16,7 +17,7 @@ export default function ClubHub({data,ar,busy,message,failed,onAction,onLanguage
   function setup(event:FormEvent<HTMLFormElement>){event.preventDefault();if(busy)return;const f=new FormData(event.currentTarget),name=String(f.get('name')).trim(),trial=f.get('trial')==='on';if(!setupRequest.current||setupRequest.current.name!==name||setupRequest.current.trial!==trial)setupRequest.current={name,trial,id:crypto.randomUUID()};void onAction({action:'setup',name,startTrial:trial,requestId:setupRequest.current.id});}
   function open(c:CommercialClub){void onAction({action:'select',tenant:c.id});}
   function order(order:Order){return <article className="commercial-order" key={order.id}><h3>{states[order.status]??order.status}</h3><p>{modes[order.mode]??order.mode}</p>{order.expected_minor!==null&&<p>{t('قيمة العرض: ','Quoted amount: ')}{new Intl.NumberFormat(ar?'ar-EG':'en-GB',{style:'currency',currency:order.currency}).format(Number(order.expected_minor)/100)}</p>}{order.review_note&&<p style={{whiteSpace:'pre-wrap'}}>{order.review_note}</p>}{order.status==='awaiting_payment'&&<><p style={{whiteSpace:'pre-wrap'}}>{data.settings.payload.paymentInstructions||t('تواصل مع مسؤول المنصة للحصول على تعليمات التحويل.','Contact the platform owner for transfer instructions.')}</p><form onSubmit={e=>{e.preventDefault();const f=new FormData(e.currentTarget);void onAction({action:'transfer',tenant:club!.id,id:order.id,reference:f.get('reference'),day:f.get('day'),amount:Math.round(Number(f.get('amount'))*100)});}}><label>{t('مرجع التحويل','Transfer reference')}<input name="reference" required maxLength={200}/></label><label>{t('تاريخ التحويل','Transfer date')}<input name="day" type="date" required/></label><label>{t('المبلغ الذي حوّلته','Amount transferred')}<input name="amount" type="number" min="0.01" step="0.01" required/></label><button disabled={busy}>{t('إرسال التحويل للمراجعة','Submit transfer for review')}</button></form></>}{['quote_requested','awaiting_payment','pending_review'].includes(order.status)&&<button className="quiet" disabled={busy} onClick={()=>void onAction({action:'cancel',tenant:club!.id,id:order.id})}>{t('إلغاء الطلب','Cancel request')}</button>}</article>;}
 - return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href="/">GymEG</Link><nav>{data.platform&&<Link href="/platform">{t('لوحة مالك المنصة','Platform owner dashboard')}</Link>}<button className="quiet" onClick={onLanguage}>{ar?'English':'العربية'}</button></nav></header><section className="commercial-hero"><span>{t('حساب واحد · ناديك وفريقك','ONE ACCOUNT · YOUR CLUB & TEAM')}</span><h1>{data.clubs.length?t('أهلًا، '+(data.account?.name??''),'Welcome, '+(data.account?.name??'')):t('حسابك جاهز. جهّز ناديك الآن.','Your account is ready. Set up your club.')}</h1><p>{t('التشغيل والاشتراك والانضمام للفريق من مكان واحد.','Operations, subscription and team access in one place.')}</p></section>
-+ return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href="/">GymEG</Link><nav>{data.platform&&<Link href="/platform">{t('لوحة مالك المنصة','Platform owner dashboard')}</Link>}{data.ownerComplimentary&&<><Link href="/support-install">{t('تطبيق الدعم على موبايلك','Support mobile app')}</Link><a href="/downloads/GymEG-Support-Android-1.0.4.apk" download="GymEG-Support-Android-1.0.4.apk">{t('تحميل تطبيق الدعم APK (1.0.4)','Download Support APK (1.0.4)')}</a></>}<button className="quiet" onClick={onLanguage}>{ar?'English':'العربية'}</button></nav></header><section className="commercial-hero"><span>{t('حساب واحد · ناديك وفريقك','ONE ACCOUNT · YOUR CLUB & TEAM')}</span><h1>{data.clubs.length?t('أهلًا، '+(data.account?.name??''),'Welcome, '+(data.account?.name??'')):t('حسابك جاهز. جهّز ناديك الآن.','Your account is ready. Set up your club.')}</h1><p>{t('التشغيل والاشتراك والانضمام للفريق من مكان واحد.','Operations, subscription and team access in one place.')}</p></section>
++ return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href="/">GymEG</Link><nav>{data.platform&&<Link href="/platform">{t('لوحة مالك المنصة','Platform owner dashboard')}</Link>}{data.ownerComplimentary&&<><Link href={supportInstallPath}>{t('تطبيق الدعم على موبايلك','Support mobile app')}</Link>{androidAppVariants.map(v=><a key={v.id} href={v.url} download={v.filename}>{t(v.arNavLabel,v.enNavLabel)}</a>)}</>}<button className="quiet" onClick={onLanguage}>{ar?'English':'العربية'}</button></nav></header><section className="commercial-hero"><span>{t('حساب واحد · ناديك وفريقك','ONE ACCOUNT · YOUR CLUB & TEAM')}</span><h1>{data.clubs.length?t('أهلًا، '+(data.account?.name??''),'Welcome, '+(data.account?.name??'')):t('حسابك جاهز. جهّز ناديك الآن.','Your account is ready. Set up your club.')}</h1><p>{t('التشغيل والاشتراك والانضمام للفريق من مكان واحد.','Operations, subscription and team access in one place.')}</p></section>
   <nav className="hub-tabs" aria-label={t('إدارة حسابك','Account navigation')}>{([['clubs',data.platform?t('كل الأندية','All clubs'):t('أنديتي','My clubs')],['subscription',t('اشتراك التطبيق','App subscription')],['create',t('إنشاء نادي','Create club')],['join',t('الانضمام لفريق','Join a team')]] as const).filter(([id])=>id!=='subscription'||data.clubs.some(c=>c.role==='owner')).map(([id,label])=><button key={id} className={section===id?'selected':''} aria-current={section===id?'page':undefined} onClick={()=>setSection(id)}>{label}</button>)}</nav>
   {message&&<p role={failed?'alert':'status'} className={'commercial-message '+(failed?'error':'')}>{message}</p>}
   {(section==='create'||section==='clubs'&&!data.clubs.length)&&<section className="commercial-card"><h2>{t('الخطوة الأخيرة: اسم النادي','Last step: club name')}</h2><p>{t('حساب المالك: ','Owner account: ')}<bdi>{data.account?.email}</bdi></p><form onSubmit={setup}><label>{t('اسم النادي','Club name')}<input name="name" autoComplete="organization" required maxLength={120}/></label>{!data.ownerComplimentary&&!data.trialUsed&&<label className="commercial-check"><input type="checkbox" name="trial" defaultChecked/>{t('ابدأ تجربة ٣٠ يومًا لهذا النادي الآن — مرة واحدة للحساب، بدون تحصيل تلقائي.','Start this club’s 30-day trial now — once per account, no automatic charge.')}</label>}<p>{data.ownerComplimentary?t('حساب صاحب المنصة: النادي مجاني دائمًا، بلا تحصيل أو تجديد.','Platform owner account: permanently free, with no charge or renewal.'):t('سيتم إنشاء النادي وفتحه مباشرة. إذا اخترت التجربة يبدأ عدّها عند إتمام هذه الخطوة.','We will create and open your club. If selected, the trial starts when this step completes.')}</p><button disabled={busy}>{busy?t('جارٍ تجهيز النادي…','Setting up your club…'):t('إنشاء النادي والدخول','Create & enter club')}</button></form><p>{t('أنت موظف؟ لا تنشئ ناديًا جديدًا.','Are you staff? You do not need to create a club.')}</p><button className="quiet" onClick={()=>setSection('join')}>{t('لديّ دعوة من النادي','I have a club invitation')}</button></section>}
 diff --git a/app/commercial-panel.tsx b/app/commercial-panel.tsx
-index ec74dce..b0c8775 100644
+index ec74dce..23c61b4 100644
 --- a/app/commercial-panel.tsx
 +++ b/app/commercial-panel.tsx
-@@ -2,6 +2,7 @@
+@@ -2,16 +2,21 @@
  import {WORKSPACE_PATH} from './lib/navigation';
  import ClubHub from './club-hub';
  import Copyright from './copyright';
@@ -2581,16 +2589,30 @@ index ec74dce..b0c8775 100644
  import Link from 'next/link';
  import {useRouter} from 'next/navigation';
  import {useEffect,useState,type FormEvent} from 'react';
-@@ -25,10 +26,10 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
+ import {usePreference} from './use-preference';
++import {androidAppVariants,supportApkUrl,supportFallbackQrPath,supportInstallPath,managementApkUrl,managementFallbackQrPath,membersApkUrl,membersFallbackQrPath,resolveSupportApkUrl,resolveManagementApkUrl,resolveMembersApkUrl,generateQrDataUrl,type AndroidVariantId} from './lib/support-release';
+ import type {Order,CommercialDirectory as Directory} from './lib/commercial-types';
+ export default function CommercialPanel({platform=false,initialData}:{platform?:boolean;initialData?:Directory}){
+  const [lang,setLang]=usePreference<'ar'|'en'>('gymos.language','ar'),[data,setData]=useState<Directory|null>(initialData??null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false);
++ const [apkHrefs,setApkHrefs]=useState<Record<AndroidVariantId,string>>({support:supportApkUrl,management:managementApkUrl,members:membersApkUrl});
++ const [qrSources,setQrSources]=useState<Record<AndroidVariantId,string>>({support:supportFallbackQrPath,management:managementFallbackQrPath,members:membersFallbackQrPath});
+  const router=useRouter();
+  const [clubSearch,setClubSearch]=useState(''),[orderFilter,setOrderFilter]=useState('pending_review'),[platformTab,setPlatformTab]=useState('clubs');
+  const ar=lang==='ar',t=(a:string,e:string)=>ar?a:e;
++ useEffect(()=>{if(!platform||typeof window==='undefined')return;let active=true;const nextHrefs:Record<AndroidVariantId,string>={support:resolveSupportApkUrl(window.location.origin),management:resolveManagementApkUrl(window.location.origin),members:resolveMembersApkUrl(window.location.origin)};void Promise.all(androidAppVariants.map(async v=>[v.id,await generateQrDataUrl(nextHrefs[v.id],v.fallbackQrPath)] as const)).then(entries=>{if(active){setApkHrefs(nextHrefs);setQrSources(Object.fromEntries(entries) as Record<AndroidVariantId,string>);}});return()=>{active=false;};},[platform]);
+  async function load(){const response=await fetch('/api/commercial'+(platform?'?platform=1':''),{cache:'no-store'});if(!response.ok)throw Error(response.status===403?'forbidden':'unavailable');setData(await response.json());}
+  useEffect(()=>{if(initialData)return;let active=true;fetch('/api/commercial'+(platform?'?platform=1':''),{cache:'no-store'}).then(async response=>{if(!response.ok)throw Error();const value=await response.json();if(active)setData(value);}).catch(()=>{if(active){setFailed(true);setMessage(lang==='ar'?'تعذر فتح الصفحة. تحقق من صلاحية الحساب وتفعيل الخدمة.':'Unable to open this page. Check account access and service availability.');}});return()=>{active=false;};},[platform,lang,initialData]); // Language changes refresh the localized error.
+  async function send(body:Record<string,unknown>,endpoint='/api/commercial'){if(busy)return;setBusy(true);setMessage('');setFailed(false);try{const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json();if(!response.ok){const errors:Record<string,string>={trialUsed:t('تم استخدام التجربة المجانية لهذا الحساب أو النادي.','This account or club already used its free trial.'),trialUnavailable:t('التجربة متاحة لنادٍ جديد غير مفعل فقط.','Trials are only available to new, unactivated clubs.'),openRequest:t('يوجد طلب مفتوح لهذا النادي بالفعل.','This club already has an open request.'),conflict:t('البيانات تغيرت. حدّث الصفحة ثم حاول مجددًا.','Data changed. Refresh and try again.'),paymentMismatch:t('المبلغ المحوّل لا يطابق المبلغ المطلوب. راجع التحويل أولًا.','Transferred amount does not match the requested amount. Review the transfer.'),forbidden:t('ليست لديك الصلاحية.','You do not have permission.')};throw Error(errors[result.error]??t('تعذر الحفظ. راجع الحقول ثم حاول مجددًا.','Could not save. Check the fields and retry.'));}if(body.action==='support.stop'){router.push('/platform');router.refresh();return;}if(body.action==='select'||body.action==='setup'||body.action==='trial.start'&&body.open===true||body.action==='claim'||body.action==='support.start'){router.push(WORKSPACE_PATH);router.refresh();return;}setMessage(t('تم الحفظ.','Saved.'));await load();}catch(error){setFailed(true);setMessage(error instanceof Error?error.message:t('تعذر الاتصال.','Connection failed.'));}finally{setBusy(false);}}
+@@ -25,10 +30,10 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
   {platform&&order.status==='quote_requested'&&<form onSubmit={event=>submit(event,{action:'quote',id:order.id},v=>({...v,amount:Math.round(Number(v.amount)*100)}))}>{field('amount',t('قيمة العرض','Quoted amount'),'','number')}{field('note',t('شروط التفعيل والصيانة والدعم المتفق عليها','Agreed activation, maintenance and support terms'))}<button disabled={busy}>{t('إرسال عرض السعر','Send quote')}</button></form>}
   {platform&&order.status==='pending_review'&&<form onSubmit={event=>{event.preventDefault();const form=new FormData(event.currentTarget),action=(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value');void send({action,id:order.id,note:form.get('note'),confirm:form.get('verified')==='on'?'VERIFIED_TRANSFER':''});}}>{field('note',t('ملاحظات المراجعة','Review notes'))}<label className="commercial-check"><input name="verified" type="checkbox"/>{t('تحققت بنفسي من وصول التحويل بالقيمة المطلوبة','I verified receipt of the requested amount')}</label><button disabled={busy} value="approve">{t('اعتماد وتفعيل','Approve & activate')}</button><button className="quiet" disabled={busy} value="reject">{t('رفض','Reject')}</button></form>}</article>;}
   if(!platform&&data)return <ClubHub data={data} ar={ar} busy={busy} message={message} failed={failed} onAction={send} onLanguage={()=>setLang(ar?'en':'ar')}/>;
 - return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href="/">GymEG</Link><nav><Link href="/">{t('الموقع الرئيسي','Main website')}</Link>{platform&&<Link href="/support-install">{t('تطبيق الدعم على موبايلك','Support mobile app')}</Link>}<Link href="/clubs">{t('أنديتي','My clubs')}</Link>{data?.platform&&<Link href="/platform">{t('إدارة المنصة','Platform admin')}</Link>}<button className="quiet" onClick={()=>setLang(ar?'en':'ar')}>{ar?'English':'العربية'}</button></nav></header>{platform&&<button className="button secondary" disabled={busy} onClick={()=>void send({action:"support.stop"})}>{t("إنهاء جلسة الدعم الحالية","End current support session")}</button>}<section className="commercial-hero"><span>GymEG BUSINESS</span><h1>{platform?t('لوحة مالك المنصة','Platform owner dashboard'):t('أنديتك، في مكان واحد.','Your clubs, in one place.')}</h1><p>{platform?t('أندية مستقلة. تراخيص واضحة. كل تفعيل له سجل.','Independent clubs. Clear licenses. An audit trail for every activation.'):t('اختار النادي، تابع الترخيص، وقدّم طلب التفعيل أو التجديد.','Choose a club, follow its license, and request activation or renewal.')}</p></section>
-+ return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href="/" style={{display:'inline-flex',alignItems:'center',gap:10}}><Image src={platform?"/icons/support-192.png?v=20261030-role-icons":"/icons/icon-192.png?v=20261029-gymeg"} width={36} height={36} alt="GymEG" unoptimized style={{borderRadius:8}}/><span>GymEG</span></Link><nav><Link href="/">{t('الموقع الرئيسي','Main website')}</Link>{platform&&data?.ownerComplimentary&&<><Link href="/support-install">{t('تطبيق الدعم على موبايلك','Support mobile app')}</Link><a href="/downloads/GymEG-Support-Android-1.0.4.apk" download="GymEG-Support-Android-1.0.4.apk">{t('تحميل تطبيق الدعم APK (1.0.4)','Download Support APK (1.0.4)')}</a></>}<Link href="/clubs">{t('أنديتي','My clubs')}</Link>{data?.platform&&<Link href="/platform">{t('إدارة المنصة','Platform admin')}</Link>}<button className="quiet" onClick={()=>setLang(ar?'en':'ar')}>{ar?'English':'العربية'}</button></nav></header>{platform&&<button className="button secondary" disabled={busy} onClick={()=>void send({action:"support.stop"})}>{t("إنهاء جلسة الدعم الحالية","End current support session")}</button>}<section className="commercial-hero"><span>GymEG BUSINESS</span><h1>{platform?t('لوحة مالك المنصة','Platform owner dashboard'):t('أنديتك، في مكان واحد.','Your clubs, in one place.')}</h1><p>{platform?t('أندية مستقلة. تراخيص واضحة. كل تفعيل له سجل.','Independent clubs. Clear licenses. An audit trail for every activation.'):t('اختار النادي، تابع الترخيص، وقدّم طلب التفعيل أو التجديد.','Choose a club, follow its license, and request activation or renewal.')}</p></section>
++ return <main className="commercial-shell" dir={ar?'rtl':'ltr'}><header><Link href={platform?"/platform":"/clubs"} onClick={()=>{if(platform){setPlatformTab('clubs');setClubSearch('');}}} style={{display:'inline-flex',alignItems:'center',gap:10}}><Image src={platform?"/icons/support-192.png?v=20261030-role-icons":"/icons/icon-192.png?v=20261029-gymeg"} width={36} height={36} alt="GymEG" unoptimized style={{borderRadius:8}}/><span>GymEG</span></Link><nav><Link href="/">{t('الموقع الرئيسي','Main website')}</Link>{platform&&<><Link href={supportInstallPath}>{t('تطبيق الدعم على موبايلك','Support mobile app')}</Link>{androidAppVariants.map(v=><a key={v.id} href={apkHrefs[v.id]} download={v.filename}>{t(v.arNavLabel,v.enNavLabel)}</a>)}</>}<Link href="/clubs">{t('أنديتي','My clubs')}</Link>{data?.platform&&<Link href="/platform">{t('إدارة المنصة','Platform admin')}</Link>}<button className="quiet" onClick={()=>setLang(ar?'en':'ar')}>{ar?'English':'العربية'}</button></nav></header>{platform&&<button className="button secondary" disabled={busy} onClick={()=>void send({action:"support.stop"})}>{t("إنهاء جلسة الدعم الحالية","End current support session")}</button>}<section className="commercial-hero"><span>GymEG BUSINESS</span><h1>{platform?t('لوحة مالك المنصة','Platform owner dashboard'):t('أنديتك، في مكان واحد.','Your clubs, in one place.')}</h1><p>{platform?t('أندية مستقلة. تراخيص واضحة. كل تفعيل له سجل.','Independent clubs. Clear licenses. An audit trail for every activation.'):t('اختار النادي، تابع الترخيص، وقدّم طلب التفعيل أو التجديد.','Choose a club, follow its license, and request activation or renewal.')}</p></section>
   {platform&&<nav className="hub-tabs" aria-label={t('أقسام إدارة المنصة','Platform sections')}>{[['clubs',t('الأندية والدعم','Clubs & support')],['requests',t('طلبات التفعيل','Activation requests')],['settings',t('الإعدادات التجارية','Business settings')],['activity',t('سجل الإدارة','Audit trail')]].map(([id,label])=><button key={id} aria-current={platformTab===id?'page':undefined} className={platformTab===id?'selected':''} onClick={()=>setPlatformTab(id)}>{label}</button>)}</nav>}
   {message&&<p className={'commercial-message '+(failed?'error':'')} role="status">{message}</p>}{!data&&!failed&&<p role="status">{t('جارٍ التحميل…','Loading…')}</p>}
 - {data&&<><section className="commercial-card"><h2>{platform?t('ابدأ من هنا','Start here'):t('افتح ناديك للعمل','Open your club')}</h2><p>{platform?t('راجع طلبات التفعيل أولًا، ثم ابحث عن النادي. إعدادات الأسعار والتحويل موجودة أسفل الصفحة.','Review activation requests first, then find a club. Pricing and transfer settings are below.'):t('افتح النادي لإدارة الأعضاء والحضور. إنشاء نادي جديد والانضمام بدعوة خيارات منفصلة أدناه.','Open a club to manage members and attendance. Creating a club and joining by invitation are separate options below.')}</p>{platform&&<div className="commercial-metrics"><button onClick={()=>setPlatformTab('clubs')}><b>{data.clubs.length}</b>{t('الأندية','Clubs')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('pending_review');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='pending_review').length}</b>{t('تحويلات تحتاج مراجعتك','Transfers to review')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('quote_requested');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='quote_requested').length}</b>{t('طلبات عرض سعر','Quote requests')}</button></div>}<div className="commercial-tools" id="club-directory"><label>{t('البحث عن نادي بالاسم أو المعرّف','Find a club by name or ID')}<input type="search" value={clubSearch} onChange={e=>setClubSearch(e.target.value)}/></label><span role="status">{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).length} {t('نادي مطابق','matching clubs')}</span></div></section>{!platform&&<section className="commercial-card"><h2>{t('ابدأ بالترتيب الصحيح','Start in the right order')}</h2><ol><li><b>{t('حساب المالك','Owner account')}</b> — {data.account?.name} <bdi>{data.account?.email}</bdi><p>{t('أنت مسجل بالفعل. أي نادي تنشئه الآن سيكون مملوكًا لهذا الحساب؛ لا تحتاج إنشاء كلمة مرور ثانية للنادي.','You are already signed in. Clubs created now belong to this account; a club does not need a second password.')}</p></li><li>{t('أنشئ ناديك المستقل من النموذج أدناه.','Create your independent club below.')}</li><li>{t('ابدأ تجربة ٣٠ يومًا للنادي الجديد المؤهل، ثم افتح النادي.','Start the eligible new club’s 30-day trial, then open the club.')}</li></ol><p>{t('بتجهز النظام لمالك مختلف؟ لازم هو ينشئ حسابه ببريده وكلمة مروره أولًا. كود دعوة الموظف لا ينشئ حساب مالك.','Setting up for a different owner? That owner must first register with their own email and password. A staff invitation does not create an owner account.')}</p></section>}{!platform&&<section className="commercial-card"><details><summary>{t('للموظفين فقط: الانضمام بدعوة فريق (اختياري)','Staff only: join with a team invitation (optional)')}</summary><form onSubmit={event=>{event.preventDefault();void send({action:'claim',code:new FormData(event.currentTarget).get('code')},'/api/team');}}>{field('code',t('كود الدعوة','Invitation code'))}<button disabled={busy}>{t('قبول الدعوة','Accept invitation')}</button></form></details></section>}<div className="commercial-grid" hidden={platform&&platformTab!=='clubs'}>{!platform&&<section className="commercial-card"><h2>{t('إنشاء نادي مستقل','Create an independent club')}</h2><p>{t('أنشئ ناديك بدون دعوة، ثم ابدأ التجربة المجانية لمدة ٣٠ يومًا مرة واحدة. بياناته منفصلة عن باقي الأندية.','Create your club without an invitation, then start your one-time 30-day free trial. Its data is isolated from other clubs.')}</p><form onSubmit={event=>submit(event,{action:'create'})}>{field('name',t('اسم النادي','Club name'))}<button disabled={busy}>{t('إنشاء النادي','Create club')}</button></form></section>}{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).map(club=><section className="commercial-card" key={club.id}><h2>{club.name}</h2><small>{club.id}</small>{platform&&data.ownerComplimentary&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح وإدارة النادي','Open & manage club')}</button>}{platform&&<form onSubmit={event=>submit(event,{action:'support.start',tenant:club.id})}>{field('reason',t('سبب جلسة الدعم (٨ أحرف على الأقل)','Support reason (at least 8 characters)'))}<button disabled={busy}>{t('فتح النادي للدعم — قراءة فقط','Open club for support — read only')}</button></form>}<p>{statuses[club.license?.status??club.status??'']??''} · {club.license?.mode??club.mode}</p>{club.license?.mode==='trial'&&<p>{t('تجربة مجانية ٣٠ يومًا — لا تتجدد تلقائيًا','Free 30-day trial — no automatic renewal')}</p>}{club.license?.ends_at&&<p>{t('نهاية الترخيص','License ends')}: {new Date(club.license.ends_at).toLocaleDateString(lang)}</p>}{!platform&&club.role==='owner'&&!data.trialUsed&&club.license?.status==='pending'&&<button disabled={busy} onClick={()=>void send({action:'trial.start',tenant:club.id})}>{t('ابدأ تجربتك المجانية — ٣٠ يومًا','Start your free 30-day trial')}</button>}{!platform&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح النادي','Open club')}</button>}
-+ {data&&<><section className="commercial-card"><h2>{platform?t('ابدأ من هنا','Start here'):t('افتح ناديك للعمل','Open your club')}</h2><p>{platform?t('راجع طلبات التفعيل أولًا، ثم ابحث عن النادي. إعدادات الأسعار والتحويل موجودة أسفل الصفحة.','Review activation requests first, then find a club. Pricing and transfer settings are below.'):t('افتح النادي لإدارة الأعضاء والحضور. إنشاء نادي جديد والانضمام بدعوة خيارات منفصلة أدناه.','Open a club to manage members and attendance. Creating a club and joining by invitation are separate options below.')}</p>{platform&&data.ownerComplimentary&&<div className="commercial-tools"><Image src="/icons/support-192.png?v=20261030-role-icons" width={56} height={56} alt="GymEG Support" unoptimized style={{borderRadius:14}}/><a className="button primary" href="/downloads/GymEG-Support-Android-1.0.4.apk" download="GymEG-Support-Android-1.0.4.apk">{t('تحميل تطبيق الدعم — Android (1.0.4)','Download Support APK — Android (1.0.4)')}</a><Link className="button secondary" href="/support-install">{t('تعليمات التثبيت ونسخة iPhone','Setup guide & iPhone version')}</Link><a href="/downloads/GymEG-Support-Android-1.0.4.apk" download="GymEG-Support-Android-1.0.4.apk"><Image src="/downloads/support-mobile-qr.png" width={120} height={120} alt={t('QR تحميل تطبيق الدعم','Support app download QR')} unoptimized style={{background:'#fff',borderRadius:12,padding:4}}/></a></div>}{platform&&<div className="commercial-metrics"><button onClick={()=>setPlatformTab('clubs')}><b>{data.clubs.length}</b>{t('الأندية','Clubs')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('pending_review');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='pending_review').length}</b>{t('تحويلات تحتاج مراجعتك','Transfers to review')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('quote_requested');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='quote_requested').length}</b>{t('طلبات عرض سعر','Quote requests')}</button></div>}<div className="commercial-tools" id="club-directory"><label>{t('البحث عن نادي بالاسم أو المعرّف','Find a club by name or ID')}<input type="search" value={clubSearch} onChange={e=>setClubSearch(e.target.value)}/></label><span role="status">{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).length} {t('نادي مطابق','matching clubs')}</span></div></section>{!platform&&<section className="commercial-card"><h2>{t('ابدأ بالترتيب الصحيح','Start in the right order')}</h2><ol><li><b>{t('حساب المالك','Owner account')}</b> — {data.account?.name} <bdi>{data.account?.email}</bdi><p>{t('أنت مسجل بالفعل. أي نادي تنشئه الآن سيكون مملوكًا لهذا الحساب؛ لا تحتاج إنشاء كلمة مرور ثانية للنادي.','You are already signed in. Clubs created now belong to this account; a club does not need a second password.')}</p></li><li>{t('أنشئ ناديك المستقل من النموذج أدناه.','Create your independent club below.')}</li><li>{t('ابدأ تجربة ٣٠ يومًا للنادي الجديد المؤهل، ثم افتح النادي.','Start the eligible new club’s 30-day trial, then open the club.')}</li></ol><p>{t('بتجهز النظام لمالك مختلف؟ لازم هو ينشئ حسابه ببريده وكلمة مروره أولًا. كود دعوة الموظف لا ينشئ حساب مالك.','Setting up for a different owner? That owner must first register with their own email and password. A staff invitation does not create an owner account.')}</p></section>}{!platform&&<section className="commercial-card"><details><summary>{t('للموظفين فقط: الانضمام بدعوة فريق (اختياري)','Staff only: join with a team invitation (optional)')}</summary><form onSubmit={event=>{event.preventDefault();void send({action:'claim',code:new FormData(event.currentTarget).get('code')},'/api/team');}}>{field('code',t('كود الدعوة','Invitation code'))}<button disabled={busy}>{t('قبول الدعوة','Accept invitation')}</button></form></details></section>}<div className="commercial-grid" hidden={platform&&platformTab!=='clubs'}>{!platform&&<section className="commercial-card"><h2>{t('إنشاء نادي مستقل','Create an independent club')}</h2><p>{t('أنشئ ناديك بدون دعوة، ثم ابدأ التجربة المجانية لمدة ٣٠ يومًا مرة واحدة. بياناته منفصلة عن باقي الأندية.','Create your club without an invitation, then start your one-time 30-day free trial. Its data is isolated from other clubs.')}</p><form onSubmit={event=>submit(event,{action:'create'})}>{field('name',t('اسم النادي','Club name'))}<button disabled={busy}>{t('إنشاء النادي','Create club')}</button></form></section>}{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).map(club=><section className="commercial-card" key={club.id}><h2>{club.name}</h2><small>{club.id}</small>{platform&&data.ownerComplimentary&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح وإدارة النادي','Open & manage club')}</button>}{platform&&<form onSubmit={event=>submit(event,{action:'support.start',tenant:club.id})}>{field('reason',t('سبب جلسة الدعم (٨ أحرف على الأقل)','Support reason (at least 8 characters)'))}<button disabled={busy}>{t('فتح النادي للدعم — قراءة فقط','Open club for support — read only')}</button></form>}<p>{statuses[club.license?.status??club.status??'']??''} · {club.license?.mode??club.mode}</p>{club.license?.mode==='trial'&&<p>{t('تجربة مجانية ٣٠ يومًا — لا تتجدد تلقائيًا','Free 30-day trial — no automatic renewal')}</p>}{club.license?.ends_at&&<p>{t('نهاية الترخيص','License ends')}: {new Date(club.license.ends_at).toLocaleDateString(lang)}</p>}{!platform&&club.role==='owner'&&!data.trialUsed&&club.license?.status==='pending'&&<button disabled={busy} onClick={()=>void send({action:'trial.start',tenant:club.id})}>{t('ابدأ تجربتك المجانية — ٣٠ يومًا','Start your free 30-day trial')}</button>}{!platform&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح النادي','Open club')}</button>}
++ {data&&<><section className="commercial-card"><h2>{platform?t('ابدأ من هنا','Start here'):t('افتح ناديك للعمل','Open your club')}</h2><p>{platform?t('راجع طلبات التفعيل أولًا، ثم ابحث عن النادي. إعدادات الأسعار والتحويل موجودة أسفل الصفحة.','Review activation requests first, then find a club. Pricing and transfer settings are below.'):t('افتح النادي لإدارة الأعضاء والحضور. إنشاء نادي جديد والانضمام بدعوة خيارات منفصلة أدناه.','Open a club to manage members and attendance. Creating a club and joining by invitation are separate options below.')}</p>{platform&&<div className="commercial-grid">{androidAppVariants.map(v=><div className="commercial-tools" key={v.id} data-variant={v.id}><Image src={v.iconPath} width={56} height={56} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:14}}/><strong>{t(v.arTitle,v.enTitle)} · v{v.version}</strong><a className="button primary" href={apkHrefs[v.id]} download={v.filename}>{t(v.arCta,v.enCta)}</a><Link className="button secondary" href={v.installPath}>{t('تعليمات التثبيت ونسخة iPhone','Setup guide & iPhone version')}</Link><a href={apkHrefs[v.id]} download={v.filename}><Image src={qrSources[v.id]} width={120} height={120} alt={t(v.arQrAlt,v.enQrAlt)} unoptimized style={{background:'#fff',borderRadius:12,padding:4}}/></a></div>)}</div>}{platform&&<div className="commercial-metrics"><button onClick={()=>setPlatformTab('clubs')}><b>{data.clubs.length}</b>{t('الأندية','Clubs')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('pending_review');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='pending_review').length}</b>{t('تحويلات تحتاج مراجعتك','Transfers to review')}</button><button onClick={()=>{setPlatformTab('requests');setOrderFilter('quote_requested');document.getElementById('activation-requests')?.scrollIntoView({behavior:'smooth'});}}><b>{data.orders.filter(o=>o.status==='quote_requested').length}</b>{t('طلبات عرض سعر','Quote requests')}</button></div>}<div className="commercial-tools" id="club-directory"><label>{t('البحث عن نادي بالاسم أو المعرّف','Find a club by name or ID')}<input type="search" value={clubSearch} onChange={e=>setClubSearch(e.target.value)}/></label><span role="status">{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).length} {t('نادي مطابق','matching clubs')}</span></div></section>{!platform&&<section className="commercial-card"><h2>{t('ابدأ بالترتيب الصحيح','Start in the right order')}</h2><ol><li><b>{t('حساب المالك','Owner account')}</b> — {data.account?.name} <bdi>{data.account?.email}</bdi><p>{t('أنت مسجل بالفعل. أي نادي تنشئه الآن سيكون مملوكًا لهذا الحساب؛ لا تحتاج إنشاء كلمة مرور ثانية للنادي.','You are already signed in. Clubs created now belong to this account; a club does not need a second password.')}</p></li><li>{t('أنشئ ناديك المستقل من النموذج أدناه.','Create your independent club below.')}</li><li>{t('ابدأ تجربة ٣٠ يومًا للنادي الجديد المؤهل، ثم افتح النادي.','Start the eligible new club’s 30-day trial, then open the club.')}</li></ol><p>{t('بتجهز النظام لمالك مختلف؟ لازم هو ينشئ حسابه ببريده وكلمة مروره أولًا. كود دعوة الموظف لا ينشئ حساب مالك.','Setting up for a different owner? That owner must first register with their own email and password. A staff invitation does not create an owner account.')}</p></section>}{!platform&&<section className="commercial-card"><details><summary>{t('للموظفين فقط: الانضمام بدعوة فريق (اختياري)','Staff only: join with a team invitation (optional)')}</summary><form onSubmit={event=>{event.preventDefault();void send({action:'claim',code:new FormData(event.currentTarget).get('code')},'/api/team');}}>{field('code',t('كود الدعوة','Invitation code'))}<button disabled={busy}>{t('قبول الدعوة','Accept invitation')}</button></form></details></section>}<div className="commercial-grid" hidden={platform&&platformTab!=='clubs'}>{!platform&&<section className="commercial-card"><h2>{t('إنشاء نادي مستقل','Create an independent club')}</h2><p>{t('أنشئ ناديك بدون دعوة، ثم ابدأ التجربة المجانية لمدة ٣٠ يومًا مرة واحدة. بياناته منفصلة عن باقي الأندية.','Create your club without an invitation, then start your one-time 30-day free trial. Its data is isolated from other clubs.')}</p><form onSubmit={event=>submit(event,{action:'create'})}>{field('name',t('اسم النادي','Club name'))}<button disabled={busy}>{t('إنشاء النادي','Create club')}</button></form></section>}{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).map(club=><section className="commercial-card" key={club.id}><h2>{club.name}</h2><small>{club.id}</small>{platform&&data.ownerComplimentary&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح وإدارة النادي','Open & manage club')}</button>}{platform&&<form onSubmit={event=>submit(event,{action:'support.start',tenant:club.id})}>{field('reason',t('سبب جلسة الدعم (٨ أحرف على الأقل)','Support reason (at least 8 characters)'))}<button disabled={busy}>{t('فتح النادي للدعم — قراءة فقط','Open club for support — read only')}</button></form>}<p>{statuses[club.license?.status??club.status??'']??''} · {club.license?.mode??club.mode}</p>{club.license?.mode==='trial'&&<p>{t('تجربة مجانية ٣٠ يومًا — لا تتجدد تلقائيًا','Free 30-day trial — no automatic renewal')}</p>}{club.license?.ends_at&&<p>{t('نهاية الترخيص','License ends')}: {new Date(club.license.ends_at).toLocaleDateString(lang)}</p>}{!platform&&club.role==='owner'&&!data.trialUsed&&club.license?.status==='pending'&&<button disabled={busy} onClick={()=>void send({action:'trial.start',tenant:club.id})}>{t('ابدأ تجربتك المجانية — ٣٠ يومًا','Start your free 30-day trial')}</button>}{!platform&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح النادي','Open club')}</button>}
   {!platform&&club.role==='owner'&&<><form onSubmit={event=>submit(event,{action:'order',tenant:club.id})}><p>{t('التطبيق مدفوع. التفعيل والتجديد والصيانة والدعم الفني حسب عرض واتفاق خاص بناديك. لا توجد أسعار أو باقات معلنة.','Paid software. Activation, renewal, maintenance and support follow a club-specific quotation and agreement; there are no public prices or packages.')}</p><label>{t('نظام الترخيص','License model')}<select name="mode"><option value="monthly">{t('شهري','Monthly')}</option><option value="annual">{t('سنوي','Annual')}</option><option value="perpetual">{t('دائم + صيانة سنوية','Perpetual + annual maintenance')}</option>{club.license?.mode==='perpetual'&&<option value="maintenance">{t('تجديد الصيانة السنوية','Renew annual maintenance')}</option>}</select></label><button disabled={busy}>{t('طلب عرض وتفعيل حسب الاتفاق','Request agreed quotation & activation')}</button></form>{club.requests?.map(order=>orderCard(order,club.id))}<details><summary>{t('ملكية النادي','Club ownership')}</summary><p>{t('ادعُ المستخدم أولًا من قسم الفريق. المالك الإضافي يحصل على إدارة النادي بالكامل. لا يمكن إزالة آخر مالك.','Invite the user from Team first. An additional owner gets full club control. The last owner cannot be removed.')}</p><form onSubmit={event=>submit(event,{tenant:club.id},v=>({...v,confirm:v.confirm==='on'?'CHANGE_OWNERSHIP':''}))}><label>{t('المستخدم','User')}<select name="user">{club.members?.map(member=><option key={member.user_id} value={member.user_id}>{member.name} · {member.role}</option>)}</select></label><label>{t('الإجراء','Action')}<select name="action"><option value="owner.add">{t('تعيين مالك إضافي','Add owner')}</option><option value="owner.remove">{t('إلغاء وصول مالك','Remove owner access')}</option></select></label><label className="commercial-check"><input name="confirm" type="checkbox" required/>{t('أؤكد تغيير صلاحيات الملكية','I confirm the ownership change')}</label><button disabled={busy}>{t('تنفيذ تغيير الملكية','Apply ownership change')}</button></form></details></>}
   {platform&&<form onSubmit={event=>submit(event,{action:club.status==='suspended'?'resume':'suspend',tenant:club.id,revision:club.revision})}>{field('note',t('سبب تغيير حالة الترخيص','Reason for license status change'))}<button className="quiet" disabled={busy}>{club.status==='suspended'?t('رفع الإيقاف','Resume'):t('إيقاف التعديلات','Suspend writes')}</button></form>}</section>)}</div>
  
@@ -3091,6 +3113,188 @@ index 0000000..a881c5d
 +    };
 +  }
 +}
+diff --git a/app/lib/support-release.ts b/app/lib/support-release.ts
+new file mode 100644
+index 0000000..84e761f
+--- /dev/null
++++ b/app/lib/support-release.ts
+@@ -0,0 +1,176 @@
++import QRCode from 'qrcode';
++import supportRelease from '../../public/downloads/support-android.json' with { type: 'json' };
++import managementRelease from '../../public/downloads/gymeg-management-android.json' with { type: 'json' };
++import membersRelease from '../../public/downloads/gymeg-members-android.json' with { type: 'json' };
++
++export type AndroidVariantId = 'support' | 'management' | 'members';
++
++export const supportApkVersion = supportRelease.version;
++export const supportApkUrl = supportRelease.url;
++export const supportApkFilename = supportRelease.url.split('/').pop() ?? `GymEG-Support-Android-${supportRelease.version}.apk`;
++export const supportMinAndroid = supportRelease.minAndroid;
++export const supportInstallPath = '/support-install';
++export const supportMobileEntryPath = '/mobile/support';
++export const supportFallbackQrPath = '/downloads/support-mobile-qr.png';
++
++export const managementApkVersion = managementRelease.version;
++export const managementApkUrl = managementRelease.url;
++export const managementApkFilename = managementRelease.url.split('/').pop() ?? `GymEG-Manager-Android-${managementRelease.version}.apk`;
++export const managementMinAndroid = managementRelease.minAndroid;
++export const managementInstallPath = '/management-install';
++export const managementMobileEntryPath = '/mobile/management';
++export const managementFallbackQrPath = '/downloads/gymeg-management-qr.png';
++
++export const membersApkVersion = membersRelease.version;
++export const membersApkUrl = membersRelease.url;
++export const membersApkFilename = membersRelease.url.split('/').pop() ?? `GymEG-Members-Android-${membersRelease.version}.apk`;
++export const membersMinAndroid = membersRelease.minAndroid;
++export const membersInstallPath = '/member-install';
++export const membersMobileEntryPath = '/mobile/member';
++export const membersFallbackQrPath = '/downloads/gymeg-member-qr.png';
++
++export interface AndroidVariantInfo {
++  id: AndroidVariantId;
++  version: string;
++  url: string;
++  filename: string;
++  minAndroid: string;
++  installPath: string;
++  mobileEntryPath: string;
++  fallbackQrPath: string;
++  iconPath: string;
++  arTitle: string;
++  enTitle: string;
++  arCta: string;
++  enCta: string;
++  arNavLabel: string;
++  enNavLabel: string;
++  arQrAlt: string;
++  enQrAlt: string;
++}
++
++export const androidAppVariants: readonly AndroidVariantInfo[] = [
++  {
++    id: 'support',
++    version: supportApkVersion,
++    url: supportApkUrl,
++    filename: supportApkFilename,
++    minAndroid: supportMinAndroid,
++    installPath: supportInstallPath,
++    mobileEntryPath: supportMobileEntryPath,
++    fallbackQrPath: supportFallbackQrPath,
++    iconPath: '/icons/support-192.png?v=20261030-role-icons',
++    arTitle: 'تطبيق الدعم الفني',
++    enTitle: 'Support App',
++    arCta: `تحميل تطبيق الدعم — Android (${supportApkVersion})`,
++    enCta: `Download Support APK — Android (${supportApkVersion})`,
++    arNavLabel: `تحميل تطبيق الدعم APK (${supportApkVersion})`,
++    enNavLabel: `Download Support APK (${supportApkVersion})`,
++    arQrAlt: 'QR تحميل تطبيق الدعم',
++    enQrAlt: 'Support app download QR',
++  },
++  {
++    id: 'management',
++    version: managementApkVersion,
++    url: managementApkUrl,
++    filename: managementApkFilename,
++    minAndroid: managementMinAndroid,
++    installPath: managementInstallPath,
++    mobileEntryPath: managementMobileEntryPath,
++    fallbackQrPath: managementFallbackQrPath,
++    iconPath: '/icons/icon-192.png?v=20261029-gymeg',
++    arTitle: 'تطبيق إدارة النادي',
++    enTitle: 'Manager App',
++    arCta: `تحميل تطبيق الإدارة — Android (${managementApkVersion})`,
++    enCta: `Download Manager APK — Android (${managementApkVersion})`,
++    arNavLabel: `تحميل تطبيق الإدارة APK (${managementApkVersion})`,
++    enNavLabel: `Download Manager APK (${managementApkVersion})`,
++    arQrAlt: 'QR تحميل تطبيق الإدارة',
++    enQrAlt: 'Management app download QR',
++  },
++  {
++    id: 'members',
++    version: membersApkVersion,
++    url: membersApkUrl,
++    filename: membersApkFilename,
++    minAndroid: membersMinAndroid,
++    installPath: membersInstallPath,
++    mobileEntryPath: membersMobileEntryPath,
++    fallbackQrPath: membersFallbackQrPath,
++    iconPath: '/icons/members-192.png?v=20261030-role-icons',
++    arTitle: 'تطبيق أعضاء النادي',
++    enTitle: 'Members App',
++    arCta: `تحميل تطبيق الأعضاء — Android (${membersApkVersion})`,
++    enCta: `Download Members APK — Android (${membersApkVersion})`,
++    arNavLabel: `تحميل تطبيق الأعضاء APK (${membersApkVersion})`,
++    enNavLabel: `Download Members APK (${membersApkVersion})`,
++    arQrAlt: 'QR تحميل تطبيق الأعضاء',
++    enQrAlt: 'Member app download QR',
++  },
++];
++
++export function resolveDeploymentOrigin(origin?: string | null): string {
++  const candidates = [
++    origin?.trim(),
++    typeof process !== 'undefined' ? process.env.NEXT_PUBLIC_SITE_URL?.trim() : undefined,
++    supportRelease.origin,
++    'https://gymeg.vercel.app',
++  ];
++  for (const candidate of candidates) {
++    if (!candidate) continue;
++    try {
++      const parsed = new URL(candidate);
++      if ((parsed.protocol === 'https:' || parsed.protocol === 'http:') && !parsed.username && !parsed.password) {
++        return parsed.origin;
++      }
++    } catch {
++      continue;
++    }
++  }
++  return 'https://gymeg.vercel.app';
++}
++
++export function resolveSupportApkUrl(origin?: string | null): string {
++  if (!origin) return supportApkUrl;
++  return new URL(supportApkUrl, resolveDeploymentOrigin(origin)).toString();
++}
++
++export function resolveSupportInstallUrl(origin?: string | null): string {
++  if (!origin) return supportInstallPath;
++  return new URL(supportInstallPath, resolveDeploymentOrigin(origin)).toString();
++}
++
++export function resolveManagementApkUrl(origin?: string | null): string {
++  if (!origin) return managementApkUrl;
++  return new URL(managementApkUrl, resolveDeploymentOrigin(origin)).toString();
++}
++
++export function resolveManagementInstallUrl(origin?: string | null): string {
++  if (!origin) return managementInstallPath;
++  return new URL(managementInstallPath, resolveDeploymentOrigin(origin)).toString();
++}
++
++export function resolveMembersApkUrl(origin?: string | null): string {
++  if (!origin) return membersApkUrl;
++  return new URL(membersApkUrl, resolveDeploymentOrigin(origin)).toString();
++}
++
++export function resolveMembersInstallUrl(origin?: string | null): string {
++  if (!origin) return membersInstallPath;
++  return new URL(membersInstallPath, resolveDeploymentOrigin(origin)).toString();
++}
++
++export async function generateQrDataUrl(targetUrl: string, fallback = supportFallbackQrPath): Promise<string> {
++  try {
++    const svg = await QRCode.toString(targetUrl, {
++      type: 'svg',
++      errorCorrectionLevel: 'M',
++      margin: 2,
++      width: 240,
++    });
++    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
++  } catch {
++    return fallback;
++  }
++}
++
 diff --git a/app/lib/windows-release.ts b/app/lib/windows-release.ts
 index 4b42c80..8f4e0ab 100644
 --- a/app/lib/windows-release.ts
@@ -3123,15 +3327,35 @@ index 235cc8a..caccc36 100644
 -export default function MemberAndroidDownload({ar}:{ar:boolean}){const t=(a:string,e:string)=>ar?a:e;return <div id="android-download" className="member-android-download"><h3>GymEG Members</h3><p>{t('نفس العضوية والبيانات والرقم السري، في تطبيقك الجديد.','Your existing membership, records and PIN in your new app.')}</p><a href="/mobile/member"><Image src="/downloads/gymeg-member-qr.png" width={180} height={180} alt={t('QR تطبيق الأعضاء','Members app QR')} unoptimized style={{maxWidth:'100%',height:'auto',background:'#fff',borderRadius:12}}/></a><a className="button primary" href={release.url}>{t('تحميل تطبيق الأعضاء — Android','Download Members — Android')}</a><p>{t('Android 8 أو أحدث · يتطلب اتصالًا بالإنترنت.','Android 8+ · Internet connection required.')}</p><p>{t('iPhone: افتح نسخة الويب في Safari ثم مشاركة وإضافة إلى الشاشة الرئيسية.','iPhone: open the web app in Safari, then Share and Add to Home Screen.')}</p><a className="button secondary" href="/member">{t('فتح نسخة الويب','Open web app')}</a><a className="button secondary" href="/member-install">{t('تعليمات التثبيت والتحقق','Installation and verification guide')}</a></div>;}
 +export default function MemberAndroidDownload({ar}:{ar:boolean}){const t=(a:string,e:string)=>ar?a:e;return <div id="android-download" className="member-android-download"><h3>GymEG Members</h3><p>{t('نفس العضوية والبيانات والرقم السري، في تطبيقك الجديد.','Your existing membership, records and PIN in your new app.')}</p><a href="/mobile/member"><Image src="/downloads/gymeg-member-qr.png" width={180} height={180} alt={t('QR تطبيق الأعضاء','Members app QR')} unoptimized style={{maxWidth:'100%',height:'auto',background:'#fff',borderRadius:12}}/></a><a className="button primary" href={release.url} download>{t('تحميل تطبيق الأعضاء — Android','Download Members — Android')} ({release.version})</a><p>{t('الإصدار ','Version ')}{release.version} · {t('Android 8 أو أحدث · يتطلب اتصالًا بالإنترنت.','Android 8+ · Internet connection required.')}</p><p>{t('iPhone: افتح نسخة الويب في Safari ثم مشاركة وإضافة إلى الشاشة الرئيسية.','iPhone: open the web app in Safari, then Share and Add to Home Screen.')}</p><a className="button secondary" href="/member">{t('فتح نسخة الويب','Open web app')}</a><a className="button secondary" href="/member-install">{t('تعليمات التثبيت والتحقق','Installation and verification guide')}</a></div>;}
 diff --git a/app/mobile-install-guide.tsx b/app/mobile-install-guide.tsx
-index 9223869..0caa4d3 100644
+index 9223869..3044585 100644
 --- a/app/mobile-install-guide.tsx
 +++ b/app/mobile-install-guide.tsx
-@@ -12,7 +12,7 @@ export default function MobileInstallGuide({kind,en=false}:{kind:'members'|'mana
+@@ -1,18 +1,25 @@
+ import Link from 'next/link';
+ import Image from 'next/image';
++import {headers} from 'next/headers';
+ import members from '../public/downloads/gymeg-members-android.json';
+ import management from '../public/downloads/gymeg-management-android.json';
++import {resolveDeploymentOrigin,generateQrDataUrl} from './lib/support-release';
+ import './member-install/install.css';
+-export default function MobileInstallGuide({kind,en=false}:{kind:'members'|'management';en?:boolean}){
++export default async function MobileInstallGuide({kind,en=false}:{kind:'members'|'management';en?:boolean}){
+  const member=kind==='members',release=member?members:management,home=member?'/member':'/clubs';
+  const t=(ar:string,english:string)=>en?english:ar;
+  const name=member?(en?'GymEG Members':'GymEG الأعضاء'):(en?'GymEG Manager':'GymEG إدارة النادي'),entry=member?'/mobile/member':'/mobile/management';
++ const fallbackQr=member?'/downloads/gymeg-member-qr.png':'/downloads/gymeg-management-qr.png';
++ const filename=release.url.split('/').pop()??(member?'GymEG-Members-Android.apk':'GymEG-Manager-Android.apk');
++ const h=await headers(),host=h.get('x-forwarded-host')??h.get('host'),proto=h.get('x-forwarded-proto')?.split(',')[0]?.trim()||(host?.startsWith('localhost')||host?.startsWith('127.0.0.1')?'http':'https');
++ const origin=resolveDeploymentOrigin(host?`${proto}://${host}`:null);
++ const qrSrc=await generateQrDataUrl(new URL(release.url,origin).toString(),fallbackQr);
+  return <main className="mobile-install-guide" dir={en?'ltr':'rtl'}>
+   <header><Link href="/">GymEG</Link><Link href={(member?'/member-install':'/management-install')+(en?'':'?lang=en')}>{en?'العربية':'English'}</Link></header>
    <section className="install-intro"><small>YOUR GYM. ONE SYSTEM.</small><h1>{name}</h1><p>{t('التطبيق الجديد، بنفس حسابك وبياناتك الحالية.','Your new app, with your existing account and records.')}</p><Link className="button secondary" href={home}>{t('فتح نسخة الويب','Open web app')}</Link></section>
    <div className="install-platforms"><section className="card"><h2>Android</h2>
-    <a href={entry}><Image src={member?'/downloads/gymeg-member-qr.png':'/downloads/gymeg-management-qr.png'} width={180} height={180} alt={t('QR تحميل التطبيق','App download QR')} unoptimized/></a>
+-   <a href={entry}><Image src={member?'/downloads/gymeg-member-qr.png':'/downloads/gymeg-management-qr.png'} width={180} height={180} alt={t('QR تحميل التطبيق','App download QR')} unoptimized/></a>
 -   <a className="button primary" href={release.url}>{t('تحميل '+name,'Download '+name)}</a>
-+   <a className="button primary" href={release.url} download>{t('تحميل '+name+' — Android ('+release.version+')','Download '+name+' — Android ('+release.version+')')}</a>
++   <a href={entry}><Image src={qrSrc} width={180} height={180} alt={t('QR تحميل التطبيق','App download QR')} unoptimized/></a>
++   <a className="button primary" href={release.url} download={filename}>{t('تحميل '+name+' — Android ('+release.version+')','Download '+name+' — Android ('+release.version+')')}</a>
     <p>{t('الإصدار','Version')} {release.version} · Android {release.minAndroid}+ · {t('يتطلب الإنترنت','Internet required')}</p>
     <ol><li>{t('حمّل التطبيق وافتحه، ثم اسمح بالتثبيت إذا طلب Android ذلك.','Download and open the app, then allow installation if Android asks.')}</li><li>{t('سجّل بنفس حسابك الحالي.','Sign in with your existing account.')}</li><li>{member?t('استخدم رقم الهاتف والرقم السري المسجلين لدى النادي.','Use the phone number and PIN registered with your club.'):t('يمكنك السماح باستخدام الكاميرا لمسح الكروت.','Allow camera access to scan membership cards.')}</li></ol>
    </section><section className="card"><h2>iPhone / iPad</h2><ol><li>{t('افتح نسخة الويب في Safari.','Open the web app in Safari.')}</li><li>{t('اختر مشاركة ← إضافة إلى الشاشة الرئيسية ← إضافة.','Choose Share → Add to Home Screen → Add.')}</li><li>{t('افتح التطبيق من الشاشة الرئيسية وسجّل الدخول.','Open the app from your Home Screen and sign in.')}</li></ol><Link className="button primary" href={home}>{t('فتح التطبيق','Open app')}</Link></section></div>
@@ -3168,13 +3392,30 @@ index 76a7212..12c7c63 100644
    <section className={styles.faq} data-reveal><div className={styles.sectionTitle}><h2>{t('أسئلة قبل بدء الاستخدام','Before you get started')}</h2></div>{[
     [t('هل أستطيع تغيير الأسعار والباقات؟','Can I change prices and memberships?'),t('نعم، يحدد النادي أسعار الاشتراكات والحصص والمنتجات وبرامج المدربين. تغيير الأسعار لا يعيد كتابة الإيصالات السابقة.','Yes. Your club controls membership, class, product and coach-program prices. Price changes do not rewrite previous receipts.')],
 diff --git a/app/support-install/page.tsx b/app/support-install/page.tsx
-index 2fc91ef..0b75c82 100644
+index 2fc91ef..2a691b5 100644
 --- a/app/support-install/page.tsx
 +++ b/app/support-install/page.tsx
-@@ -1 +1,2 @@
+@@ -1 +1,19 @@
 -import Link from 'next/link';import Image from 'next/image';import{redirect,notFound}from'next/navigation';import{getChatGPTUser}from'../chatgpt-auth';import{commercialTransaction}from'../lib/commercial';import '../member-install/install.css';export const dynamic='force-dynamic';export const metadata={title:'GymEG Support — تطبيق الموبايل',robots:{index:false,follow:false},manifest:'/support.webmanifest',appleWebApp:{capable:true,title:'GymEG الدعم الفني',statusBarStyle:'default' as const},icons:{icon:'/icons/support-192.png?v=20261030-role-icons',apple:'/icons/support-180.png?v=20261030-role-icons'}};export default async function Page(){const u=await getChatGPTUser();if(!u)redirect('/support-login');if(!await commercialTransaction(u,async(_c,p)=>p))notFound();return <main className="mobile-install-guide" dir="rtl"><header><Link href="/platform">GymEG SUPPORT</Link><Link href="/sign-out">تسجيل الخروج</Link></header><section className="install-intro"><Image src="/icons/support-192.png?v=20261030-role-icons" width={96} height={96} alt="GymEG Support"/><h1>إدارة منصتك، معاك على الموبايل.</h1><p>تطبيق خاص بحساب إدارة المنصة. نفس الحساب والصلاحيات والتحقق من الخادم، بدون أي مفاتيح إدارية داخل التطبيق.</p><Link className="button primary" href="/platform">فتح إدارة المنصة على الرابط الجديد</Link><p>نسخة Android 1.0.3 متاحة الآن. على iPhone افتح Safari ثم أضف تطبيق الويب إلى الشاشة الرئيسية.</p><Image src="/downloads/support-mobile-qr.png" width={180} height={180} alt="QR تطبيق الدعم"/></section><section className="card"><h2>iPhone</h2><p>افتح هذه الصفحة في Safari، ثم مشاركة ← إضافة إلى الشاشة الرئيسية ← إضافة. نسخة iPhone تطبيق ويب قابل للتثبيت، وليست ملف iOS أو إصدار App Store.</p><Link className="button secondary" href="/platform">فتح إدارة المنصة</Link><p>تطبيق الويب يتصل بالنظام مباشرة. يتطلب اتصالًا بالإنترنت.</p></section></main>; }
-+import Link from 'next/link';import Image from 'next/image';import{redirect,notFound}from'next/navigation';import{getChatGPTUser}from'../chatgpt-auth';import{commercialTransaction}from'../lib/commercial';import{ownerComplimentary}from'../lib/platform-owner-license';import supportRelease from '../../public/downloads/support-android.json';import '../member-install/install.css';export const dynamic='force-dynamic';export const metadata={title:'GymEG Support — تطبيق الموبايل',robots:{index:false,follow:false},manifest:'/support.webmanifest',appleWebApp:{capable:true,title:'GymEG الدعم الفني',statusBarStyle:'default' as const},icons:{icon:'/icons/support-192.png?v=20261030-role-icons',apple:'/icons/support-180.png?v=20261030-role-icons'}};export default async function Page(){const u=await getChatGPTUser();if(!u)redirect('/support-login');if(!await commercialTransaction(u,async(_c,p)=>ownerComplimentary(p,u.userId)))notFound();return <main className="mobile-install-guide" dir="rtl"><header><Link href="/platform" style={{display:'inline-flex',alignItems:'center',gap:10}}><Image src="/icons/support-192.png?v=20261030-role-icons" width={36} height={36} alt="GymEG Support" unoptimized style={{borderRadius:8}}/><span>GymEG SUPPORT</span></Link><Link href="/sign-out">تسجيل الخروج</Link></header><section className="install-intro"><Image src="/icons/support-192.png?v=20261030-role-icons" width={96} height={96} alt="GymEG Support" unoptimized style={{borderRadius:22,display:'block',marginBottom:16}}/><h1>إدارة منصتك، معاك على الموبايل.</h1><p>تطبيق خاص بحساب صاحب المنصة فقط. نفس الحساب والصلاحيات والتحقق من الخادم، بدون أي مفاتيح إدارية داخل التطبيق.</p><Link className="button secondary" href="/platform">فتح إدارة المنصة على الويب</Link></section><div className="install-platforms"><section className="card"><h2>Android</h2><a href={supportRelease.url} download="GymEG-Support-Android-1.0.4.apk"><Image src="/downloads/support-mobile-qr.png" width={180} height={180} alt="QR تطبيق الدعم" unoptimized/></a><a className="button primary" href={supportRelease.url} download="GymEG-Support-Android-1.0.4.apk">تحميل تطبيق الدعم — Android ({supportRelease.version})</a><p>الإصدار {supportRelease.version} · Android {supportRelease.minAndroid}+ · يتطلب الإنترنت</p><ol><li>حمّل ملف APK وافتحه على هاتف Android، ثم اسمح بالتثبيت.</li><li>سجّل الدخول بحساب صاحب المنصة لإدارة الأندية والتراخيص والنداءات الصوتية.</li></ol></section><section className="card"><h2>iPhone / iPad</h2><p>افتح هذه الصفحة في Safari، ثم مشاركة ← إضافة إلى الشاشة الرئيسية ← إضافة. نسخة iPhone تطبيق ويب قابل للتثبيت، وليست ملف iOS أو إصدار App Store.</p><Link className="button primary" href="/platform">فتح إدارة المنصة</Link><p>تطبيق الويب يتصل بالنظام مباشرة. يتطلب اتصالًا بالإنترنت.</p></section></div></main>; }
-+
++import Link from 'next/link';
++import Image from 'next/image';
++import {headers} from 'next/headers';
++import {redirect,notFound} from 'next/navigation';
++import {getChatGPTUser} from '../chatgpt-auth';
++import {commercialTransaction} from '../lib/commercial';
++import {supportApkFilename,supportApkUrl,supportApkVersion,supportFallbackQrPath,supportMinAndroid,resolveSupportApkUrl,generateQrDataUrl} from '../lib/support-release';
++import '../member-install/install.css';
++export const dynamic='force-dynamic';
++export const metadata={title:'GymEG Support — تطبيق الموبايل',robots:{index:false,follow:false},manifest:'/support.webmanifest',appleWebApp:{capable:true,title:'GymEG الدعم الفني',statusBarStyle:'default' as const},icons:{icon:'/icons/support-192.png?v=20261030-role-icons',apple:'/icons/support-180.png?v=20261030-role-icons'}};
++export default async function Page(){
++ const u=await getChatGPTUser();
++ if(!u)redirect('/support-login');
++ if(!await commercialTransaction(u,async(_c,p)=>p))notFound();
++ const h=await headers(),host=h.get('x-forwarded-host')??h.get('host'),proto=h.get('x-forwarded-proto')?.split(',')[0]?.trim()||(host?.startsWith('localhost')||host?.startsWith('127.0.0.1')?'http':'https');
++ const fullApkUrl=resolveSupportApkUrl(host?`${proto}://${host}`:null);
++ const qrSrc=await generateQrDataUrl(fullApkUrl,supportFallbackQrPath);
++ return <main className="mobile-install-guide" dir="rtl"><header><Link href="/platform" style={{display:'inline-flex',alignItems:'center',gap:10}}><Image src="/icons/support-192.png?v=20261030-role-icons" width={36} height={36} alt="GymEG Support" unoptimized style={{borderRadius:8}}/><span>GymEG SUPPORT</span></Link><Link href="/sign-out">تسجيل الخروج</Link></header><section className="install-intro"><Image src="/icons/support-192.png?v=20261030-role-icons" width={96} height={96} alt="GymEG Support" unoptimized style={{borderRadius:22,display:'block',marginBottom:16}}/><h1>إدارة منصتك، معاك على الموبايل.</h1><p>تطبيق خاص بحساب صاحب المنصة فقط. نفس الحساب والصلاحيات والتحقق من الخادم، بدون أي مفاتيح إدارية داخل التطبيق.</p><Link className="button secondary" href="/platform">فتح إدارة المنصة على الويب</Link></section><div className="install-platforms"><section className="card"><h2>Android</h2><a href={supportApkUrl} download={supportApkFilename}><Image src={qrSrc} width={180} height={180} alt="QR تطبيق الدعم" unoptimized/></a><a className="button primary" href={supportApkUrl} download={supportApkFilename}>تحميل تطبيق الدعم — Android ({supportApkVersion})</a><p>الإصدار {supportApkVersion} · Android {supportMinAndroid}+ · يتطلب الإنترنت</p><ol><li>حمّل ملف APK وافتحه على هاتف Android، ثم اسمح بالتثبيت.</li><li>سجّل الدخول بحساب صاحب المنصة لإدارة الأندية والتراخيص والنداءات الصوتية.</li></ol></section><section className="card"><h2>iPhone / iPad</h2><p>افتح هذه الصفحة في Safari، ثم مشاركة ← إضافة إلى الشاشة الرئيسية ← إضافة. نسخة iPhone تطبيق ويب قابل للتثبيت، وليست ملف iOS أو إصدار App Store.</p><Link className="button primary" href="/platform">فتح إدارة المنصة</Link><p>تطبيق الويب يتصل بالنظام مباشرة. يتطلب اتصالًا بالإنترنت.</p></section></div></main>;
++}
 diff --git a/app/workspace.tsx b/app/workspace.tsx
 index e631252..f04f4d0 100644
 --- a/app/workspace.tsx
@@ -4340,6 +4581,24 @@ index 0000000..dba8137
 +  assert.equal(invalidRes.totalSeconds, 34.0);
 +  assert.ok(invalidRes.error?.includes('تتجاوز الحد الأقصى 30 ثانية'));
 +});
+diff --git a/tests/commercial-library-ui.integration.mjs b/tests/commercial-library-ui.integration.mjs
+index 2ddcb44..dd6d785 100644
+--- a/tests/commercial-library-ui.integration.mjs
++++ b/tests/commercial-library-ui.integration.mjs
+@@ -1,9 +1,11 @@
+ import {test,after} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
+ const dom=new JSDOM('<div id="root"></div>',{url:'https://gym.test',pretendToBeVisual:true});for(const [key,value]of Object.entries({window:dom.window,document:dom.window.document,navigator:dom.window.navigator,localStorage:dom.window.localStorage,Event:dom.window.Event}))Object.defineProperty(globalThis,key,{value,configurable:true});globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+-const React=await import('react'),{createRoot}=await import('react-dom/client'),{default:MusicRoom}=await import('../app/music-room.tsx'),{default:ClubHub}=await import('../app/club-hub.tsx');const root=createRoot(document.getElementById('root')),h=React.createElement;
++const React=await import('react'),{createRoot}=await import('react-dom/client'),{default:MusicRoom}=await import('../app/music-room.tsx'),{default:ClubHub}=await import('../app/club-hub.tsx'),{default:CommercialPanel}=await import('../app/commercial-panel.tsx'),{androidAppVariants,supportApkUrl,supportApkFilename,supportInstallPath}=await import('../app/lib/support-release.ts');const root=createRoot(document.getElementById('root')),h=React.createElement;
+ const props={scope:'tenant-a:main',ar:false,canEdit:true,visible:true};const tracks=()=>document.querySelectorAll('.music-track');
+ test('Actual music UI provides defaults even when device storage is unavailable, hides/restores per tenant branch',async()=>{await React.act(async()=>root.render(h(MusicRoom,props)));assert.equal(tracks().length,12);const remove=document.querySelector('button[aria-label^="Remove from library "]');await React.act(async()=>remove.click());assert.equal(tracks().length,11);await React.act(async()=>root.render(h(MusicRoom,{...props,scope:'tenant-b:main'})));assert.equal(tracks().length,12);await React.act(async()=>root.render(h(MusicRoom,props)));assert.equal(tracks().length,11);const restore=[...document.querySelectorAll('button')].find(b=>b.textContent==='Restore defaults');await React.act(async()=>restore.click());assert.equal(tracks().length,12);});
+ test('Read-only role cannot play, remove or restore music',async()=>{await React.act(async()=>root.render(h(MusicRoom,{...props,canEdit:false})));for(const b of document.querySelectorAll('button[aria-label^="Play "],button[aria-label^="Remove from library "]'))assert.equal(b.disabled,true);});
+ test('Platform-observer club cards have no membership workspace or subscription action',async()=>{const data={account:{name:'Admin'},platform:true,clubs:[{id:'other',name:'Customer trial club',role:'platform-observer',license:{mode:'trial',status:'active'}}],settings:{payload:{}},orders:[],plans:[],events:[]};let actions=0;await React.act(async()=>root.render(h(ClubHub,{data,ar:false,busy:false,message:'',failed:false,onAction:async()=>actions++,onLanguage(){}})));assert.match(document.body.textContent,/Platform oversight — not club ownership/);assert.doesNotMatch(document.body.textContent,/Club owner|Enter club workspace|Subscription & activation/);assert.ok([...document.querySelectorAll('a')].some(a=>a.getAttribute('href')==='/platform'));assert.equal(actions,0);});
+-after(async()=>{await React.act(async()=>root.unmount());dom.window.close();});
+ test('Platform owner can enter another club without presenting it as owned membership',async()=>{const data={account:{name:'Owner'},platform:true,ownerComplimentary:true,clubs:[{id:'other',name:'Customer club',role:'platform-owner',license:{mode:'annual',status:'active'}}],settings:{payload:{}},orders:[],plans:[],events:[]};const actions=[];await React.act(async()=>root.render(h(ClubHub,{data,ar:false,busy:false,message:'',failed:false,onAction:async body=>actions.push(body),onLanguage(){}})));assert.match(document.body.textContent,/Platform owner — club administration/);const enter=[...document.querySelectorAll('button')].find(b=>b.textContent==='Enter club workspace');assert.ok(enter);await React.act(async()=>enter.click());assert.deepEqual(actions,[{action:'select',tenant:'other'}]);assert.doesNotMatch(document.body.textContent,/Subscription & activation/);});
++test('Platform management dashboard renders dynamic APK download links, install guide links and deployment QR codes for all three Android variants',async()=>{const data={account:{name:'Admin'},platform:true,ownerComplimentary:false,clubs:[],settings:{payload:{},revision:1},orders:[],plans:[],events:[]};await React.act(async()=>{root.render(h(CommercialPanel,{platform:true,initialData:data}));await new Promise(r=>setTimeout(r,80));});const links=[...document.querySelectorAll('a')];assert.ok(links.some(a=>a.getAttribute('href')==='/platform'&&a.textContent?.includes('GymEG')));assert.ok(links.some(a=>a.getAttribute('href')===supportInstallPath));assert.ok(links.some(a=>a.getAttribute('href')===`https://gym.test${supportApkUrl}`&&a.getAttribute('download')===supportApkFilename));for(const variant of androidAppVariants){assert.ok(links.some(a=>a.getAttribute('href')===variant.installPath),`Missing install guide link for ${variant.id}`);assert.ok(links.some(a=>a.getAttribute('href')===`https://gym.test${variant.url}`&&a.getAttribute('download')===variant.filename),`Missing dynamic APK download link for ${variant.id}`);}const qrImgs=[...document.querySelectorAll('[alt*="QR"]')];assert.equal(qrImgs.length,3);for(const qrImg of qrImgs)assert.match(qrImg.getAttribute('src')??'',/^data:image\/svg\+xml;utf8,/);});
++after(async()=>{await React.act(async()=>root.unmount());dom.window.close();});
++
 diff --git a/tests/image-brand-contract.test.mjs b/tests/image-brand-contract.test.mjs
 index acb2e4d..893deac 100644
 --- a/tests/image-brand-contract.test.mjs
@@ -4352,15 +4611,48 @@ index acb2e4d..893deac 100644
   for(const path of ['/icons/icon-192.png?v=unreviewed','/api/member-photo?member=other','/images/photo.webp?url=https://evil.invalid'])assert.equal(hasLocalMatch(config.images.localPatterns,path),false,path);
  });
 diff --git a/tests/mobile-download.test.mjs b/tests/mobile-download.test.mjs
-index d44b71f..f45e20b 100644
+index d44b71f..cc1d446 100644
 --- a/tests/mobile-download.test.mjs
 +++ b/tests/mobile-download.test.mjs
-@@ -1,4 +1,4 @@
- import {test} from 'node:test';import assert from 'node:assert/strict';import {mobileDownloadResponse} from '../app/lib/mobile-download.ts';
+@@ -1,4 +1,26 @@
+-import {test} from 'node:test';import assert from 'node:assert/strict';import {mobileDownloadResponse} from '../app/lib/mobile-download.ts';
 -for(const web of ['/clubs','/member'])test('QR routes safely by platform for '+web,()=>{for(const [ua,want] of [['Mozilla Android 15','/downloads/app.apk'],['Mozilla iPhone OS 18',web],['Mozilla iPad',web],['Desktop',web],['',web]]){const r=mobileDownloadResponse(new Request('https://pushtorq.vercel.app/mobile/member',{headers:{'user-agent':ua}}),'/downloads/app.apk',web);assert.equal(r.status,307);assert.equal(r.headers.get('location'),want);assert.match(r.headers.get('cache-control'),/no-store/);assert.equal(r.headers.get('vary'),'User-Agent');}});
++import {test} from 'node:test';import assert from 'node:assert/strict';import {existsSync} from 'node:fs';import {mobileDownloadResponse} from '../app/lib/mobile-download.ts';import {androidAppVariants,supportApkFilename,supportApkUrl,supportApkVersion,supportInstallPath,managementApkFilename,managementApkUrl,managementApkVersion,managementInstallPath,membersApkFilename,membersApkUrl,membersApkVersion,membersInstallPath,resolveSupportApkUrl,resolveSupportInstallUrl,resolveManagementApkUrl,resolveManagementInstallUrl,resolveMembersApkUrl,resolveMembersInstallUrl} from '../app/lib/support-release.ts';
 +for(const web of ['/clubs','/member','/support-login'])test('QR routes safely by platform for '+web,()=>{for(const [ua,want] of [['Mozilla Android 15','/downloads/app.apk'],['Mozilla iPhone OS 18',web],['Mozilla iPad',web],['Desktop',web],['',web]]){const r=mobileDownloadResponse(new Request('https://pushtorq.vercel.app/mobile/member',{headers:{'user-agent':ua}}),'/downloads/app.apk',web);assert.equal(r.status,307);assert.equal(r.headers.get('location'),want);assert.match(r.headers.get('cache-control'),/no-store/);assert.equal(r.headers.get('vary'),'User-Agent');}});
  
  test('Pending original-key APK upgrade opens the working new-origin web app on Android',()=>{const r=mobileDownloadResponse(new Request('https://pushtorq.vercel.app/mobile/member',{headers:{'user-agent':'Android'}}),'/downloads/old.apk','/member',false);assert.equal(r.headers.get('location'),'/member');assert.match(r.headers.get('cache-control'),/no-store/);});
++
++test('Platform support, management and members download metadata map to latest downloadable APKs and resolve deployment URLs dynamically',()=>{
++ assert.equal(androidAppVariants.length,3);
++ for(const variant of androidAppVariants){
++  assert.match(variant.version,/^\d+\.\d+\.\d+$/);
++  assert.equal(variant.url,`/downloads/${variant.filename}`);
++  assert.equal(existsSync(new URL('../public'+variant.url,import.meta.url)),true,`Missing APK artifact for ${variant.id}: ${variant.url}`);
++ }
++ assert.equal(supportApkVersion,'1.0.4');
++ assert.equal(managementApkVersion,'1.1.4');
++ assert.equal(membersApkVersion,'1.1.4');
++ assert.equal(supportApkUrl,`/downloads/${supportApkFilename}`);
++ assert.equal(managementApkUrl,`/downloads/${managementApkFilename}`);
++ assert.equal(membersApkUrl,`/downloads/${membersApkFilename}`);
++ assert.equal(resolveSupportApkUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${supportApkUrl}`);
++ assert.equal(resolveSupportInstallUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${supportInstallPath}`);
++ assert.equal(resolveManagementApkUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${managementApkUrl}`);
++ assert.equal(resolveManagementInstallUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${managementInstallPath}`);
++ assert.equal(resolveMembersApkUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${membersApkUrl}`);
++ assert.equal(resolveMembersInstallUrl('https://deploy-preview.gymeg.example/platform'),`https://deploy-preview.gymeg.example${membersInstallPath}`);
++});
++
+diff --git a/tests/usability-loader.mjs b/tests/usability-loader.mjs
+index 86ddbd8..e15f27d 100644
+--- a/tests/usability-loader.mjs
++++ b/tests/usability-loader.mjs
+@@ -2,4 +2,4 @@ import {registerHooks} from 'node:module';
+ import {readFileSync,existsSync} from 'node:fs';
+ import ts from 'typescript';
+ const app=new URL('../app/',import.meta.url).href;
+-registerHooks({resolve(spec,ctx,next){if(spec==='server-only')return{url:'data:text/javascript,export{}',shortCircuit:true};if(['next/link','next/image'].includes(spec))return{url:'data:text/javascript,export default "a";',shortCircuit:true};if(spec.startsWith('.')&&!/\.[a-z]+$/i.test(spec)){for(const ext of ['.ts','.tsx'])if(existsSync(new URL(spec+ext,ctx.parentURL)))return next(spec+ext,ctx);}return next(spec,ctx);},load(url,ctx,next){if(url.endsWith('.module.css'))return{format:'module',shortCircuit:true,source:'export default {};'};if(url===app+'lib/database.ts')return{format:'module',shortCircuit:true,source:'export const getPool=()=>globalThis.__setupPool;'};if(url.endsWith('.tsx')&&url.startsWith(app))return{format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ESNext}}).outputText};return next(url,ctx);}});
++registerHooks({resolve(spec,ctx,next){if(spec==='server-only')return{url:'data:text/javascript,export{}',shortCircuit:true};if(['next/link','next/image','next/navigation'].includes(spec))return{url:'data:text/javascript,export const useRouter=()=>({push(){},refresh(){}});export default "a";',shortCircuit:true};if(spec.startsWith('.')&&!/\.[a-z]+$/i.test(spec)){for(const ext of ['.ts','.tsx'])if(existsSync(new URL(spec+ext,ctx.parentURL)))return next(spec+ext,ctx);}return next(spec,ctx);},load(url,ctx,next){if(url.endsWith('.module.css'))return{format:'module',shortCircuit:true,source:'export default {};'};if(url===app+'lib/database.ts')return{format:'module',shortCircuit:true,source:'export const getPool=()=>globalThis.__setupPool;'};if((url.endsWith('.tsx')||url.endsWith('.ts'))&&url.startsWith(app))return{format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ESNext}}).outputText};return next(url,ctx);}});
 diff --git a/tests/windows-devices/Program.cs b/tests/windows-devices/Program.cs
 index 4a62f15..e7c4578 100644
 --- a/tests/windows-devices/Program.cs
