@@ -175,6 +175,14 @@ export default function Announcements({
   const playbackGeneration = useRef<number>(0);
   const firedOccurrences = useRef<Set<string>>(new Set<string>());
 
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: '*', active: false } }));
+      }
+    };
+  }, []);
+
   const blankAnnouncement = (): Announcement => ({
     id: crypto.randomUUID(),
     branch,
@@ -349,6 +357,10 @@ export default function Announcements({
       });
     }
 
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: item.id, active: true } }));
+    }
+
     try {
       // 1. Fetch Blobs from IndexedDB
       const mainBlob = await retrieveBlob(item.main.id);
@@ -480,6 +492,10 @@ export default function Announcements({
         setStatusMessage({text: `خطأ في التشغيل: ${msg}`, type: 'error'});
       }
       setCurrentPlayback(null);
+    } finally {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: item.id, active: false } }));
+      }
     }
   };
 
@@ -511,6 +527,9 @@ export default function Announcements({
     }
     audioQueue.cancelCurrent();
     setCurrentPlayback(null);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: '*', active: false } }));
+    }
   };
 
   const executeSequenceRef = useRef(executeSequence);
