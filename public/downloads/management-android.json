@@ -15,7 +15,7 @@
   "upgradeFromCertificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "2402dbf7ef73d2478e42d3cae25e07a81a990a89dc7149157898637fcb6e6fc1",
+    "AndroidManifest.xml": "09fae3b6c0f5ee53d74dc1562e560259e67dda6e5680a74e56084b16eb3d1dec",
     "res/drawable/ic_launcher_foreground.xml": "49fe402299b8bd82d016ff07510e4853c935a9af0331127ae1bf536aaf2d2688",
     "res/drawable/ic_monochrome.xml": "81b76f97aee37817725e03af7b2f8dfe9c997a01e529cfbaab138abe3a79f465",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -31,6 +31,6 @@
     "res/values/styles.xml": "518120ebd6daceedbbfe68c93a5a5c4565623db89b57f8ec6e8ec8115ea91e3b",
     "res/xml/data_extraction_rules.xml": "66c2d7c6ac2a3c03200235a556e0f410620cae5bdfedd4ebdf18528fcbc42886",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
-    "src/com/gymos/management/MainActivity.java": "aafcbffa656929e1079224b74236aa0c13e8f4c71edb2ec7ad2cc16c6616db6e"
+    "src/com/gymos/management/MainActivity.java": "8f6024d27442d7dcdd231b05ee6751282d4225a5d942d8d4e0b9dc3f31fd6c7f"
   }
 }

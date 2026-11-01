@@ -146,3 +146,26 @@ class AnnouncementAudioQueue {
 
 export const audioQueue = new AnnouncementAudioQueue();
 
+export const MAX_ANNOUNCEMENT_DURATION_SECONDS = 30.0;
+export const SAFE_MAX_DURATION_SECONDS = 29.5;
+
+/**
+ * Validates whether the complete announcement sequence stays strictly under the mandatory 30-second limit.
+ */
+export function validateAnnouncementSequence(item: SequenceItem): {
+  valid: boolean;
+  totalSeconds: number;
+  exceedsLimit: boolean;
+  error?: string;
+} {
+  const timeline = calculateTimeline(item);
+  const exceedsLimit = timeline.totalSeconds >= MAX_ANNOUNCEMENT_DURATION_SECONDS;
+  return {
+    valid: !exceedsLimit,
+    totalSeconds: Number(timeline.totalSeconds.toFixed(2)),
+    exceedsLimit,
+    error: exceedsLimit
+      ? `إجمالي مدة النداء (${timeline.totalSeconds.toFixed(1)} ثانية) تتجاوز الحد الأقصى 30 ثانية.`
+      : undefined
+  };
+}

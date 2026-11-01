@@ -3,13 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": "24.x"
+    "node": ">=22"
   },
   "scripts": {
-    "dev": "next dev --webpack",
+    "dev": "next dev -p 3000 -H 0.0.0.0 --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "test": "node --test --test-isolation=none tests/*.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node --env-file-if-exists=.env.local scripts/migrate.mjs",
     "lint": "eslint app components hooks lib"

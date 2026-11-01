@@ -32,6 +32,6 @@
     "res/values-ar/strings.xml": "0fa709f97a3ad3427922037263d59e2333379d3023127e039ebe3bd56a0f53dd",
     "res/xml/data_extraction_rules.xml": "66c2d7c6ac2a3c03200235a556e0f410620cae5bdfedd4ebdf18528fcbc42886",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
-    "src/com/pushtorq/management/MainActivity.java": "f6fb4ded80c090fe95d81991a524bc03537cbbaa332470d7e426bda677afdc90"
+    "src/com/pushtorq/management/MainActivity.java": "487fbe7ae4d0464bd7baa159e57fba642ba4f0be15c114c40764e2213e607b85"
   }
 }
