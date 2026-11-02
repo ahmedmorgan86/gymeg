@@ -7,6 +7,7 @@ import {validateBackup} from './backup.ts';
 import {presets} from './training.ts';
 import {applyMemberCredit} from './member-ledger.ts';
 import {coachBalance} from './coaches-shifts.ts';
+import {defaultWhatsApp} from './manual-whatsapp.ts';
 export const DEMO_PREFIX='sample-full-';
 /** Additive, deterministic fictional dataset for a dedicated test club only. */
 export function completeDemo(source:GymState,count:number,now:string){
@@ -58,7 +59,7 @@ export function completeDemo(source:GymState,count:number,now:string){
    run('hr.payroll.generate',{employee,month:today.slice(0,7)});if(!i)run('hr.payroll.pay',{id:s.hr!.payroll.at(-1)!.id,method:'cash'});
    run('hr.leave.request',{employee,from:addDays(today,7+i*3),to:addDays(today,8+i*3),kind:'annual',reason:'إجازة سنوية - مثال اصطناعي'});if(!i)run('hr.leave.decide',{id:s.hr!.leaves.at(-1)!.id,approved:true});
   }
-  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:'قالب '+kind,kind,body:'أهلًا {name}، معك فريق {gym} - {branch}. تاريخ عضويتك {expires}. يسعدنا مساعدتك.',offset:7,enabled:true});
+  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:'قالب '+kind,kind,body:defaultWhatsApp(kind,true),offset:7,enabled:true});
   run('community.post',{title:'مواعيد العمل وسياسة استخدام الأجهزة',body:'يرجى إعادة الأوزان إلى أماكنها والحفاظ على نظافة الأجهزة. هذه بيانات اصطناعية للتدريب على النظام.',publishAt:now,enabled:true});
   const member=s.members.find(m=>m.branch===branch.id&&m.id.startsWith(DEMO_PREFIX)&&!m.archived&&!m.demo);if(member)run('community.reply',{member:member.id,text:'مرحبًا بك، يمكنك متابعة الاشتراك والكارت والقياسات من حسابك. رسالة تدريب اصطناعية فقط.'});
   s.events.push({id:marker,branch:branch.id,at:now,kind:'demo.business',subject:'workspace',actor:'Synthetic demo setup'});
