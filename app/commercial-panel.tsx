@@ -15,7 +15,7 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
  const [apkHrefs,setApkHrefs]=useState<Record<AndroidVariantId,string>>({support:supportApkUrl,management:managementApkUrl,members:membersApkUrl});
  const [qrSources,setQrSources]=useState<Record<AndroidVariantId,string>>({support:supportFallbackQrPath,management:managementFallbackQrPath,members:membersFallbackQrPath});
  const router=useRouter();
- const [clubSearch,setClubSearch]=useState(''),[orderFilter,setOrderFilter]=useState('pending_review'),[platformTab,setPlatformTab]=useState('clubs');
+ const [clubSearch,setClubSearch]=useState(''),[orderFilter,setOrderFilter]=useState('pending_review'),[platformTab,setPlatformTab]=useState('clubs'),[activeApp,setActiveApp]=useState<string>('all');
  const ar=lang==='ar',t=(a:string,e:string)=>ar?a:e;
 
  useEffect(()=>{
@@ -232,23 +232,34 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
 
    {platform&&<section className="commercial-card commercial-apps-section" hidden={platformTab!=='clubs'&&platformTab!=='apps'}>
     <div className="commercial-apps-header">
+     <span className="commercial-apps-pill">{t('منظومة تطبيقات الهاتف المحمول','Official Mobile Applications')}</span>
      <h2>{t('تطبيقات GymEG الرسمية للهواتف الذكية','Official GymEG Mobile Applications')}</h2>
      <p>{t('ثلاثة تطبيقات مخصصة بصيغة APK جاهزة للتحميل المباشر مع أكواد QR للمسح السريع بكاميرا الهاتف ودليل التثبيت لنسخ iPhone.','Three dedicated APK packages ready for direct download with camera-scannable QR codes and iPhone installation guides.')}</p>
+     <div className="commercial-apps-switcher">
+      <button type="button" className={`commercial-switcher-btn ${activeApp==='all'?'active':''}`} onClick={()=>setActiveApp('all')}>{t('جميع التطبيقات (3)','All Apps (3)')}</button>
+      {androidAppVariants.map(v=><button key={v.id} type="button" className={`commercial-switcher-btn ${activeApp===v.id?'active':''}`} onClick={()=>setActiveApp(v.id)}><Image src={v.iconPath} width={20} height={20} alt="" unoptimized style={{borderRadius:6}}/><span>{t(v.arTitle,v.enTitle)}</span></button>)}
+     </div>
     </div>
     <div className="commercial-apps-grid">
-     {androidAppVariants.map(v=><div className="commercial-app-card" key={v.id} data-variant={v.id}>
+     {androidAppVariants.map(v=><div className={"commercial-app-card "+(activeApp!=='all'&&activeApp!==v.id?'is-inactive-card':'')} key={v.id} data-variant={v.id}>
       <div className="commercial-app-top">
-       <Image src={v.iconPath} width={64} height={64} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:16,boxShadow:'0 4px 14px rgba(0,0,0,0.18)'}}/>
+       <Image src={v.iconPath} width={58} height={58} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:16,boxShadow:'0 4px 14px rgba(0,0,0,0.18)'}}/>
        <div className="commercial-app-meta">
         <h3>{t(v.arTitle,v.enTitle)}</h3>
-        <span className="commercial-app-badge">v{v.version}</span>
+        <div className="commercial-app-badges">
+         <span className="commercial-app-badge">v{v.version}</span>
+         <span className="commercial-app-os-badge">Android {v.minAndroid}+</span>
+        </div>
        </div>
       </div>
       <div className="commercial-app-qr-box">
        <a href={apkHrefs[v.id]} download={v.filename} title={t(v.arCta,v.enCta)}>
-        <Image src={qrSources[v.id]} width={130} height={130} alt={t(v.arQrAlt,v.enQrAlt)} unoptimized className="commercial-app-qr-img"/>
+        <Image src={qrSources[v.id]} width={96} height={96} alt={t(v.arQrAlt,v.enQrAlt)} unoptimized className="commercial-app-qr-img"/>
        </a>
-       <small>{t('امسح الكود بكاميرا الموبايل للتحميل','Scan with phone camera to download')}</small>
+       <div className="commercial-app-qr-info">
+        <strong>{t('مسح بالكاميرا','Scan with Camera')}</strong>
+        <small>{t('وجّه كاميرا الهاتف نحو الكود للتثبيت المباشر','Scan with phone camera to download directly')}</small>
+       </div>
       </div>
       <div className="commercial-app-actions">
        <a className="button primary commercial-app-download" href={apkHrefs[v.id]} download={v.filename}>

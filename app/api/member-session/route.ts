@@ -23,9 +23,38 @@ export async function POST(request:Request){
    valid.push({...account,key:account.owner_id+'|'+account.member_id,label:state.settings.name+' · '+(state.branches.find(b=>b.id===account.branch)?.name??account.branch)});
   }
   if(!valid.length)return reply({error:'invalidCredentials'},401);
-  if(valid.length>1&&!body.account)return reply({chooseAccount:valid.map(a=>({id:a.key,name:a.label}))});
-  const account=body.account?valid.find(a=>a.key===body.account):valid[0];if(!account)return reply({error:'invalidCredentials'},401);
+  const selected=(typeof body.account==='string'&&body.account.trim())||(typeof body.branch==='string'&&body.branch.trim())||'';
+  const matched=selected?valid.find(a=>a.key===selected||a.branch===selected||a.owner_id===selected||(a.owner_id+':'+a.branch)===selected||(a.owner_id+'|'+a.branch)===selected):null;
+  if(body.account&&!matched)return reply({error:'invalidCredentials'},401);
+  if(valid.length>1&&!matched)return reply({chooseAccount:valid.map(a=>({id:a.key,name:a.label}))});
+  const account=matched??valid[0];if(!account)return reply({error:'invalidCredentials'},401);
   const token=randomBytes(32).toString('hex');await withScope(account.owner_id,async c=>{await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND expires_at<now()',[account.owner_id]);await c.query("INSERT INTO gymos.member_code_sessions(session_hash,owner_id,member_id,version,expires_at) VALUES($1,$2,$3,$4,now()+interval '7 days')",[memberCodeHash(token),account.owner_id,account.member_id,account.version]);});return sessionReply(token,7*86400);
  }catch{return reply({error:'unavailable'},503);}
 }
+export async function GET(){
+ try{
+  const c=await getPool().connect();
+  try{
+   const rows=(await c.query("SELECT t.storage_key,t.name,s.payload FROM gymos.tenants t JOIN gymos.gym_states s ON s.user_id=t.storage_key JOIN gymos.tenant_licenses l ON l.tenant_id=t.id WHERE l.status IN ('active','trial') ORDER BY t.created_at ASC")).rows;
+   const branches:{id:string;name:string;branchId:string;clubId:string}[]=[];
+   for(const row of rows){
+    try{
+     const state=JSON.parse(row.payload);
+     const clubName=state.settings?.name||row.name;
+     const bList=Array.isArray(state.branches)&&state.branches.length>0?state.branches:[{id:'main',name:'الفرع الرئيسي'}];
+     for(const b of bList){
+      branches.push({
+       id:`${row.storage_key}:${b.id}`,
+       name:bList.length>1?`${clubName} — ${b.name}`:clubName,
+       branchId:b.id,
+       clubId:row.storage_key
+      });
+     }
+    }catch{}
+   }
+   return reply({branches});
+  }finally{c.release();}
+ }catch{return reply({branches:[]});}
+}
+
 export async function DELETE(request:Request){if(!sameOrigin(request))return reply({error:'origin'},403);try{const token=memberSessionToken(request);if(token){const c=await getPool().connect();try{await c.query('BEGIN');await c.query("SELECT set_config('app.member_session',$1,true)",[memberCodeHash(token)]);await c.query('DELETE FROM gymos.member_code_sessions WHERE session_hash=$1',[memberCodeHash(token)]);await c.query('COMMIT');}catch{await c.query('ROLLBACK');return reply({error:'unavailable'},503);}finally{c.release();}}return sessionReply('',0);}catch{return reply({error:'unavailable'},503);}}
