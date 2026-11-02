@@ -1,8 +1,9 @@
 import {serverAuth} from '../../lib/auth';
+import {sameOrigin} from '../../lib/server-workspace';
 export const dynamic='force-dynamic';
 const reply=(value:unknown,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'private, no-store'}});
 export async function POST(request:Request){
- if(request.headers.get('origin')!==new URL(request.url).origin)return reply({error:'origin'},403);
+ if(!sameOrigin(request))return reply({error:'origin'},403);
  if(request.headers.get('content-type')?.split(';')[0]!=='application/json')return reply({error:'invalid'},415);
  try{const raw=await request.text();if(raw.length>2048)return reply({error:'limit'},413);const body=JSON.parse(raw);const auth=await serverAuth();
  if(body.action==='request'){if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email.trim()))return reply({error:'invalid'},400);const redirectBase=process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL??new URL('/auth/callback',request.url).href;

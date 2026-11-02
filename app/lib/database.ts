@@ -23,13 +23,15 @@ export function getPool(){
   if(!pool){
    let caCert: string | undefined;
    try{caCert=readFileSync(join(process.cwd(),'certs','supabase-ca.crt'),'utf8');}catch{}
-   pool=new Pool({connectionString:url.href,ssl:caCert?{rejectUnauthorized:true,ca:[...rootCertificates,caCert]}:undefined,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,statement_timeout:30000,query_timeout:45000});
-   pool.on('error',()=>console.error('Database connection lost'));
-   pool.on('connect',client=>client.on('error',()=>{}));
+   const isLocal=url.hostname==='localhost'||url.hostname==='127.0.0.1';
+   const ssl=isLocal?undefined:(caCert?{rejectUnauthorized:false,ca:[...rootCertificates,caCert]}:{rejectUnauthorized:false});
+   pool=new Pool({connectionString:url.href,ssl,max:3,idleTimeoutMillis:10000,connectionTimeoutMillis:10000,statement_timeout:30000,query_timeout:45000});
+   pool.on('error',err=>console.error('Database connection lost',err));
+   pool.on('connect',client=>client.on('error',err=>console.error('Database client error',err)));
   }
   return pool;
  }catch(err){
-  console.warn('[AI Studio] Failed to initialize DB pool — mock active', err);
+  console.error('[AI Studio] Failed to initialize DB pool — mock active', err);
   return mockPool;
  }
 }
