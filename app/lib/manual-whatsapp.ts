@@ -6,7 +6,29 @@ const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>Number.isFinite(Dat
 export const manualTemplateSchema=z.object({id:z.string().min(1).max(250),branch:z.string().min(1).max(250),name:z.string().trim().min(1).max(100),kind:z.enum(['welcome','policy','birthday','occasion','absence','renewal','expired']),body:z.string().trim().min(1).max(1500).refine(v=>!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(v)),enabled:z.boolean(),offset:z.number().int().min(1).max(90),date:date.optional()}).strict().refine(x=>x.kind!=='occasion'||Boolean(x.date));
 export const manualWhatsAppSchema=z.array(manualTemplateSchema).max(100);
 export type ManualWhatsAppTemplate=z.infer<typeof manualTemplateSchema>;
-export const defaultWhatsApp=(kind:ManualWhatsAppTemplate['kind'],ar:boolean)=>({welcome:ar?'أهلًا {name}، نورت {gym}! يسعدنا انضمامك.':'Welcome {name} to {gym}!',policy:ar?'أهلًا {name}، تواصل معنا للحصول على سياسات {gym}.':'Hello {name}, please contact us for {gym} policies.',birthday:ar?'كل سنة وأنت بخير يا {name}! أطيب التمنيات من {gym}.':'Happy birthday {name}! Best wishes from {gym}.',occasion:ar?'أهلًا {name}، {occasion}. تحيات {gym}.':'Hello {name}, {occasion}. Best wishes from {gym}.',absence:ar?'وحشتنا يا {name} في {gym}. هل نقدر نساعدك ترجع للتمرين؟':'We miss you at {gym}, {name}. Can we help you return?',renewal:ar?'أهلًا {name}، اشتراكك في {gym} ينتهي {expires}. يسعدنا مساعدتك في التجديد.':'Hello {name}, your {gym} membership ends {expires}. Contact us to renew.',expired:ar?'أهلًا {name}، انتهى اشتراكك في {gym} بتاريخ {expires}. يسعدنا رجوعك.':'Hello {name}, your {gym} membership expired on {expires}. We look forward to your return.'}[kind]);
+export const defaultWhatsApp=(kind:ManualWhatsAppTemplate['kind'],ar:boolean)=>({
+  welcome:ar
+    ?'أهلًا بك يا {name} في أسرة {gym}! 💪 يسعدنا جدًا انضمامك لأسرتنا الرياضية، ونتمنى لك رحلة تدريبية موفقة وتحقيقًا لكل أهدافك. فريقنا والمدربون دائمًا في خدمتك لأي مساعدة.'
+    :'Welcome {name} to the {gym} family! 💪 We are thrilled to have you with us and wish you an inspiring, successful fitness journey. Our team and coaches are always here to support you.',
+  policy:ar
+    ?'أهلًا {name}، إليك إرشادات وقواعد التدريب والسلامة العامة في {gym} لضمان أفضل تجربة لك ولجميع الأعضاء. نرجو الاطلاع عليها والالتزام بها، ويسعدنا الإجابة عن أي استفسار.'
+    :'Hello {name}, here are the workout rules and gym safety guidelines for {gym} to ensure the best experience for everyone. Please review them, and feel free to ask our team any questions.',
+  birthday:ar
+    ?'كل عام وأنت بألف صحة وسعادة يا {name}! 🎉🎂 أسرة {gym} تتمنى لك عامًا جديدًا مليئًا بالنشاط والنجاح والوصول لأفضل لياقة وفورمة.'
+    :'Happy Birthday {name}! 🎉🎂 The {gym} team wishes you a wonderful year full of strength, energy, and milestone fitness achievements!',
+  occasion:ar
+    ?'أهلًا {name}، تتقدم أسرة {gym} بأحر التهاني وأطيب التمنيات بمناسبة {occasion}! كل عام وأنت وأسرتك الكريمة بخير وصحة وعافية.'
+    :'Hello {name}, warm greetings from {gym} on {occasion}! Wishing you and your loved ones joy, happiness, and good health.',
+  absence:ar
+    ?'وحشتنا في {gym} يا {name}! 💪 لاحظنا غيابك عن التمرين مؤخرًا وحبينا نطمئن عليك. تذكر أن الاستمرارية هي سر النتائج؛ بانتظار عودتك القوية لصالة التدريب، وإذا كنت بحاجة لأي استشارة نحن دائمًا معك.'
+    :'We miss you at {gym}, {name}! 💪 We noticed you have been away from training lately and wanted to check in. Consistency is key to real results; we cannot wait to see you back on the gym floor!',
+  renewal:ar
+    ?'أهلًا {name}، نود تذكيرك بأن اشتراكك في {gym} ينتهي بتاريخ {expires}. تفضل بزيارة الاستقبال للتجديد الآن للحفاظ على استمرارية لياقتك والاستفادة من أفضل عروض الباقات المتاحة.'
+    :'Hello {name}, friendly reminder that your membership at {gym} ends on {expires}. Visit our reception to renew today, keep your training momentum going, and enjoy our latest offers!',
+  expired:ar
+    ?'أهلًا {name}، نبلغك بأن اشتراكك في {gym} قد انتهى بتاريخ {expires}. لا تدع حماسك يتوقف؛ يسعدنا تجديد عضويتك وترحيبنا بك مجددًا في صالة التمرين في أي وقت لمواصلة فورمتك.'
+    :'Hello {name}, your membership at {gym} expired on {expires}. Don\'t pause your progress! We would love to welcome you back anytime to renew and continue your fitness journey.'
+}[kind]);
 export function manualWhatsAppOperation(s:GymState,op:Operation,newId:()=>string){
  if(op.type!=='whatsapp.manual.save')return false;
  s.manualWhatsApp??=[];const old=op.id?s.manualWhatsApp.find(t=>t.id===op.id&&t.branch===op.branch):undefined;if(op.id&&!old)throw new RuleError('notFound');
