@@ -1,8 +1,40 @@
 import {addDays,applyOperation,dayAt,type GymState} from './domain.ts';
 import {emptyEngagement} from './engagement.ts';
+import {defaultWhatsApp,manualWhatsAppSchema,type ManualWhatsAppTemplate} from './manual-whatsapp.ts';
 
 /** Explicitly synthetic, tenant-local scenarios. Never dispatch messages or enable hardware. */
 export function addDemoScenarios(s:GymState,now:string){
+  // Insert demo WhatsApp templates for each branch using the latest default templates
+  const branches = s.branches.slice(0, 2);
+  for (const branch of branches) {
+    const templates = [
+      {kind:'welcome', name:'ترحيب', offset:7},
+      {kind:'policy', name:'سياسات', offset:7},
+      {kind:'birthday', name:'عيد ميلاد', offset:7},
+      {kind:'occasion', name:'مناسبة', offset:7, date:dayAt(now, s.settings.timezone)},
+      {kind:'absence', name:'غياب', offset:7},
+      {kind:'renewal', name:'تجديد', offset:7},
+      {kind:'expired', name:'منتهي', offset:7}
+    ];
+    for (const t of templates) {
+      const id = `demo-whatsapp-${branch.id}-${t.kind}`;
+      const body = defaultWhatsApp(t.kind as ManualWhatsAppTemplate['kind'], s.settings.lang==='ar');
+      s.manualWhatsApp = s.manualWhatsApp ?? [];
+      s.manualWhatsApp.push({
+        id,
+        branch: branch.id,
+        name: t.name,
+        kind: t.kind as ManualWhatsAppTemplate['kind'],
+        body,
+        enabled:true,
+        offset:t.offset,
+        date:t.date
+      });
+    }
+  }
+  // Ensure schema validation after injection
+  if (s.manualWhatsApp) manualWhatsAppSchema.parse(s.manualWhatsApp);
+
  const today=dayAt(now,s.settings.timezone);
  for(const branch of s.branches.slice(0,2)){
   const prefix='sample-full-'+branch.id+'-scenarios-v2-',marker=prefix+'seed';
