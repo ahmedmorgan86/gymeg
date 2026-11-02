@@ -238,7 +238,7 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
     <div className="commercial-apps-grid">
      {androidAppVariants.map(v=><div className="commercial-app-card" key={v.id} data-variant={v.id}>
       <div className="commercial-app-top">
-       <Image src={v.iconPath} width={56} height={56} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:14}}/>
+       <Image src={v.iconPath} width={64} height={64} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:16,boxShadow:'0 4px 14px rgba(0,0,0,0.18)'}}/>
        <div className="commercial-app-meta">
         <h3>{t(v.arTitle,v.enTitle)}</h3>
         <span className="commercial-app-badge">v{v.version}</span>
