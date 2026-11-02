@@ -208,7 +208,18 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
   const now=new Date().toISOString();
   const members=state.members.filter(m=>m.branch===branch&&!m.archived&&!m.demo);
   const byId=useMemo(()=>new Map(members.map(m=>[m.id,m])),[members]);
-  const templates=(state.manualWhatsApp??[]).filter(x=>x.branch===branch);
+  const rawTemplates=useMemo(()=>(state.manualWhatsApp??[]).filter(x=>x.branch===branch),[state.manualWhatsApp,branch]);
+  const templates=useMemo(()=>{
+    return rawTemplates.map(t=>{
+      const isLegacy=t.body.includes('تاريخ عضويتك {expires}. يسعدنا مساعدتك')||t.body.trim()===LEGACY_DUMMY_BODY;
+      const isLegacyName=t.name.startsWith('قالب ')||t.name===t.kind;
+      return {
+        ...t,
+        name:isLegacyName?labels[t.kind][ar?0:1]:t.name,
+        body:isLegacy?defaultWhatsApp(t.kind,ar):t.body
+      };
+    });
+  },[rawTemplates,ar]);
   const due=useMemo(()=>manualWhatsAppDue(state,branch,now),[state,branch,now]);
   const branchName=state.branches.find(b=>b.id===branch)?.name??'';
 
@@ -245,7 +256,7 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
     if(busy)return;setBusy(true);
     try{
       for(const k of ['welcome','policy','birthday','absence','renewal','expired'] as const){
-        const existing=templates.find(t=>t.kind===k);
+        const existing=rawTemplates.find(t=>t.kind===k);
         await mutate({
           type:'whatsapp.manual.save',
           ...(existing?{id:existing.id}:{}),
@@ -259,6 +270,8 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
       setNotice(t('تم تحديث وتخصيص جميع قوالب الفرع إلى النصوص النموذجية المعتمدة لكل حالة بنجاح! 💪','All branch templates upgraded to dedicated scenario texts successfully! 💪'));
     }finally{setBusy(false);}
   }
+
+
 
   function openComposer(m:Member,msgKind:ManualWhatsAppTemplate['kind'],tmplId?:string){
     let tmpl: Pick<ManualWhatsAppTemplate,'body'|'name'|'kind'>;

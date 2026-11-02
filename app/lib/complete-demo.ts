@@ -44,7 +44,21 @@ export function completeDemo(source:GymState,count:number,now:string){
  }
  if(!s.events.some(e=>e.id===DEMO_PREFIX+'seed-event'))s.events.push({id:DEMO_PREFIX+'seed-event',branch:branches[0].id,at:now,kind:'demo.complete',subject:'workspace',actor:'إضافة بيانات اصطناعية بطلب المالك',detail:'Fictional reserved phone numbers; no messaging connections created.'});
  for(const p of s.products??[]){const match=/^sample-full-.+-product-([0-3])$/.exec(p.id);if(match){const i=Number(match[1]);p.brand??='GymEG Demo';p.unit??=i===3?'قطعة':'عبوة';p.size??=['1 كجم','300 جم','60 قرص','60 جم'][i];p.flavor??=i===0||i===3?'شوكولاتة':'';p.description??='منتج وعبوة اصطناعيان للتدريب على البيع والمخزون؛ ليس منتجًا حقيقيًا أو توصية غذائية.';p.photo??=demoProductImages[i];}}
- // Upgrade only our synthetic members; retain the explicit label and reserved fictional phones.
+ const demoTemplateNames: Record<string, string> = {
+    welcome: 'ترحيب بعضو جديد',
+    renewal: 'قرب انتهاء الاشتراك',
+    expired: 'انتهاء الاشتراك',
+    absence: 'غياب وانقطاع عن التمرين',
+    birthday: 'عيد ميلاد العضو',
+    policy: 'سياسات النادي والسلامة'
+  };
+  for(const t of s.manualWhatsApp ?? []){
+    if(t.id.startsWith(DEMO_PREFIX) || t.name.startsWith('قالب ') || t.body.includes('تاريخ عضويتك {expires}. يسعدنا مساعدتك')){
+      t.name = demoTemplateNames[t.kind] ?? t.name;
+      t.body = defaultWhatsApp(t.kind, true);
+    }
+  }
+  // Upgrade only our synthetic members; retain the explicit label and reserved fictional phones.
  for(const m of s.members){const match=/^sample-full-member-(\d+)$/.exec(m.id);if(!match||before.has(m.id))continue;const i=Number(match[1])-1;m.name=first[i%first.length]+' '+last[Math.floor(i/first.length)%last.length]+' '+last[Math.floor(i/(first.length*last.length))%last.length]+' — تجريبي';}
  for(const branch of branches){const prefix=DEMO_PREFIX+branch.id+'-business-',marker=prefix+'seed';if(s.events.some(e=>e.id===marker))continue;let seq=0;const run=(type:string,data:Record<string,unknown>={})=>{const next=applyOperation(s,{type,branch:branch.id,...data},now,'Synthetic demo setup',()=>prefix+String(++seq));Object.assign(s,next);};
   run('book.shift.open',{opening:2000000});
@@ -59,7 +73,7 @@ export function completeDemo(source:GymState,count:number,now:string){
    run('hr.payroll.generate',{employee,month:today.slice(0,7)});if(!i)run('hr.payroll.pay',{id:s.hr!.payroll.at(-1)!.id,method:'cash'});
    run('hr.leave.request',{employee,from:addDays(today,7+i*3),to:addDays(today,8+i*3),kind:'annual',reason:'إجازة سنوية - مثال اصطناعي'});if(!i)run('hr.leave.decide',{id:s.hr!.leaves.at(-1)!.id,approved:true});
   }
-  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:'قالب '+kind,kind,body:defaultWhatsApp(kind,true),offset:7,enabled:true});
+  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:demoTemplateNames[kind],kind,body:defaultWhatsApp(kind,true),offset:7,enabled:true});
   run('community.post',{title:'مواعيد العمل وسياسة استخدام الأجهزة',body:'يرجى إعادة الأوزان إلى أماكنها والحفاظ على نظافة الأجهزة. هذه بيانات اصطناعية للتدريب على النظام.',publishAt:now,enabled:true});
   const member=s.members.find(m=>m.branch===branch.id&&m.id.startsWith(DEMO_PREFIX)&&!m.archived&&!m.demo);if(member)run('community.reply',{member:member.id,text:'مرحبًا بك، يمكنك متابعة الاشتراك والكارت والقياسات من حسابك. رسالة تدريب اصطناعية فقط.'});
   s.events.push({id:marker,branch:branch.id,at:now,kind:'demo.business',subject:'workspace',actor:'Synthetic demo setup'});
