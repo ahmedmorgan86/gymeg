@@ -286,6 +286,16 @@ function syncWithNativePlatforms(itemsList: Announcement[]): void {
   })();
 }
 
+function dispatchSpeechActivity(detail: { id: string; active: boolean }) {
+  if (typeof window === 'undefined') return;
+  try {
+    const Ctor = (window.CustomEvent ?? (typeof CustomEvent !== 'undefined' ? CustomEvent : null));
+    if (Ctor) {
+      window.dispatchEvent(new Ctor('gymos-speech-activity', { detail }));
+    }
+  } catch {}
+}
+
 export default function Announcements({
   branch,
   owner,
@@ -360,7 +370,7 @@ export default function Announcements({
       unsubscribe();
       unbindBroadcast();
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: '*', active: false } }));
+        dispatchSpeechActivity({ id: '*', active: false });
       }
     };
   }, []);
@@ -569,7 +579,7 @@ export default function Announcements({
 
     // Duck background music in music-room.tsx
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: item.id, active: true } }));
+      dispatchSpeechActivity({ id: item.id, active: true });
     }
 
     try {
@@ -738,7 +748,7 @@ export default function Announcements({
     } finally {
       // Restore background music
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: item.id, active: false } }));
+        dispatchSpeechActivity({ id: item.id, active: false });
       }
     }
   };
@@ -777,7 +787,7 @@ export default function Announcements({
         const winHost = (window as unknown as { chrome?: { webview?: { postMessage: (msg: unknown) => void } } }).chrome?.webview;
         winHost?.postMessage({ type: 'gymos-desktop', action: 'announcementStop' });
       } catch {}
-      window.dispatchEvent(new CustomEvent('gymos-speech-activity', { detail: { id: '*', active: false } }));
+      dispatchSpeechActivity({ id: '*', active: false });
     }
   };
 
