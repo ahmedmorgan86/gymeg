@@ -35,16 +35,21 @@ export function manualWhatsAppOperation(s:GymState,op:Operation,newId:()=>string
  const row=manualTemplateSchema.parse({id:old?.id??newId(),branch:op.branch,name:op.name,kind:op.kind,body:op.body,enabled:op.enabled,offset:op.offset??7,...(op.date?{date:op.date}:{})});
  if(old)Object.assign(old,row);else s.manualWhatsApp.push(row);manualWhatsAppSchema.parse(s.manualWhatsApp);return true;
 }
-export function whatsAppText(s:GymState,m:Member,template:Pick<ManualWhatsAppTemplate,'body'|'name'>,now:string){
+export const LEGACY_DUMMY_BODY = 'أهلًا {name}، معك فريق {gym} - {branch}. تاريخ عضويتك {expires}. يسعدنا مساعدتك.';
+export function whatsAppText(s:GymState,m:Member,template:Pick<ManualWhatsAppTemplate,'body'|'name'>&{kind?:ManualWhatsAppTemplate['kind']},now:string,ar:boolean=true){
  const balance=(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch).reduce((n,i)=>n+invoiceOutstanding(s,i),0);
  const fields:Record<string,string>={name:m.name,gym:s.settings.name,branch:s.branches.find(b=>b.id===m.branch)?.name??'',expires:m.expires,balance:(balance/100).toFixed(2)+' '+s.settings.currency,date:dayAt(now,s.settings.timezone),occasion:template.name};
- return template.body.replace(/\{(name|gym|branch|expires|balance|date|occasion)\}/g,(_,key)=>fields[key]);
+ let rawBody=template.body;
+ if(template.kind&&rawBody.trim()===LEGACY_DUMMY_BODY){
+   rawBody=defaultWhatsApp(template.kind,ar);
+ }
+ return rawBody.replace(/\{(name|gym|branch|expires|balance|date|occasion)\}/g,(_,key)=>fields[key]);
 }
 export function memberWhatsAppLink(s:GymState,m:Member,branch:string,kind:ManualWhatsAppTemplate['kind'],ar:boolean,now:string,templateId?:string){
  if(m.branch!==branch||m.archived||m.demo||!s.members.some(x=>x.id===m.id&&x.branch===branch))return null;const phone=normalizeMemberPhone(m.phone);if(!phone)return null;
  const configured=s.manualWhatsApp?.find(t=>t.branch===branch&&t.enabled&&(templateId?t.id===templateId:t.kind===kind));if(templateId&&!configured)return null;
- const template=configured??{body:defaultWhatsApp(kind,ar),name:ar?'مناسبة سعيدة':'Best wishes'};
- return'https://wa.me/'+phone.slice(1)+'?text='+encodeURIComponent(whatsAppText(s,m,template,now));
+ const template=configured??{body:defaultWhatsApp(kind,ar),name:ar?'مناسبة سعيدة':'Best wishes',kind};
+ return'https://wa.me/'+phone.slice(1)+'?text='+encodeURIComponent(whatsAppText(s,m,{...template,kind:template.kind??kind},now,ar));
 }
 export function manualWhatsAppDue(s:GymState,branch:string,now:string){const today=dayAt(now,s.settings.timezone),lastVisits=new Map<string,string>();for(const v of s.visits)if(v.branch===branch&&v.day<=today&&v.day>(lastVisits.get(v.member)??''))lastVisits.set(v.member,v.day);return(s.manualWhatsApp??[]).filter(t=>t.branch===branch&&t.enabled).flatMap(t=>s.members.filter(m=>m.branch===branch&&!m.demo&&!m.archived).flatMap(m=>{
  const last=lastVisits.get(m.id)??m.joined,until=days(today,m.expires);if(['absence','renewal','expired'].includes(t.kind)&&(m.awaitingSubscription||m.freezes?.some(f=>!f.cancelled&&f.from<=today&&f.to>=today)))return[];

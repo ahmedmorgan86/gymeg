@@ -1,7 +1,7 @@
 'use client';
 import {useState,useRef,useMemo} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
-import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,type ManualWhatsAppTemplate} from './lib/manual-whatsapp';
+import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,type ManualWhatsAppTemplate} from './lib/manual-whatsapp';
 
 const labels={
   welcome:['ترحيب بعضو جديد','Welcome new member'],
@@ -46,7 +46,10 @@ function TemplateEditor({
   onChangeKind:(k:ManualWhatsAppTemplate['kind'])=>void;
 }){
   const t=(a:string,b:string)=>ar?a:b;
-  const [text,setText]=useState(edit?.body??defaultWhatsApp(templateKind,ar));
+  const initialText=(edit?.body&&edit.body.trim()!==LEGACY_DUMMY_BODY)
+    ?edit.body
+    :defaultWhatsApp(templateKind,ar);
+  const [text,setText]=useState(initialText);
   const textareaRef=useRef<HTMLTextAreaElement>(null);
 
   const variables=[
@@ -207,7 +210,6 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
   const byId=useMemo(()=>new Map(members.map(m=>[m.id,m])),[members]);
   const templates=(state.manualWhatsApp??[]).filter(x=>x.branch===branch);
   const due=useMemo(()=>manualWhatsAppDue(state,branch,now),[state,branch,now]);
-  const matches=(s:string)=>s.toLocaleLowerCase().includes(search.toLocaleLowerCase());
   const branchName=state.branches.find(b=>b.id===branch)?.name??'';
 
   // Counts per scenario for badges
@@ -239,10 +241,39 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
     }finally{setBusy(false);}
   }
 
+  async function upgradeAllTemplatesToRecommended(){
+    if(busy)return;setBusy(true);
+    try{
+      for(const k of ['welcome','policy','birthday','absence','renewal','expired'] as const){
+        const existing=templates.find(t=>t.kind===k);
+        await mutate({
+          type:'whatsapp.manual.save',
+          ...(existing?{id:existing.id}:{}),
+          name:labels[k][ar?0:1],
+          kind:k,
+          body:defaultWhatsApp(k,ar),
+          enabled:true,
+          offset:existing?.offset??7
+        });
+      }
+      setNotice(t('تم تحديث وتخصيص جميع قوالب الفرع إلى النصوص النموذجية المعتمدة لكل حالة بنجاح! 💪','All branch templates upgraded to dedicated scenario texts successfully! 💪'));
+    }finally{setBusy(false);}
+  }
+
   function openComposer(m:Member,msgKind:ManualWhatsAppTemplate['kind'],tmplId?:string){
-    const configured=templates.find(t=>t.enabled&&(tmplId?t.id===tmplId:t.kind===msgKind));
-    const tmpl=configured??{body:defaultWhatsApp(msgKind,ar),name:labels[msgKind][ar?0:1]};
-    const text=whatsAppText(state,m,tmpl,now);
+    let tmpl: Pick<ManualWhatsAppTemplate,'body'|'name'|'kind'>;
+    if(tmplId){
+      const found=templates.find(t=>t.id===tmplId);
+      if(found&&found.body.trim()!==LEGACY_DUMMY_BODY){
+        tmpl=found;
+      }else{
+        tmpl={body:defaultWhatsApp(msgKind,ar),name:found?.name??labels[msgKind][ar?0:1],kind:msgKind};
+      }
+    }else{
+      // Specifically selected default recommended template for this case
+      tmpl={body:defaultWhatsApp(msgKind,ar),name:labels[msgKind][ar?0:1],kind:msgKind};
+    }
+    const text=whatsAppText(state,m,tmpl,now,ar);
     setModalState({member:m,kind:msgKind,templateId:tmplId,customText:text});
   }
 
@@ -376,6 +407,9 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
           {filteredDue.slice(0,60).map(x=>{
             const m=byId.get(x.member)!;
             const templateObj=templates.find(t=>t.id===x.template);
+            const tmpl: Pick<ManualWhatsAppTemplate,'body'|'name'|'kind'>=(templateObj&&templateObj.body.trim()!==LEGACY_DUMMY_BODY)
+              ?templateObj
+              :{body:defaultWhatsApp(x.kind,ar),name:templateObj?.name??labels[x.kind][ar?0:1],kind:x.kind};
             return <article className="preference-row" key={x.member+'|'+x.template} style={{padding:'12px 16px',borderRadius:10,border:'1px solid var(--line)',background:'var(--surface)'}}>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px',flexWrap:'wrap'}}>
@@ -394,7 +428,7 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
                     {t('👁️ معاينة نص الرسالة المجهزة','👁️ Preview message text')}
                   </summary>
                   <p style={{fontSize:'0.85rem',whiteSpace:'pre-wrap',margin:'8px 0',background:'var(--surface-soft,#f8fafc)',padding:'10px 14px',borderRadius:8,border:'1px solid var(--line)',lineHeight:'1.6'}}>
-                    {whatsAppText(state,m,templateObj,now)}
+                    {whatsAppText(state,m,tmpl,now,ar)}
                   </p>
                 </details>}
               </div>
@@ -428,21 +462,35 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
       <section className="card">
         <h2>{t('محادثة عضو مباشر مع اختيار السيناريو والقالب','Direct Member WhatsApp')}</h2>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))',gap:'12px',marginBottom:'16px'}}>
-          <label style={{margin:0}}>{t('سيناريو الرسالة','Message Scenario')}
-            <select value={kind} onChange={e=>{setKind(e.target.value as typeof kind);setTemplateId('');}}>
+          <label style={{margin:0}}>{t('سيناريو الرسالة والهدف منها','Message Scenario')}
+            <select value={kind} onChange={e=>{
+              const nextK=e.target.value as typeof kind;
+              setKind(nextK);
+              setTemplateId('');
+            }}>
               {Object.entries(labels).map(([value,label])=><option key={value} value={value}>{label[ar?0:1]}</option>)}
             </select>
           </label>
           <label style={{margin:0}}>{t('القالب المستخدم','Template')}
             <select value={templateId} onChange={e=>setTemplateId(e.target.value)}>
-              <option value="">{t('القالب النموذجي الافتراضي','Default recommended template')}</option>
+              <option value="">{t('✨ القالب النموذجي المخصص للحالة: ','✨ Recommended scenario template: ')} {labels[kind][ar?0:1]}</option>
               {templates.filter(x=>x.enabled&&x.kind===kind).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
           </label>
         </div>
 
+        {/* Live Scenario Preview Banner */}
+        <div style={{background:'var(--surface-soft,#f8fafc)',padding:'12px 16px',borderRadius:10,marginBottom:'16px',border:'1px solid var(--line)'}}>
+          <small style={{fontWeight:700,display:'block',color:'var(--purple,#7c3aed)',marginBottom:'4px'}}>
+            {t('📌 نص الرسالة النموذجي المعتمد لحالة (','📌 Current default message for: ')}{labels[kind][ar?0:1]}{t('):',')')}
+          </small>
+          <p style={{margin:0,fontSize:'0.9rem',opacity:.9,whiteSpace:'pre-wrap',lineHeight:'1.6'}}>
+            {defaultWhatsApp(kind,ar)}
+          </p>
+        </div>
+
         <div style={{display:'grid',gap:'8px'}}>
-          {members.filter(m=>matches(m.name+' '+m.phone)).slice(0,50).map(m=>{
+          {members.filter(m=>matchesSearch(m.name+' '+m.phone,search)).slice(0,50).map(m=>{
             const phone=m.phone;
             return <article className="preference-row" key={m.id} style={{padding:'10px 14px',borderRadius:8,border:'1px solid var(--line)'}}>
               <div>
@@ -471,6 +519,16 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
     {/* TAB 3: Templates Configuration Studio */}
     {activeTab==='templates'&&(
       <section className="card">
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'16px',background:'var(--surface-soft,#f8fafc)',padding:'12px 16px',borderRadius:10,border:'1px solid var(--line)'}}>
+          <div>
+            <b style={{display:'block',fontSize:'1rem'}}>{t('تحديث وتوحيد قوالب الفرع الذكية','Sync & Upgrade Branch Templates')}</b>
+            <small style={{opacity:.75}}>{t('ضبط كل قالب بنصه النموذجي المخصص لكل حالة بدلاً من النصوص العامة أو القديمة.','Set each scenario with its dedicated motivating text instead of generic text.')}</small>
+          </div>
+          <button type="button" className="button primary" disabled={busy} onClick={upgradeAllTemplatesToRecommended} style={{fontSize:'0.85rem'}}>
+            {t('🔄 تحديث وضبط جميع القوالب للفرع الآن','🔄 Reset & Upgrade All Templates Now')}
+          </button>
+        </div>
+
         <h2 style={{marginTop:0}}>{edit?t('✏️ تعديل قالب واتساب','✏️ Edit WhatsApp Template'):t('⚙️ إعداد وتخصيص قوالب الرسائل والمناسبات','⚙️ Configure & Customize Templates')}</h2>
         <TemplateEditor
           key={(edit?.id??'new')+'|'+templateKind+'|'+ar}
@@ -488,15 +546,20 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
 
         <h3 style={{marginBlock:'24px 12px'}}>{t('القوالب المحفوظة للفرع','Saved Branch Templates')} ({templates.length})</h3>
         <div style={{display:'grid',gap:'8px'}}>
-          {templates.map(x=><article className="preference-row" key={x.id} style={{padding:'10px 14px',border:'1px solid var(--line)',borderRadius:8}}>
-            <div>
-              <b>{x.name}</b>
-              <span style={{fontSize:'0.75rem',marginInlineStart:'8px',padding:'2px 7px',borderRadius:6,background:'var(--surface-soft,#f1f5f9)'}}>
-                {labels[x.kind][ar?0:1]}
-              </span>
-              <span style={{fontSize:'0.75rem',marginInlineStart:'6px',color:x.enabled?'var(--green,#16a34a)':'var(--muted)',fontWeight:600}}>
-                {x.enabled?t('● مفعل','● Enabled'):t('○ متوقف','○ Disabled')}
-              </span>
+          {templates.map(x=><article className="preference-row" key={x.id} style={{padding:'12px 16px',border:'1px solid var(--line)',borderRadius:8}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div>
+                <b>{x.name}</b>
+                <span style={{fontSize:'0.75rem',marginInlineStart:'8px',padding:'2px 7px',borderRadius:6,background:'var(--surface-soft,#f1f5f9)'}}>
+                  {labels[x.kind][ar?0:1]}
+                </span>
+                <span style={{fontSize:'0.75rem',marginInlineStart:'6px',color:x.enabled?'var(--green,#16a34a)':'var(--muted)',fontWeight:600}}>
+                  {x.enabled?t('● مفعل','● Enabled'):t('○ متوقف','○ Disabled')}
+                </span>
+              </div>
+              <p style={{fontSize:'0.83rem',opacity:.8,margin:'6px 0 2px',maxWidth:'540px',whiteSpace:'pre-wrap',lineHeight:'1.5'}}>
+                {x.body.trim()===LEGACY_DUMMY_BODY?defaultWhatsApp(x.kind,ar):x.body}
+              </p>
               <small style={{display:'block',opacity:.7,marginTop:'4px'}}>{t('فترة التطبيق: ','Offset: ')}{x.offset} {t('أيام','days')}</small>
             </div>
             <button className="button secondary" onClick={()=>{setEdit(x);setTemplateKind(x.kind);window.scrollTo({top:0,behavior:'smooth'});}}>
@@ -589,4 +652,9 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
       </div>
     )}
   </section>;
+}
+
+function matchesSearch(text:string,search:string){
+  const term=search.trim().toLocaleLowerCase();
+  return !term||text.toLocaleLowerCase().includes(term);
 }
