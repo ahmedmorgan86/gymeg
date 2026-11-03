@@ -36,14 +36,17 @@ export async function GET(){
   const c=await getPool().connect();
   try{
    await c.query('BEGIN');
-   // The public directory only exposes active club and branch names. Tenant and
-   // license RLS otherwise hides every row from an anonymous request.
+   // Tenant and license policies allow this scoped directory lookup. State
+   // payloads have a separate owner-only policy and must be read per owner.
    await c.query("SELECT set_config('app.platform','1',true)");
-   const rows=(await c.query("SELECT t.storage_key,t.name,s.payload FROM gymos.tenants t JOIN gymos.gym_states s ON s.user_id=t.storage_key JOIN gymos.tenant_licenses l ON l.tenant_id=t.id WHERE l.status IN ('active','trial') ORDER BY t.created_at ASC")).rows;
+   const rows=(await c.query("SELECT t.storage_key,t.name FROM gymos.tenants t JOIN gymos.tenant_licenses l ON l.tenant_id=t.id WHERE l.status IN ('active','trial') ORDER BY t.created_at ASC")).rows;
+   await c.query('COMMIT');
    const branches:{id:string;name:string;branchId:string;clubId:string}[]=[];
    for(const row of rows){
     try{
-     const state=JSON.parse(row.payload);
+     const payload=await withScope(row.storage_key,async client=>(await client.query('SELECT payload FROM gymos.gym_states WHERE user_id=$1',[row.storage_key])).rows[0]?.payload);
+     if(!payload)continue;
+     const state=JSON.parse(payload);
      const clubName=state.settings?.name||row.name;
      const bList=Array.isArray(state.branches)&&state.branches.length>0?state.branches:[{id:'main',name:'الفرع الرئيسي'}];
      for(const b of bList){
@@ -56,9 +59,8 @@ export async function GET(){
      }
     }catch{}
    }
-   await c.query('COMMIT');
    return reply({branches});
-  }catch(e){await c.query('ROLLBACK');throw e;
+  }catch(e){try{await c.query('ROLLBACK');}catch{}throw e;
   }finally{c.release();}
  }catch{return reply({branches:[]});}
 }
