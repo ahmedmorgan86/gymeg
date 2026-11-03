@@ -1,1 +1,4 @@
-self.addEventListener('install',()=>self.skipWaiting());self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));self.addEventListener('fetch',()=>{});
+self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil(self.clients.claim()));
+self.addEventListener('notificationclick',event=>{event.notification.close();event.waitUntil(self.clients.matchAll({type:'window',includeUncontrolled:true}).then(async clients=>{let targetPath='/member';try{const requested=new URL(event.notification.data?.url||'/member',self.location.origin);if(requested.origin===self.location.origin&&['/member','/clubs'].includes(requested.pathname))targetPath=requested.pathname;}catch{}const target=new URL(targetPath,self.location.origin);const existing=clients.find(client=>{try{const current=new URL(client.url);return current.origin===target.origin&&(current.pathname===target.pathname||current.pathname.startsWith(target.pathname+'/'));}catch{return false;}});if(existing){await existing.focus();return;}await self.clients.openWindow(target.href);}));});
+self.addEventListener('fetch',()=>{});

@@ -1,21 +1,21 @@
 {
-  "version": "1.1.4",
-  "versionCode": 6,
-  "url": "/downloads/GymEG-Manager-Android-1.1.4.apk",
+  "version": "1.1.5",
+  "versionCode": 7,
+  "url": "/downloads/GymEG-Manager-Android-1.1.5.apk",
   "package": "com.pushtorq.management",
   "origin": "https://gymeg.vercel.app",
   "home": "/clubs",
   "minAndroid": "8.0",
-  "sha256": "0293ca60010b72af3a22a9df9ed5a27087763956efc1adba9c7cef69411adade",
-  "bytes": 79187,
-  "certificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
-  "builtAt": "2026-11-01T19:34:12.550315+00:00",
+  "sha256": "38b96221efc1ab2dd2b051b7114ecb7545121a4ac5d05126d356d7a5f4b1df91",
+  "bytes": 83283,
+  "certificateSha256": "ca947f535286bc17bb55efbb7714f1d46b9cb30616907ab271d9526238717037",
+  "builtAt": "2026-11-03T10:48:23.199616+00:00",
   "independentApplication": true,
   "requiresReinstallFromPreviousBrand": true,
-  "upgradeFromCertificateSha256": "aa5c45e73c901c4e34d6337ffbbb71584e3318c127bcf52fd7bad25003f6ac94",
+  "upgradeFromCertificateSha256": "ca947f535286bc17bb55efbb7714f1d46b9cb30616907ab271d9526238717037",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "e7a30e40a926b2e759bd6c0cd9c0a312de03dc2a625ce81435c6db620f50edcf",
+    "AndroidManifest.xml": "4c9a9d9e96059fbde1fdb2740cd1201a3571609e5d4f4a21136d7bc80f2a6c21",
     "res/drawable/ic_launcher_foreground.xml": "49fe402299b8bd82d016ff07510e4853c935a9af0331127ae1bf536aaf2d2688",
     "res/drawable/ic_monochrome.xml": "81b76f97aee37817725e03af7b2f8dfe9c997a01e529cfbaab138abe3a79f465",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -34,6 +34,7 @@
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
     "src/com/pushtorq/management/AnnouncementBridge.java": "7b4f8dc0ff657c4fbf31a49ff0d1fdfd31f6f1bb4c61d6b75e02072ae220b043",
     "src/com/pushtorq/management/AnnouncementReceiver.java": "0ec3706f04f9a705a02a2cd2c0e4e4f682194e92b2c0ab8c783e073c87c47e95",
-    "src/com/pushtorq/management/MainActivity.java": "31c229e580f42ffff10206d4d460405006b8b915c8d1348ad165c1db7260381c"
+    "src/com/pushtorq/management/MainActivity.java": "ecc1335238bc4a16a89a5cd96731d6df166722e6f03b31c2541bb62d931bda01",
+    "src/com/pushtorq/management/NotificationBridge.java": "0bfddc51d6918d63787c22e8c0073f8b765abebce3bdb4c723111f8c98392c8e"
   }
 }

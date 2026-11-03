@@ -25,7 +25,7 @@ export default function NotificationCenter({
   onOpenPulse:()=>void;
   onOpenCommunity?:(memberId?:string)=>void;
 }){
- const [open,setOpen]=useState(false),[filter,setFilter]=useState('all');
+ const [open,setOpen]=useState(false),[filter,setFilter]=useState('all'),[permissionNotice,setPermissionNotice]=useState('');
  const [saved,setSaved]=usePreference<string>('gymos.notifications.read.'+scope,'[]');
  let read:string[]=[];try{const value:unknown=JSON.parse(saved);if(Array.isArray(value))read=value.filter((v):v is string=>typeof v==='string').slice(-500);}catch{}
 
@@ -57,10 +57,7 @@ export default function NotificationCenter({
    className="icon-button notification"
    aria-expanded={open}
    aria-label={ar?`الإشعارات، ${unread} غير مقروءة`:`Notifications, ${unread} unread`}
-   onClick={()=>{
-    setOpen(!open);
-    void requestNotificationPermission();
-   }}
+    onClick={()=>setOpen(!open)}
   >
    <Bell size={19}/>
    {unread>0&&<span className="notification-count">{unread>99?'99+':unread}</span>}
@@ -78,7 +75,9 @@ export default function NotificationCenter({
      <option value="errors">{ar?'أخطاء العمليات':'Operation errors'}</option>
     </select>
     <button className="text-button" onClick={()=>mark(notices.map(n=>n.id))}>{ar?'قراءة الكل':'Mark all read'}</button>
+    <button className="text-button" onClick={()=>void requestNotificationPermission().then(result=>setPermissionNotice(result.granted?(ar?'تم تفعيل إشعارات الجهاز.':'Device notifications are enabled.'):result.prompted?(ar?'تم طلب إذن الإشعارات؛ وافق على النافذة التي ظهرت من Android.':'Notification permission was requested; approve the Android prompt.'):(ar?'فعّل إشعارات GymEG من إعدادات المتصفح أو الهاتف.':'Enable GymEG notifications in your browser or phone settings.')))}>{ar?'تفعيل تنبيهات الرسائل':'Enable message alerts'}</button>
    </div>
+   {permissionNotice&&<p role="status" className="form-note">{permissionNotice}</p>}
    <p className="form-note">{ar?'قراءة الإشعار لا توافق على أي إجراء. الأخطاء محفوظة خلال الجلسة فقط؛ حالة القراءة على هذا الجهاز.':'Reading never approves an action. Errors last for this session; read status is stored on this device.'}</p>
    <div className="notification-list">
     {notices.filter(n=>(filter!=='unread'||!read.includes(n.id))&&(filter!=='errors'||(!n.pulse&&!n.isMessage))&&(filter!=='messages'||n.isMessage)).map(n=><article className={read.includes(n.id)?'notice read':'notice'} key={n.id}>

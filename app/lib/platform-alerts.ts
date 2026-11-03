@@ -45,16 +45,20 @@ function synthesizeChime(): void {
   } catch {}
 }
 
-export function dispatchPlatformNotification(title: string, body: string, icon = '/icons/brand-main.svg'): void {
+export function dispatchPlatformNotification(title: string, body: string, icon = '/icons/brand-main.svg', url='/member'): void {
   if (typeof window === 'undefined') return;
 
   // 1. Notification sound
   playNotificationChime();
 
-  // 2. Web Notification API (Modern browsers, PWA)
-  try {
+  // 2. Web Notification API (modern browsers and installed PWAs)
+  const androidApp=/GymEG(?:Members|Manager)Android/i.test(navigator.userAgent);
+  if(!androidApp)try {
     if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, { body, icon });
+      const options={body,icon,data:{url}};
+      const fallback=()=>{try{const notification=new Notification(title,options);notification.onclick=()=>{window.focus();if(window.location.pathname!==url)window.location.assign(url);};}catch{}};
+      if('serviceWorker'in navigator)void navigator.serviceWorker.getRegistration().then(async registration=>{if(registration)await registration.showNotification(title,options);else fallback();}).catch(fallback);
+      else fallback();
     }
   } catch {}
 
@@ -71,15 +75,8 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
     }
   } catch {}
 
-  // 4. Android Host (native interception and JavascriptInterface)
-  try {
-    const androidBridge = (window as unknown as { GymOSAndroid?: { showNotification?: (title: string, body: string) => void } }).GymOSAndroid;
-    if (androidBridge?.showNotification) {
-      androidBridge.showNotification(title, body);
-    } else {
-      void fetch(`/__native_notifications__?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`).catch(() => {});
-    }
-  } catch {}
+  // 4. Android apps intercept these exact same-origin URLs locally; no message is sent to the server.
+  if(androidApp)try {void fetch(`/__native_notifications__?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`,{cache:'no-store'}).catch(() => {});} catch {}
 
   // 5. iOS WebKit Host
   try {
@@ -96,14 +93,16 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
   } catch {}
 }
 
-export async function requestNotificationPermission(): Promise<boolean> {
-  if (typeof window === 'undefined' || !('Notification' in window)) return false;
+export async function requestNotificationPermission(): Promise<{granted:boolean;native:boolean;prompted:boolean}> {
+  if (typeof window === 'undefined') return {granted:false,native:false,prompted:false};
+  if(/GymEG(?:Members|Manager)Android/i.test(navigator.userAgent)) {
+    try {const response=await fetch('/__native_notifications_permission__',{cache:'no-store'});const result=await response.json() as {granted?:boolean;requested?:boolean};return {granted:result.granted===true,native:true,prompted:result.requested===true};} catch {return {granted:false,native:true,prompted:false};}
+  }
   try {
-    if (Notification.permission === 'granted') return true;
-    if (Notification.permission !== 'denied') {
-      const perm = await Notification.requestPermission();
-      return perm === 'granted';
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') return {granted:true,native:false,prompted:false};
+      if (Notification.permission !== 'denied') return {granted:await Notification.requestPermission()==='granted',native:false,prompted:false};
     }
   } catch {}
-  return false;
+  return {granted:false,native:false,prompted:false};
 }
