@@ -13,6 +13,8 @@ import MemberCommunity from './member-community';
 import MemberPinForm from './member-pin-form';
 import MemberDigitalPass from './member-digital-pass';
 import MemberHealthPanel from '../member-health-panel';
+import {dispatchPlatformNotification} from '../lib/platform-alerts';
+import {messageNotificationBody,unseenIncomingMessages} from '../lib/message-notifications';
 import './member-design.css';
 type View=ReturnType<typeof memberView>&{selected:string;clubs:{id:string}[];staffPreview?:boolean};
 const sections=['profile','training','attendance','health','payments','messages'] as const;
@@ -26,6 +28,7 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
  const [branches,setBranches]=useState<{id:string;name:string}[]>([]),[selectedBranch,setSelectedBranch]=useState('');
  const [mustChangePin,setMustChangePin]=useState(false),[showPinForm,setShowPinForm]=useState(false);
  const refreshing=useRef<AbortController|null>(null);
+ const seenMessageIds=useRef<Set<string>|null>(null);
  const pass=useRef<HTMLElement>(null),content=useRef<HTMLElement>(null),sequence=useRef(0);
  const t=(a:string,e:string)=>ar?a:e;
  async function load(club=''){
@@ -34,7 +37,7 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
   if(staffRequest){params.set('member',staffRequest.member);params.set('club',staffRequest.club);}else if(club)params.set('club',club);
   try{const r=await fetch('/api/member-portal?'+params,{cache:'no-store',signal:AbortSignal.any([controller.signal,AbortSignal.timeout(20000)])}),d=await r.json();if(current!==sequence.current)return false;
    setLoading(false);
-   if(r.ok){setMustChangePin(false);setData(d);setMessage('');setLoginMessage('');return true;}
+   if(r.ok){const messages=d.messages??[];const previous=seenMessageIds.current;if(previous===null)seenMessageIds.current=new Set(messages.map((m:{id:string})=>m.id));else{const incoming=unseenIncomingMessages(previous,messages.map((m:{id:string;side:'staff'|'member';text:string})=>({...m,branch:d.branch?.id??''})),'member',d.branch?.id);if(incoming.length&&!staffMode){const latest=incoming[incoming.length-1];const title=t('رسالة جديدة من إدارة النادي','New message from your club');dispatchPlatformNotification(title,messageNotificationBody(latest.text));}seenMessageIds.current=new Set(messages.map((m:{id:string})=>m.id));}setMustChangePin(false);setData(d);setMessage('');setLoginMessage('');return true;}
    if(d.error==='pinChangeRequired'){setMustChangePin(true);setData(null);setMessage('');return false;}setMustChangePin(false);
    setData(null);const errorMessage=d.error==='notLinked'||d.error==='auth'?'':t('تعذر فتح الملف. راجع صلاحية الدخول وحالة ترخيص النادي.','Cannot open the profile. Check access and club license.');if(staffMode)setMessage(errorMessage);else{setMessage('');setLoginMessage(errorMessage);}
    return r.status===404;
@@ -45,8 +48,8 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
  useEffect(()=>{const timer=setTimeout(()=>void init(),0);return()=>clearTimeout(timer);},[]);
  const selectedClub=data?.selected;
  const poll=useEffectEvent(()=>{if(!busy&&navigator.onLine)void load(selectedClub??'');});
- useEffect(()=>{if(preview||!selectedClub)return;const timer=setInterval(()=>{if(document.visibilityState==='visible')poll();},5000);return()=>clearInterval(timer);},[preview,selectedClub]);
- async function signOut(){setBusy(true);try{const r=await fetch('/api/member-session',{method:'DELETE'});if(!r.ok)throw Error();sequence.current++;refreshing.current?.abort();refreshing.current=null;setMustChangePin(false);setShowPinForm(false);setData(null);setShowPass(false);setMessage('');setLoginMessage('');}catch{setMessage(t('تعذر تسجيل الخروج. أعد المحاولة.','Sign-out failed. Please retry.'));}finally{setBusy(false);}}
+ useEffect(()=>{if(preview||!selectedClub)return;const timer=setInterval(()=>{const notificationsGranted='Notification'in window&&Notification.permission==='granted';if(document.visibilityState==='visible'||notificationsGranted)poll();},5000);return()=>clearInterval(timer);},[preview,selectedClub]);
+ async function signOut(){setBusy(true);try{const r=await fetch('/api/member-session',{method:'DELETE'});if(!r.ok)throw Error();sequence.current++;refreshing.current?.abort();refreshing.current=null;seenMessageIds.current=null;setMustChangePin(false);setShowPinForm(false);setData(null);setShowPass(false);setMessage('');setLoginMessage('');}catch{setMessage(t('تعذر تسجيل الخروج. أعد المحاولة.','Sign-out failed. Please retry.'));}finally{setBusy(false);}}
  function pinChanged(){refreshing.current?.abort();refreshing.current=null;sequence.current++;setMustChangePin(false);setShowPinForm(false);void load();}
  const money=(minor:number)=>new Intl.NumberFormat(ar?'ar-EG-u-nu-latn':'en-GB',{style:'currency',currency:data?.gym.currency??'EGP'}).format(minor/100);
  const dateTime=(stamp:string)=>new Date(stamp).toLocaleString(ar?'ar-EG':'en-GB',{timeZone:data?.gym.timezone??'Africa/Cairo'});
