@@ -16,14 +16,6 @@ class AudioUnlockerManager {
   }
 
   private initWindow() {
-    // Check if browser allows autoplay directly
-    if (typeof navigator !== 'undefined' && 'userActivation' in navigator) {
-      const ua = (navigator as unknown as { userActivation?: { hasBeenActive: boolean } }).userActivation;
-      if (ua?.hasBeenActive) {
-        this.unlocked = true;
-      }
-    }
-
     // BroadcastChannel for cross-tab audio activity
     try {
       this.channel = new BroadcastChannel('gymeg_announcements_channel');
@@ -58,12 +50,7 @@ class AudioUnlockerManager {
   }
 
   public isUnlocked(): boolean {
-    if (this.unlocked) return true;
-    if (this.audioContext && this.audioContext.state === 'running') {
-      this.unlocked = true;
-      return true;
-    }
-    return false;
+    return this.unlocked;
   }
 
   public async unlock(): Promise<boolean> {
@@ -86,16 +73,23 @@ class AudioUnlockerManager {
       }
 
       // Also create and play an empty audio element to unlock HTMLAudioElement
+      let htmlAudioReady = false;
       if (typeof Audio !== 'undefined') {
-        const silentAudio = new Audio('data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=');
+        const silentAudio = new Audio('data:audio/wav;base64,UklGRnQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVAAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==');
         silentAudio.volume = 0.01;
-        await silentAudio.play().catch(() => {});
-        silentAudio.pause();
+        try {
+          await silentAudio.play();
+          htmlAudioReady = true;
+        } catch {
+          // The browser may still prohibit scheduled HTMLAudioElement playback.
+        } finally {
+          silentAudio.pause();
+        }
       }
 
-      this.unlocked = true;
-      this.notifyListeners(true);
-      return true;
+      this.unlocked = htmlAudioReady;
+      this.notifyListeners(htmlAudioReady);
+      return htmlAudioReady;
     } catch (e) {
       console.warn('Audio unlock failed:', e);
       return false;

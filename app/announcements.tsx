@@ -32,6 +32,7 @@ import {
   composeAnnouncementAudio
 } from './lib/announcement-composer';
 import { audioUnlocker, safePlayAudio } from './lib/audio-unlocker';
+import { scheduledMinuteSamples } from './lib/announcement-schedule';
 import { DEFAULT_CHIME_BASE64 } from './lib/default-chime-data';
 
 export type Announcement = SequenceItem & {
@@ -349,6 +350,7 @@ export default function Announcements({
   const activeAudioElement = useRef<HTMLAudioElement | null>(null);
   const playbackGeneration = useRef<number>(0);
   const firedOccurrences = useRef<Set<string>>(new Set<string>());
+  const lastScheduleTick = useRef(0);
 
   // Subscribe to audio unlock events and keep awake
   useEffect(() => {
@@ -803,11 +805,25 @@ export default function Announcements({
 
   // Scheduled timer polling every second (continuous background scheduler)
   useEffect(() => {
+    // Windows and iOS own the schedule in their native hosts. Running this
+    // browser timer too would play the same occurrence twice.
+    const nativeHost = window as unknown as {
+      chrome?: { webview?: { postMessage?: (message: unknown) => void } };
+      webkit?: { messageHandlers?: { gymosAnnouncementBridge?: unknown } };
+    };
+    if (nativeHost.chrome?.webview?.postMessage || nativeHost.webkit?.messageHandlers?.gymosAnnouncementBridge) return;
+    lastScheduleTick.current = Date.now();
     const interval = setInterval(() => {
       const now = new Date();
-      const todayIndex = now.getDay();
-      const todayDate = getLocalDateStr(now);
-      const currentTime = getLocalTimeStr(now);
+      // A throttled background timer can miss the whole scheduled minute.
+      // Recover the previous minute only while it is still reasonably recent.
+      const samples = scheduledMinuteSamples(lastScheduleTick.current, now);
+      lastScheduleTick.current = now.getTime();
+
+      for (const scheduledAt of samples) {
+      const todayIndex = scheduledAt.getDay();
+      const todayDate = getLocalDateStr(scheduledAt);
+      const currentTime = getLocalTimeStr(scheduledAt);
 
       const dueItems = itemsRef.current.filter(item => {
         if (!item.enabled || !item.main) return false;
@@ -844,6 +860,7 @@ export default function Announcements({
         });
         void audioQueue.enqueue(() => executeSequenceRef.current(due, true), false);
       });
+      }
     }, 1000);
 
     return () => clearInterval(interval);
