@@ -127,27 +127,40 @@ function localParts(time:number,timezone:string){
   return{day:value('year')+'-'+value('month')+'-'+value('day'),clock:value('hour')+':'+value('minute'),hour:Number(value('hour'))};
 }
 
+function weekdayIndex(time:number,timezone:string){
+  const weekday=new Intl.DateTimeFormat('en-US',{timeZone:timezone,weekday:'short'}).format(new Date(time));
+  return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].indexOf(weekday);
+}
+
 export function announcementOccurrence(a:Announcement,now:number):string|null{
   if(!a.enabled)return null;
   // If modern schedule is present
   if(a.times&&a.times.length){
-    const parts=localParts(now,a.timezone??'Africa/Cairo');
-    const normTimes = a.times.map(t => {
-      const tr = String(t).trim();
-      const [h, m] = tr.split(':');
-      return h && m ? `${h.padStart(2, '0')}:${m.padStart(2, '0')}` : tr;
-    });
-    if(!normTimes.includes(parts.clock))return null;
-    if(a.startDate&&parts.day<a.startDate)return null;
-    if(a.endDate&&parts.day>a.endDate)return null;
-    const nowDay=new Date(now).getDay();
-    if(a.schedule==='once'&&(a.date??a.startDate)!==parts.day)return null;
-    if(a.schedule==='weekly'&&a.days&&!a.days.includes(nowDay))return null;
-    if(a.schedule==='interval'&&a.interval&&a.startDate){
-      const diff=Math.round((Date.parse(parts.day+'T12:00:00Z')-Date.parse(a.startDate+'T12:00:00Z'))/86400000);
-      if(diff<0||diff%a.interval!==0)return null;
+    try{
+      if(!Number.isFinite(now))return null;
+      const timezone=a.timezone??'Africa/Cairo';
+      const parts=localParts(now,timezone);
+      const normTimes = a.times.map(t => {
+        const tr = String(t).trim();
+        const [h, m] = tr.split(':');
+        return h && m ? `${h.padStart(2, '0')}:${m.padStart(2, '0')}` : tr;
+      });
+      if(!normTimes.includes(parts.clock))return null;
+      if(a.startDate&&parts.day<a.startDate)return null;
+      if(a.endDate&&parts.day>a.endDate)return null;
+      if(a.schedule==='once'&&(a.date??a.startDate)!==parts.day)return null;
+      if(a.schedule==='weekly'&&a.days){
+        const day=weekdayIndex(now,timezone);
+        if(day<0||!a.days.includes(day))return null;
+      }
+      if(a.schedule==='interval'&&a.interval&&a.startDate){
+        const diff=Math.round((Date.parse(parts.day+'T12:00:00Z')-Date.parse(a.startDate+'T12:00:00Z'))/86400000);
+        if(diff<0||diff%a.interval!==0)return null;
+      }
+      return parts.day+'T'+parts.clock;
+    }catch{
+      return null;
     }
-    return parts.day+'T'+parts.clock;
   }
   // Fallback for legacy format if any
   if(!a.at)return null;

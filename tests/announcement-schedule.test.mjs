@@ -10,4 +10,5 @@ test('a throttled timer recovers a recent missed minute once and ignores stale m
  assert.equal(recent[1].toISOString(),'2026-11-03T04:06:05.000Z');
  assert.equal(scheduledMinuteSamples(minute-1000,new Date(minute+95_000)).length,1);
  assert.equal(scheduledMinuteSamples(minute+60_100,new Date(minute+65_000)).length,1);
+ assert.equal(scheduledMinuteSamples(minute-3*60*60*1000,new Date(minute+65_000)).length,1);
 });
