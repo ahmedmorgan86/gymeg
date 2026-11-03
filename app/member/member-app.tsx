@@ -36,7 +36,7 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
    setLoading(false);
    if(r.ok){setMustChangePin(false);setData(d);setMessage('');return true;}
    if(d.error==='pinChangeRequired'){setMustChangePin(true);setData(null);setMessage('');return false;}setMustChangePin(false);
-   setData(null);setMessage(d.error==='notLinked'?t('استخدم رقم الموبايل والرقم السري اللذين استلمتهما من ناديك.','Use your mobile number and the PIN provided by your club.'):d.error==='auth'?'':t('تعذر فتح الملف. راجع صلاحية الدخول وحالة ترخيص النادي.','Cannot open the profile. Check access and club license.'));
+   setData(null);setMessage(d.error==='notLinked'||d.error==='auth'?'':t('تعذر فتح الملف. راجع صلاحية الدخول وحالة ترخيص النادي.','Cannot open the profile. Check access and club license.'));
    return r.status===404;
   }catch{if(current===sequence.current){setData(null);setLoading(false);setMessage(t('تعذر تحديث بياناتك. تحقق من الإنترنت ثم أعد المحاولة.','Could not refresh your records. Check your internet connection and retry.'));}return false;}finally{if(refreshing.current===controller)refreshing.current=null;}
  }
