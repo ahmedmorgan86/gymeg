@@ -24,10 +24,10 @@ export async function POST(request:Request){
   }
   if(!valid.length)return reply({error:'invalidCredentials'},401);
   const selected=(typeof body.account==='string'&&body.account.trim())||(typeof body.branch==='string'&&body.branch.trim())||'';
-  const matched=selected?valid.find(a=>a.key===selected||a.branch===selected||a.owner_id===selected||(a.owner_id+':'+a.branch)===selected||(a.owner_id+'|'+a.branch)===selected):null;
-  if(body.account&&!matched)return reply({error:'invalidCredentials'},401);
-  if(valid.length>1&&!matched)return reply({chooseAccount:valid.map(a=>({id:a.key,name:a.label}))});
-  const account=matched??valid[0];if(!account)return reply({error:'invalidCredentials'},401);
+  const matching=selected?valid.filter(a=>a.key===selected||a.branch===selected||a.owner_id===selected||(a.owner_id+':'+a.branch)===selected||(a.owner_id+'|'+a.branch)===selected):valid;
+  if(!matching.length)return reply({error:'invalidCredentials'},401);
+  if(matching.length>1)return reply({chooseAccount:matching.map(a=>({id:a.key,name:a.label}))});
+  const account=matching[0];
   const token=randomBytes(32).toString('hex');await withScope(account.owner_id,async c=>{await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND expires_at<now()',[account.owner_id]);await c.query("INSERT INTO gymos.member_code_sessions(session_hash,owner_id,member_id,version,expires_at) VALUES($1,$2,$3,$4,now()+interval '7 days')",[memberCodeHash(token),account.owner_id,account.member_id,account.version]);});return sessionReply(token,7*86400);
  }catch{return reply({error:'unavailable'},503);}
 }
@@ -35,6 +35,10 @@ export async function GET(){
  try{
   const c=await getPool().connect();
   try{
+   await c.query('BEGIN');
+   // The public directory only exposes active club and branch names. Tenant and
+   // license RLS otherwise hides every row from an anonymous request.
+   await c.query("SELECT set_config('app.platform','1',true)");
    const rows=(await c.query("SELECT t.storage_key,t.name,s.payload FROM gymos.tenants t JOIN gymos.gym_states s ON s.user_id=t.storage_key JOIN gymos.tenant_licenses l ON l.tenant_id=t.id WHERE l.status IN ('active','trial') ORDER BY t.created_at ASC")).rows;
    const branches:{id:string;name:string;branchId:string;clubId:string}[]=[];
    for(const row of rows){
@@ -45,14 +49,16 @@ export async function GET(){
      for(const b of bList){
       branches.push({
        id:`${row.storage_key}:${b.id}`,
-       name:bList.length>1?`${clubName} — ${b.name}`:clubName,
+       name:`${clubName} — ${b.name}`,
        branchId:b.id,
        clubId:row.storage_key
       });
      }
     }catch{}
    }
+   await c.query('COMMIT');
    return reply({branches});
+  }catch(e){await c.query('ROLLBACK');throw e;
   }finally{c.release();}
  }catch{return reply({branches:[]});}
 }
