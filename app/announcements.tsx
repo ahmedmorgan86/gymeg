@@ -32,7 +32,7 @@ import {
   composeAnnouncementAudio
 } from './lib/announcement-composer';
 import { audioUnlocker, safePlayAudio } from './lib/audio-unlocker';
-import { scheduledMinuteSamples } from './lib/announcement-schedule';
+import { scheduledMinuteSamples, scheduledWallClockParts } from './lib/announcement-schedule';
 import { DEFAULT_CHIME_BASE64 } from './lib/default-chime-data';
 
 export type Announcement = SequenceItem & {
@@ -298,6 +298,7 @@ function dispatchSpeechActivity(detail: { id: string; active: boolean }) {
 }
 
 export default function Announcements({
+  state,
   branch,
   owner,
   visible
@@ -351,6 +352,11 @@ export default function Announcements({
   const playbackGeneration = useRef<number>(0);
   const firedOccurrences = useRef<Set<string>>(new Set<string>());
   const lastScheduleTick = useRef(0);
+  const timezoneRef = useRef(state.settings.timezone);
+
+  useEffect(() => {
+    timezoneRef.current = state.settings.timezone;
+  }, [state.settings.timezone]);
 
   // Subscribe to audio unlock events and keep awake
   useEffect(() => {
@@ -821,9 +827,11 @@ export default function Announcements({
       lastScheduleTick.current = now.getTime();
 
       for (const scheduledAt of samples) {
-      const todayIndex = scheduledAt.getDay();
-      const todayDate = getLocalDateStr(scheduledAt);
-      const currentTime = getLocalTimeStr(scheduledAt);
+      const wallClock = scheduledWallClockParts(scheduledAt, timezoneRef.current);
+      if (!wallClock) continue;
+      const todayIndex = wallClock.weekday;
+      const todayDate = wallClock.date;
+      const currentTime = wallClock.time;
 
       const dueItems = itemsRef.current.filter(item => {
         if (!item.enabled || !item.main) return false;
