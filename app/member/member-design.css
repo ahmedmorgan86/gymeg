@@ -50,3 +50,34 @@
 .member-bottom-nav button.selected svg{color:#fff;stroke-width:2.5;background:linear-gradient(140deg,#7c3aed,#a855f7);box-shadow:0 5px 14px #7c3aed50;transform:translateY(-1px)}
 .member-bottom-nav button span{display:block;max-width:100%;white-space:normal;overflow-wrap:anywhere;line-height:1.35;font-weight:800}
 @media(max-width:380px){.member-mobile-app .member-bottom-nav{width:calc(100% - 8px);padding-inline:3px}.member-bottom-nav button span{font-size:10px}}
+
+/* The digital pass follows the club's selected palette; scannable codes remain neutral. */
+.member-mobile-app .digital-member-pass{--pass-accent:var(--accent,var(--purple,#7c3aed));--pass-bg:var(--surface,#fff);--pass-soft:var(--surface-soft,var(--bg,#f5f3ff));--pass-ink:var(--text,#21172f);--pass-muted:var(--muted,#626a76);--pass-border:var(--line,#dedbe8);position:relative;border:1px solid color-mix(in srgb,var(--pass-accent) 38%,var(--pass-border));background-color:var(--pass-bg);background-image:radial-gradient(circle at 100% 0,color-mix(in srgb,var(--pass-accent) 22%,transparent),transparent 48%),linear-gradient(145deg,var(--pass-bg),var(--pass-soft));color:var(--pass-ink);box-shadow:0 20px 48px color-mix(in srgb,var(--pass-accent) 16%,transparent)}
+.member-mobile-app .digital-pass-brand{padding-bottom:18px;border-bottom:1px solid var(--pass-border)}
+.member-mobile-app .digital-pass-brand>span{background:var(--purple-soft,transparent);color:var(--pass-accent)}
+.member-mobile-app .digital-pass-brand img{border-radius:10px}
+.member-mobile-app .digital-pass-brand b{color:var(--pass-ink);font-size:15px}
+.member-mobile-app .digital-pass-brand small{color:var(--pass-muted);font-size:9px;letter-spacing:1px}
+.member-mobile-app .digital-pass-brand>svg{color:var(--pass-accent)}
+.member-mobile-app .digital-pass-identity{padding-top:20px;padding-bottom:20px}
+.member-mobile-app .digital-pass-identity>img{border-color:var(--pass-accent)}
+.member-mobile-app .digital-pass-identity small{color:var(--pass-accent);font-weight:900;letter-spacing:.5px}
+.member-mobile-app .digital-pass-identity h3{color:var(--pass-ink)}
+.member-mobile-app .digital-pass-identity p{color:var(--pass-muted)}
+.member-mobile-app .digital-pass-avatar{background:var(--purple-soft,transparent);color:var(--pass-accent);border:1px solid var(--pass-border)}
+.member-mobile-app .digital-pass-ticket{background:var(--pass-soft)!important;color:var(--pass-ink)!important;border-color:var(--pass-border)}
+.member-mobile-app .digital-pass-ticket:before,.member-mobile-app .digital-pass-ticket:after{background:var(--bg)}
+.member-mobile-app .digital-qr-frame{min-height:0;width:min(240px,100%);margin:auto;padding:10px;border:1px solid #e4e4e7;border-radius:18px;background:#fff!important;color:#111!important}
+.member-mobile-app .digital-qr-frame img{width:220px;max-width:100%;height:auto;image-rendering:auto}
+.member-mobile-app .digital-pass-ticket>p{color:var(--pass-muted)!important;font-size:11px!important;letter-spacing:.7px}
+.member-mobile-app .digital-pass-ticket .digital-barcode{max-width:360px;height:74px;padding:8px 10px;border:1px solid #e4e4e7;border-radius:12px;background:#fff!important}
+.member-mobile-app .digital-pass-serial{display:block;color:#111!important;font-size:12px;letter-spacing:1.2px}
+.member-mobile-app .digital-member-pass footer{border-top:1px solid var(--pass-border);background:var(--pass-soft);color:var(--pass-ink)}
+.member-mobile-app .digital-member-pass footer small{color:var(--pass-muted);font-weight:800}
+.member-mobile-app .digital-member-pass footer bdi{color:var(--pass-ink)}
+.member-mobile-app .digital-member-pass footer>span{color:var(--pass-accent)}
+.member-mobile-app .digital-pass-dot{background:var(--pass-accent)}
+.member-mobile-app .digital-member-pass.has-member-cover{background-image:linear-gradient(135deg,#10101dcc,#10101de8),var(--club-member-image);background-size:cover;background-position:center;color:#fff}
+.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-brand b,.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-identity h3,.member-mobile-app .digital-member-pass.has-member-cover footer bdi{color:#fff}
+.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-brand small,.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-identity p,.member-mobile-app .digital-member-pass.has-member-cover footer small{color:#e6e2f0}
+.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-brand>svg,.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-identity small,.member-mobile-app .digital-member-pass.has-member-cover footer>span{color:#fff}
