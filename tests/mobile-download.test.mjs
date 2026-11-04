@@ -10,9 +10,9 @@ test('Platform support, management and members download metadata map to latest d
   assert.equal(variant.url,`/downloads/${variant.filename}`);
   assert.equal(existsSync(new URL('../public'+variant.url,import.meta.url)),true,`Missing APK artifact for ${variant.id}: ${variant.url}`);
  }
- assert.equal(supportApkVersion,'1.0.4');
- assert.equal(managementApkVersion,'1.1.5');
- assert.equal(membersApkVersion,'1.1.5');
+ assert.equal(supportApkVersion,'1.0.6');
+ assert.equal(managementApkVersion,'1.1.7');
+ assert.equal(membersApkVersion,'1.1.7');
  assert.equal(supportApkUrl,`/downloads/${supportApkFilename}`);
  assert.equal(managementApkUrl,`/downloads/${managementApkFilename}`);
  assert.equal(membersApkUrl,`/downloads/${membersApkFilename}`);

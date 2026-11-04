@@ -8,7 +8,7 @@ for(const role of ['members','management'])test(`Android ${role} handles only tr
  const main=readFileSync(new URL(`src/com/pushtorq/${role}/MainActivity.java`,base),'utf8');
  const bridge=readFileSync(new URL(`src/com/pushtorq/${role}/NotificationBridge.java`,base),'utf8');
  assert.match(manifest,/android\.permission\.POST_NOTIFICATIONS/);
- assert.match(manifest,/android:versionCode="8" android:versionName="1\.1\.6"/);
+ assert.match(manifest,/android:versionCode="9" android:versionName="1\.1\.7"/);
  assert.doesNotMatch(main,/addJavascriptInterface/);
  assert.match(main,/NotificationBridge\.intercept\(MainActivity\.this,u\)/);
  assert.match(bridge,/gymeg\.vercel\.app/);
