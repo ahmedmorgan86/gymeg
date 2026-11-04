@@ -33,6 +33,7 @@ import {
 } from './lib/announcement-composer';
 import { audioUnlocker, safePlayAudio } from './lib/audio-unlocker';
 import { scheduledMinuteSamples, scheduledWallClockParts } from './lib/announcement-schedule';
+import { shouldRunBrowserAnnouncementScheduler } from './lib/announcement-runtime';
 import { DEFAULT_CHIME_BASE64 } from './lib/default-chime-data';
 
 export type Announcement = SequenceItem & {
@@ -211,7 +212,7 @@ async function blobToBase64(blob: Blob): Promise<string> {
  * 2. Android WebView JavascriptInterface (window.GymOSAndroid)
  * 3. iOS WKWebView ScriptMessageHandler (window.webkit.messageHandlers.gymosAnnouncementBridge)
  */
-function syncWithNativePlatforms(itemsList: Announcement[]): void {
+function syncWithNativePlatforms(itemsList: Announcement[], timezone: string): void {
   if (typeof window === 'undefined') return;
 
   void (async () => {
@@ -229,6 +230,7 @@ function syncWithNativePlatforms(itemsList: Announcement[]): void {
           id: item.id,
           name: item.name,
           branch: item.branch,
+          timezone,
           enabled: item.enabled,
           schedule: item.schedule,
           days: item.days,
@@ -389,10 +391,12 @@ export default function Announcements({
     if (success) {
       setIsAudioUnlocked(true);
       setStatusMessage({
-        text: 'تم تفعيل الصوت التلقائي بنجاح! النداءات المجدولة ستعمل في مواعيدها المحددة.',
+        text: 'تم السماح بتشغيل الصوت في هذه الجلسة. أبقِ التطبيق مفتوحًا وفي الواجهة؛ المتصفح لا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.',
         type: 'success'
       });
     } else {
+      audioUnlocker.markPlaybackBlocked();
+      setIsAudioUnlocked(false);
       setStatusMessage({
         text: 'تعذر تفعيل الصوت التلقائي بدون تفاعل مباشر مع الصفحة. يرجى النقر والمحاولة مجددًا.',
         type: 'warning'
@@ -440,7 +444,7 @@ export default function Announcements({
         const raw = localStorage.getItem(storageKey(scope));
         const loaded: Announcement[] = raw ? JSON.parse(raw) : [];
         setItems(loaded);
-        syncWithNativePlatforms(loaded);
+        syncWithNativePlatforms(loaded, timezoneRef.current);
         const savedLogs = localStorage.getItem(logsKey(scope));
         setLogs(savedLogs ? JSON.parse(savedLogs) : []);
       } catch {
@@ -461,7 +465,7 @@ export default function Announcements({
         after: after ? { id: after.id, name: after.name, size: after.size, duration: after.duration } : undefined
       }));
       localStorage.setItem(storageKey(scope), JSON.stringify(stripped));
-      syncWithNativePlatforms(updated);
+      syncWithNativePlatforms(updated, timezoneRef.current);
     } catch {
       setStatusMessage({ text: 'تحذير: تعذر مزامنة البيانات في التخزين المحلي.', type: 'error' });
     }
@@ -736,8 +740,13 @@ export default function Announcements({
       } else {
         const isAutoplayBlocked = msg.includes('user gesture') || msg.includes('NotAllowedError');
         const displayError = isAutoplayBlocked
-          ? 'تم حظر التشغيل بواسطة سياسة المتصفح (play() can only be initiated by a user gesture). اضغط على زر تفعيل الصوت التلقائي أعلى الصفحة للسماح بالتشغيل.'
+          ? 'المتصفح منع تشغيل النداء المجدول. اضغط «تفعيل الصوت» مرة أخرى وأبقِ هذه الصفحة مفتوحة وفي الواجهة. لا يضمن المتصفح تشغيل الصوت عند إغلاق الصفحة أو إيقافها بالخلفية.'
           : msg;
+
+        if (isAutoplayBlocked) {
+          audioUnlocker.markPlaybackBlocked();
+          setIsAudioUnlocked(false);
+        }
 
         if (isScheduled) {
           addLogEntry({
@@ -815,9 +824,15 @@ export default function Announcements({
     // browser timer too would play the same occurrence twice.
     const nativeHost = window as unknown as {
       chrome?: { webview?: { postMessage?: (message: unknown) => void } };
+      GymOSAndroid?: { syncAnnouncements?: (json: string) => void };
       webkit?: { messageHandlers?: { gymosAnnouncementBridge?: unknown } };
     };
-    if (nativeHost.chrome?.webview?.postMessage || nativeHost.webkit?.messageHandlers?.gymosAnnouncementBridge) return;
+    if (!shouldRunBrowserAnnouncementScheduler({
+      windows: Boolean(nativeHost.chrome?.webview?.postMessage),
+      androidBridge: Boolean(nativeHost.GymOSAndroid?.syncAnnouncements),
+      ios: Boolean(nativeHost.webkit?.messageHandlers?.gymosAnnouncementBridge),
+      userAgent: navigator.userAgent
+    })) return;
     lastScheduleTick.current = Date.now();
     const interval = setInterval(() => {
       const now = new Date();
@@ -1105,12 +1120,12 @@ export default function Announcements({
           )}
           <div>
             <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>
-              {isAudioUnlocked ? 'نظام الصوت التلقائي مفعّل وجاهز' : 'تفعيل إذن التشغيل التلقائي للصوت في المتصفح'}
+              {isAudioUnlocked ? 'الصوت مسموح في هذه الجلسة' : 'تفعيل الصوت لهذه الجلسة'}
             </h4>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#cbd5e1' }}>
               {isAudioUnlocked
-                ? 'تم تهيئة بطاقة الصوت وسيتم إطلاق النداءات المجدولة بمواعيدها بدقة وبدون حظر.'
-                : 'تفرض متصفحات الويب قيود حظر التشغيل التلقائي (play() can only be initiated by a user gesture). اضغط الزر لمنح الإذن وتفعيل مشغل الخلفية.'}
+                ? 'تم السماح بالصوت في الجلسة الحالية فقط. اترك الصفحة مفتوحة وفي الواجهة؛ لا يمكن ضمان التشغيل إذا أوقف المتصفح الصفحة بالخلفية.'
+                : 'اضغط الزر لتجربة تفعيل الصوت في هذه الجلسة. المتصفح قد يمنع النداء المجدول، ولا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.'}
             </p>
           </div>
         </div>

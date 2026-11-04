@@ -93,5 +93,10 @@
     "file": "public/downloads/GymEG-Support-Android-1.0.6.apk",
     "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
     "apkSha256": "a1bc5672c5a9407b55383d3d42f3f8a5f9b8041e148d686bd817dd81521bc513"
+  },
+  "gymeg-manager-1.1.8": {
+    "file": "public/downloads/GymEG-Manager-Android-1.1.8.apk",
+    "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
+    "apkSha256": "4964d2270fd5d1e16efb8ac90a993b13f80de3a68bb65cee038925c3b1142811"
   }
 }
