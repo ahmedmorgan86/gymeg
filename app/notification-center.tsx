@@ -3,13 +3,14 @@ import {useState} from 'react';
 import {Bell,X} from 'lucide-react';
 import {usePreference} from './use-preference';
 import type {Pulse} from './lib/domain';
-import {requestNotificationPermission} from './lib/platform-alerts';
+import {requestNotificationPermission,disablePushNotifications} from './lib/platform-alerts';
 
 export type OperationNotice={id:string;text:string;scope:string};
 export type MemberMessageNotice={id:string;memberId:string;memberName:string;text:string;at:string;branch:string};
 
 export default function NotificationCenter({
   scope,
+  branch,
   ar,
   proposals,
   errors,
@@ -18,6 +19,7 @@ export default function NotificationCenter({
   onOpenCommunity
 }:{
   scope:string;
+  branch:string;
   ar:boolean;
   proposals:Pulse[];
   errors:OperationNotice[];
@@ -29,6 +31,7 @@ export default function NotificationCenter({
  const [saved,setSaved]=usePreference<string>('gymos.notifications.read.'+scope,'[]');
  let read:string[]=[];try{const value:unknown=JSON.parse(saved);if(Array.isArray(value))read=value.filter((v):v is string=>typeof v==='string').slice(-500);}catch{}
 
+ async function enableAlerts(){const result=await requestNotificationPermission(branch);setPermissionNotice(result.remote?(ar?'تم تفعيل Push لهذا الفرع؛ وصوله بالخلفية يعتمد على دعم الجهاز.':'Remote push is enabled for this branch; background delivery depends on device support.'):result.native?(result.granted?(ar?'إشعارات Android تعمل أثناء فتح التطبيق؛ Push بالخلفية يحتاج ربط Firebase.':'Android alerts work while the app runs; background push needs Firebase setup.'):ar?'اسمح بإشعارات Android ثم أعد التفعيل.':'Allow Android notifications, then enable again.'):result.granted&&!result.configured?(ar?'الإذن محفوظ لكن إعداد Push بالخادم غير مكتمل؛ التنبيه يعمل أثناء فتح التطبيق فقط.':'Permission granted but server push is not configured; foreground alerts only.'):result.granted?(ar?'تعذر تسجيل هذا الفرع. تحقق من الاتصال ثم أعد المحاولة.':'Could not register this branch. Check the connection and retry.'):result.prompted?(ar?'اختر السماح ثم أعد التفعيل.':'Allow notifications, then enable again.'):ar?'فعّل إشعارات GymEG من إعدادات الجهاز.':'Enable GymEG notifications in device settings.');}
  const msgItems=(memberMessages??[]).map(m=>({
   id:'msg:'+m.id,
   memberId:m.memberId,
@@ -75,7 +78,7 @@ export default function NotificationCenter({
      <option value="errors">{ar?'أخطاء العمليات':'Operation errors'}</option>
     </select>
     <button className="text-button" onClick={()=>mark(notices.map(n=>n.id))}>{ar?'قراءة الكل':'Mark all read'}</button>
-    <button className="text-button" onClick={()=>void requestNotificationPermission().then(result=>setPermissionNotice(result.granted?(ar?'تم تفعيل إشعارات الجهاز.':'Device notifications are enabled.'):result.prompted?(ar?'تم طلب إذن الإشعارات؛ وافق على النافذة التي ظهرت من Android.':'Notification permission was requested; approve the Android prompt.'):(ar?'فعّل إشعارات GymEG من إعدادات المتصفح أو الهاتف.':'Enable GymEG notifications in your browser or phone settings.')))}>{ar?'تفعيل تنبيهات الرسائل':'Enable message alerts'}</button>
+    <button className="text-button" onClick={()=>void enableAlerts()}>{ar?'تفعيل تنبيهات الرسائل':'Enable message alerts'}</button><button className="text-button" onClick={()=>void disablePushNotifications(branch).then(ok=>setPermissionNotice(ok?(ar?'تم إيقاف تنبيهات هذا الحساب على هذا المتصفح.':'Alerts were disabled for this account on this browser.'):(ar?'تعذر إيقاف التنبيهات الآن.':'Could not disable alerts right now.')))}>{ar?'إيقاف التنبيهات':'Disable alerts'}</button>
    </div>
    {permissionNotice&&<p role="status" className="form-note">{permissionNotice}</p>}
    <p className="form-note">{ar?'قراءة الإشعار لا توافق على أي إجراء. الأخطاء محفوظة خلال الجلسة فقط؛ حالة القراءة على هذا الجهاز.':'Reading never approves an action. Errors last for this session; read status is stored on this device.'}</p>

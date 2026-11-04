@@ -6,6 +6,8 @@ import {applyOperation,RuleError,type Operation} from '../../lib/domain';
 import {receptionPermitted} from '../../lib/access';
 import {administrator,context,readSpace,packet,reply,sameOrigin,hash} from '../../lib/server-workspace';
 import {workspaceUniqueError} from '../../lib/workspace-error';
+import {after} from 'next/server';
+import {sendCommunityPush} from '../../lib/web-push';
 export const dynamic='force-dynamic';
 export const maxDuration=300;
 export async function GET(request:Request){try{const ctx=await context();if(!ctx)return reply({error:'auth'},401);if(request.headers.has('x-gymos-tenant'))assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));return reply(packet(await readSpace(ctx.owner),ctx));}catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);return reply({error:e instanceof Error&&e.message==='forbidden'?'forbidden':'unavailable'},e instanceof Error&&e.message==='forbidden'?403:503);}}
@@ -19,5 +21,5 @@ export async function POST(request:Request){try{
  const digest=await hash(JSON.stringify(body.operation)),receipt=current.state.receipts.find(r=>r.id===ctx.user.userId+':'+body.requestId);
  if(receipt){if(receipt.digest!==digest)return reply({error:'replay'},409);return reply(packet(current,ctx));}if(body.revision!==current.revision)return reply({error:'conflict'},409);
  let state=applyOperation(current.state,body.operation,new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());if(body.operation.type==='member.save'&&!body.operation.id){const added=state.members.at(-1)!;state=applyOperation(state,{type:'card.issue',branch:body.operation.branch,id:added.id},new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());}state.receipts.push({id:ctx.user.userId+':'+body.requestId,digest});if(state.receipts.length>1000)state.receipts.shift();const payload=JSON.stringify(state);if(new TextEncoder().encode(payload).byteLength>20_000_000)return reply({error:'limit'},413);
- if(!await persistSpace(ctx.owner,current,state))return reply({error:'conflict'},409);return reply(packet({state,revision:current.revision+1},ctx));
+ if(!await persistSpace(ctx.owner,current,state))return reply({error:'conflict'},409);if(body.operation.type==='community.reply'){const target=body.operation.member,message=state.community?.messages.at(-1);if(message&&message.member===target)try{after(async()=>{try{await sendCommunityPush(ctx.owner,message.branch,'member',target,'/member',message.id);}catch{}});}catch{}}return reply(packet({state,revision:current.revision+1},ctx));
  }catch(e){const unique=workspaceUniqueError(e);if(unique)return reply({error:unique},409);if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RuleError)return reply({error:e.code},400);if(e instanceof SyntaxError||e instanceof RangeError)return reply({error:'invalid'},400);return reply({error:e instanceof Error&&e.message==='forbidden'?'forbidden':'unavailable'},e instanceof Error&&e.message==='forbidden'?403:503);}}

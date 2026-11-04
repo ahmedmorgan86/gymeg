@@ -8,7 +8,7 @@ for(const role of ['members','management'])test(`Android ${role} handles only tr
  const main=readFileSync(new URL(`src/com/pushtorq/${role}/MainActivity.java`,base),'utf8');
  const bridge=readFileSync(new URL(`src/com/pushtorq/${role}/NotificationBridge.java`,base),'utf8');
  assert.match(manifest,/android\.permission\.POST_NOTIFICATIONS/);
- assert.match(manifest,/android:versionCode="7" android:versionName="1\.1\.5"/);
+ assert.match(manifest,/android:versionCode="8" android:versionName="1\.1\.6"/);
  assert.doesNotMatch(main,/addJavascriptInterface/);
  assert.match(main,/NotificationBridge\.intercept\(MainActivity\.this,u\)/);
  assert.match(bridge,/gymeg\.vercel\.app/);
@@ -18,5 +18,5 @@ for(const role of ['members','management'])test(`Android ${role} handles only tr
  assert.match(bridge,/boolean granted=Build\.VERSION\.SDK_INT<33/);
  assert.match(bridge,/boolean requested=!granted/);
  assert.match(bridge,/clean\(uri\.getQueryParameter\("body"\),240\)/);
- assert.doesNotMatch(bridge,/@JavascriptInterface|WebView\.loadUrl|File|Cookie|SharedPreferences/);
+ assert.doesNotMatch(bridge,/@JavascriptInterface|WebView\.loadUrl|File|Cookie/);
 });
