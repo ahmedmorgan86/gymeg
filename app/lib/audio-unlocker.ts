@@ -53,6 +53,11 @@ class AudioUnlockerManager {
     return this.unlocked;
   }
 
+  public markPlaybackBlocked(): void {
+    this.unlocked = false;
+    this.notifyListeners(false);
+  }
+
   public async unlock(): Promise<boolean> {
     if (typeof window === 'undefined') return false;
 

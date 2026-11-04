@@ -25,6 +25,10 @@ public final class AnnouncementReceiver extends BroadcastReceiver {
 
         if (!ACTION_ALARM.equals(intent.getAction())) return;
 
+        // AlarmManager removes one-shot alarms after delivery. Rebuild the next
+        // occurrence from the saved rules before starting playback.
+        AnnouncementBridge.restoreAlarms(context);
+
         final String id = intent.getStringExtra("id");
         final String name = intent.getStringExtra("name");
         final String audioPath = intent.getStringExtra("audioPath");

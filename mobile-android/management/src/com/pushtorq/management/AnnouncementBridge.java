@@ -12,7 +12,12 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.File;
 import java.io.FileOutputStream;
-import java.util.Calendar;
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.temporal.ChronoUnit;
+import java.util.HashSet;
+import java.util.Set;
 
 public final class AnnouncementBridge {
     private final Context context;
@@ -28,9 +33,23 @@ public final class AnnouncementBridge {
         if (jsonString == null) return;
         try {
             SharedPreferences prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+            String previousJson = prefs.getString(KEY_SCHEDULES, null);
             prefs.edit().putString(KEY_SCHEDULES, jsonString).apply();
 
             JSONArray array = new JSONArray(jsonString);
+            Set<String> currentIds = new HashSet<>();
+            for (int i = 0; i < array.length(); i++) {
+                JSONObject item = array.optJSONObject(i);
+                if (item != null) currentIds.add(item.optString("id"));
+            }
+            if (previousJson != null) {
+                JSONArray previous = new JSONArray(previousJson);
+                for (int i = 0; i < previous.length(); i++) {
+                    JSONObject item = previous.optJSONObject(i);
+                    String oldId = item != null ? item.optString("id") : "";
+                    if (!oldId.isEmpty() && !currentIds.contains(oldId)) cancelAlarm(oldId);
+                }
+            }
             File audioDir = new File(context.getFilesDir(), "announcements_audio");
             if (!audioDir.exists()) audioDir.mkdirs();
 
@@ -44,6 +63,10 @@ public final class AnnouncementBridge {
                 boolean enabled = item.optBoolean("enabled", true);
 
                 if (id == null || id.isEmpty()) continue;
+
+                // Every sync replaces this announcement's pending alarms so removed times
+                // and old recurrence settings cannot continue firing.
+                cancelAlarm(id);
 
                 String b64 = item.optString("wavBase64");
                 File targetFile = new File(audioDir, id + ".wav");
@@ -65,7 +88,7 @@ public final class AnnouncementBridge {
                 if (times != null) {
                     for (int t = 0; t < times.length(); t++) {
                         String time = times.getString(t);
-                        scheduleAlarmForTime(id, name, time, targetFile.getAbsolutePath(), t);
+                        scheduleAlarmForTime(item, id, name, time, targetFile.getAbsolutePath(), t);
                     }
                 }
             }
@@ -94,25 +117,12 @@ public final class AnnouncementBridge {
         } catch (Exception ignored) {}
     }
 
-    private void scheduleAlarmForTime(String id, String name, String timeStr, String audioPath, int index) {
-        String[] parts = timeStr.trim().split(":");
-        if (parts.length != 2) return;
-
-        int hour = Integer.parseInt(parts[0].trim());
-        int minute = Integer.parseInt(parts[1].trim());
-
-        Calendar cal = Calendar.getInstance();
-        cal.set(Calendar.HOUR_OF_DAY, hour);
-        cal.set(Calendar.MINUTE, minute);
-        cal.set(Calendar.SECOND, 0);
-        cal.set(Calendar.MILLISECOND, 0);
-
-        if (cal.getTimeInMillis() <= System.currentTimeMillis()) {
-            cal.add(Calendar.DAY_OF_YEAR, 1);
-        }
-
+    private void scheduleAlarmForTime(JSONObject item, String id, String name, String timeStr, String audioPath, int index) {
+        long triggerAtMillis = nextOccurrenceMillis(item, timeStr);
+        if (triggerAtMillis <= 0) return;
         AlarmManager am = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
         if (am == null) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !am.canScheduleExactAlarms()) return;
 
         Intent intent = new Intent(context, AnnouncementReceiver.class);
         intent.setAction(AnnouncementReceiver.ACTION_ALARM);
@@ -120,7 +130,7 @@ public final class AnnouncementBridge {
         intent.putExtra("name", name);
         intent.putExtra("audioPath", audioPath);
 
-        int requestCode = Math.abs((id + "_" + index).hashCode());
+        int requestCode = (id + "_" + index).hashCode() & 0x7fffffff;
         PendingIntent pi = PendingIntent.getBroadcast(
                 context,
                 requestCode,
@@ -129,10 +139,60 @@ public final class AnnouncementBridge {
         );
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, cal.getTimeInMillis(), pi);
+            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi);
         } else {
-            am.setExact(AlarmManager.RTC_WAKEUP, cal.getTimeInMillis(), pi);
+            am.setExact(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi);
         }
+    }
+
+    private long nextOccurrenceMillis(JSONObject item, String timeStr) {
+        try {
+            LocalTime time = LocalTime.parse(timeStr.trim());
+            ZoneId zone;
+            try { zone = ZoneId.of(item.optString("timezone", ZoneId.systemDefault().getId())); }
+            catch (Exception ignored) { zone = ZoneId.systemDefault(); }
+            LocalDate today = LocalDate.now(zone);
+            String schedule = item.optString("schedule", "daily");
+            String startText = item.optString("startDate", "");
+            String endText = item.optString("endDate", "");
+            String onceText = item.optString("date", startText);
+            LocalDate start = startText.isEmpty() ? today : LocalDate.parse(startText);
+            LocalDate end = endText.isEmpty() ? null : LocalDate.parse(endText);
+            LocalDate once = onceText.isEmpty() ? start : LocalDate.parse(onceText);
+            int interval = Math.max(1, item.optInt("interval", 1));
+            JSONArray days = item.optJSONArray("days");
+            long now = System.currentTimeMillis();
+
+            for (int offset = 0; offset <= 3660; offset++) {
+                LocalDate date = today.plusDays(offset);
+                if (date.isBefore(start) || (end != null && date.isAfter(end))) continue;
+
+                boolean matches;
+                if ("once".equals(schedule)) {
+                    matches = date.equals(once);
+                } else if ("weekly".equals(schedule)) {
+                    matches = includesWeekday(days, date.getDayOfWeek().getValue() % 7);
+                } else if ("interval".equals(schedule)) {
+                    long elapsed = ChronoUnit.DAYS.between(start, date);
+                    matches = elapsed >= 0 && elapsed % interval == 0;
+                } else {
+                    matches = true;
+                }
+
+                if (!matches) continue;
+                long candidate = date.atTime(time).atZone(zone).toInstant().toEpochMilli();
+                if (candidate > now) return candidate;
+            }
+        } catch (Exception ignored) {}
+        return -1L;
+    }
+
+    private boolean includesWeekday(JSONArray days, int weekday) {
+        if (days == null) return false;
+        for (int i = 0; i < days.length(); i++) {
+            if (days.optInt(i, -1) == weekday) return true;
+        }
+        return false;
     }
 
     private void cancelAlarm(String id) {
@@ -141,7 +201,7 @@ public final class AnnouncementBridge {
         for (int i = 0; i < 50; i++) {
             Intent intent = new Intent(context, AnnouncementReceiver.class);
             intent.setAction(AnnouncementReceiver.ACTION_ALARM);
-            int requestCode = Math.abs((id + "_" + i).hashCode());
+            int requestCode = (id + "_" + i).hashCode() & 0x7fffffff;
             PendingIntent pi = PendingIntent.getBroadcast(
                     context,
                     requestCode,
