@@ -1,6 +1,6 @@
 # GymEG — GYM MANAGEMENT SYSTEM
 
-Arabic/English Cairo interface for Windows and web. Windows source version: 1.1.14. The portable WPF/WebView2 host uses the same Next.js interface as the website.
+Arabic/English Cairo interface for Windows and web. Windows source version: 1.1.15. The portable WPF/WebView2 host uses the same Next.js interface as the website.
 
 GymEG target origin: https://gymeg.vercel.app/. This source setting does not reserve a Vercel domain or configure Supabase Auth. Verify hosting ownership, redirects and successful sign-in before distributing the new-origin applications. See docs/GymEG_CONTINUATION_VERIFICATION_2026-10-28_AR.md for verified build results and deployment limits.
 
@@ -106,3 +106,7 @@ Latest validation:153 unit cases and31 mocked API integration cases passed;7 opt
 ## Unified member console
 
 The unified Arabic member and attendance console, global confirmed-attendance profile dialogs, historical card registry, discounts/partial payments and server-scheduled administrative checkout are documented in [docs/UNIFIED_MEMBER_CONSOLE_AR.md](docs/UNIFIED_MEMBER_CONSOLE_AR.md). Apply the matching reviewed migration before deployment. The scheduler is installed disabled and must be enabled only after the matching release is verified. Native hardware acceptance remains separate from code tests.
+
+## Club message Push alerts
+
+Member-to-club and club-to-member message alerts use tenant/branch-scoped browser Push subscriptions. Subscription payloads are AES-256-GCM encrypted before storage; chat text is never sent in the push notification. Native Android notifications use the separate Firebase project `gymeg-mobile-notifications` for Manager, Members and Support. See `docs/guides/message-notifications.md` for setup, server variables, migration, and platform boundaries. The dedicated service-account JSON is stored as a sensitive Vercel variable for production and preview; FCM sending remains inactive until this source is deployed and an Android build is installed and tested on a real device. Windows WebView background Push is unverified.

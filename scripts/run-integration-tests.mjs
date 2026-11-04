@@ -13,6 +13,8 @@ const testSuites = [
   { name: 'Engagement, SMS and device security boundaries', file: 'tests/engagement-api.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Finance, HR and manual WhatsApp role boundaries', file: 'tests/business-gap-api.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Private member conversation boundaries', file: 'tests/member-messages.integration.mjs', loader: './tests/member-messages-loader.mjs' },
+  { name: 'Web Push subscription tenant, branch and role boundaries', file: 'tests/web-push-subscriptions.integration.mjs', loader: './tests/web-push-loader.mjs' },
+  { name: 'Firebase Cloud Messaging enrollment and tenant boundaries', file: 'tests/fcm-subscriptions.integration.mjs', loader: './tests/fcm-subscriptions-loader.mjs' },
   { name: 'Manager member credential controls', file: 'tests/member-credentials.integration.mjs', loader: './tests/member-credentials-loader.mjs' },
   { name: 'Product photo privacy', file: 'tests/product-photo.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Simplified onboarding and task panels', file: 'tests/usability.integration.mjs', loader: './tests/usability-loader.mjs' },

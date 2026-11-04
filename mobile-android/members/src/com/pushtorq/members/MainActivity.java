@@ -40,7 +40,7 @@ public final class MainActivity extends Activity {
   error=new LinearLayout(this);error.setOrientation(LinearLayout.VERTICAL);error.setGravity(android.view.Gravity.CENTER);error.setPadding(40,40,40,40);error.setBackgroundColor(Color.rgb(18,16,28));
   TextView title=new TextView(this);title.setText("تعذر الاتصال بالنادي\nCheck your internet connection");title.setTextSize(21);title.setTextColor(Color.rgb(245,243,255));title.setGravity(android.view.Gravity.CENTER);error.addView(title);
   Button retry=new Button(this);retry.setText("إعادة المحاولة / Retry");retry.setOnClickListener(new View.OnClickListener(){@Override public void onClick(View v){loadHome();}});error.addView(retry);error.setVisibility(View.GONE);root.addView(error,new FrameLayout.LayoutParams(-1,-1));
-  WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setSafeBrowsingEnabled(true);settings.setSupportMultipleWindows(false);settings.setJavaScriptCanOpenWindowsAutomatically(false);settings.setMediaPlaybackRequiresUserGesture(false);settings.setUserAgentString(settings.getUserAgentString()+" GymEGMembersAndroid/1.1.5");
+  WebView.setWebContentsDebuggingEnabled(false);WebSettings settings=web.getSettings();settings.setJavaScriptEnabled(true);settings.setDomStorageEnabled(true);settings.setAllowFileAccess(false);settings.setAllowContentAccess(false);settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);settings.setSafeBrowsingEnabled(true);settings.setSupportMultipleWindows(false);settings.setJavaScriptCanOpenWindowsAutomatically(false);settings.setMediaPlaybackRequiresUserGesture(false);settings.setUserAgentString(settings.getUserAgentString()+" GymEGMembersAndroid/1.1.7");
   CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
   web.setWebChromeClient(new WebChromeClient(){@Override public void onProgressChanged(WebView v,int value){if(value==100&&splash!=null)splash.setVisibility(View.GONE);progress.setProgress(value);progress.setVisibility(value<100?View.VISIBLE:View.GONE);}});
   web.setWebViewClient(new WebViewClient(){
@@ -53,9 +53,11 @@ public final class MainActivity extends Activity {
   });
   // Never restore an externally supplied URL or save HTML/account data in the activity bundle.
   if(android.os.Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,new android.window.OnBackInvokedCallback(){@Override public void onBackInvoked(){handleBack();}});
-  loadHome();
+  refreshFcmToken();loadHome();
  }
+ private void refreshFcmToken(){try{com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token->getSharedPreferences("gymeg_fcm",MODE_PRIVATE).edit().putString("token",token).apply());}catch(Exception ignored){}}
  private void loadHome(){error.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);web.loadUrl(HOME);}
+ @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent!=null&&"com.pushtorq.members.OPEN_FCM".equals(intent.getAction()))loadHome();}
  private void showError(){if(splash!=null)splash.setVisibility(View.GONE);runOnUiThread(new Runnable(){@Override public void run(){progress.setVisibility(View.GONE);web.setVisibility(View.GONE);error.setVisibility(View.VISIBLE);}});}
  private void handleBack(){if(web!=null&&web.canGoBack())web.goBack();else finish();}
  @Override public void onBackPressed(){handleBack();}

@@ -53,6 +53,8 @@ next-env.d.ts
 /.agents/
 /.codex/
 /outputs/
+/output/
+/.pdf-deps/
 /work/
 
 /npm.cmd
@@ -105,6 +107,12 @@ next-env.d.ts
 /tests/windows-devices/obj/
 
 /mobile-android/build/
+/mobile-android/*/build/
+/mobile-android/.gradle/
+/mobile-android/local.properties
+/.android-task/
+/.firebase-private/
+/.gradle-task/
 *.p12
 
 /windows/release-gymeg/
