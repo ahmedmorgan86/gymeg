@@ -1,21 +1,21 @@
 {
-  "version": "1.1.7",
-  "versionCode": 9,
-  "url": "/downloads/GymEG-Members-Android-1.1.7.apk",
+  "version": "1.1.8",
+  "versionCode": 10,
+  "url": "/downloads/GymEG-Members-Android-1.1.8.apk",
   "package": "com.pushtorq.members",
   "origin": "https://gymeg.vercel.app",
   "home": "/member",
   "minAndroid": "8.0",
-  "sha256": "609df93bba5c33f9f9bd08475da0323eda10d4212e7d396ebb6f8d5f3e98e5a8",
+  "sha256": "b2690b644d58edfb22158847e17c230d6be2deedb1d74855168bee4d65aaeaec",
   "bytes": 3183248,
   "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
-  "builtAt": "2026-11-04T07:13:39.890Z",
+  "builtAt": "2026-11-04T12:07:59.468Z",
   "independentApplication": true,
-  "requiresReinstallFromPreviousBrand": true,
+  "requiresReinstallFromPreviousBrand": false,
   "upgradeFromCertificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "370d2828640fa52a0132924d9769a448316094c865c62c385d6573311fcc85db",
+    "AndroidManifest.xml": "7caf5d7af24c9217e8f267b11bcad1252439a90e82e7b2d1d76d37e7fe6c2aab",
     "res/drawable/ic_launcher_foreground.xml": "e6754702704a83f1369cc8b994a0b81eeddd0ccb3c27947ac70b552d868214f5",
     "res/drawable/ic_monochrome.xml": "daea45b062567a8bf38115a75a45f6bb71156fc438126a416a4c787241b41578",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -33,7 +33,7 @@
     "res/xml/data_extraction_rules.xml": "66c2d7c6ac2a3c03200235a556e0f410620cae5bdfedd4ebdf18528fcbc42886",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
     "src/com/pushtorq/members/FcmMessageService.java": "e53ec10dfa1a655bdaa868d4bc5e7518f8409368284d180d727ebf14fcdf8720",
-    "src/com/pushtorq/members/MainActivity.java": "d9fd89da605d2b69bb80319a9f82e08e518d16e3fc3a1ccad0e637913900fb82",
+    "src/com/pushtorq/members/MainActivity.java": "dc2661410eb4a8a575b925db30a77c034c721f55d4f784ea6a5565f4778d3adc",
     "src/com/pushtorq/members/NotificationBridge.java": "6db0a1af6ed76f1736289b67fc490dfed317ba0606cffafecf5a55b450b7dfac"
   }
 }

@@ -1,28 +1,35 @@
-# تطبيقات GYM OS / Mobile applications
+# تطبيقات GymEG للموبايل / GymEG mobile applications
 
-## Android
+## Android downloads
 
-- إدارة النادي1.0.0: https://gymos-enterprise.vercel.app/downloads/GymOS-Management-Android-1.0.0.apk
-- أعضاء النادي1.0.1: https://gymos-enterprise.vercel.app/downloads/GymOS-Members-Android-1.0.1.apk
-- تعليمات الإدارة: https://gymos-enterprise.vercel.app/management-install
-- تعليمات الأعضاء: https://gymos-enterprise.vercel.app/member-install
+- إدارة النادي — **1.1.9**: [تحميل APK](https://gymeg.vercel.app/downloads/GymEG-Manager-Android-1.1.9.apk)
+- الأعضاء — **1.1.8**: [تحميل APK](https://gymeg.vercel.app/downloads/GymEG-Members-Android-1.1.8.apk)
+- الدعم الفني — **1.0.7**: [تحميل APK](https://gymeg.vercel.app/downloads/GymEG-Support-Android-1.0.7.apk)
+- موقع GymEG: [gymeg.vercel.app](https://gymeg.vercel.app/)
 
-نزّل الملف وافتحه واسمح بتثبيته من المصدر الذي اخترته عند طلب Android. لا توقف حماية الهاتف. الإدارة تستخدم حساب المالك أو الموظف الحالي وصلاحياته؛ الأعضاء يستخدمون الموبايل والرقم السري. يحتاج الدخول والمزامنة إلى الإنترنت وAndroid8+ مع WebView محدث. التطبيقان مستقلان ولا يمنح التثبيت صلاحيات جديدة.
+نزّل التطبيق المطلوب وافتح الملف، واسمح بالتثبيت من المتصفح إذا طلب Android ذلك. لا توقف حماية الهاتف ولا تتجاوز تحذيرات النظام. التطبيقات الثلاثة أغلفة Android منفصلة، لكنها تعرض الواجهة الحية من موقع GymEG؛ تحتاج الإنترنت ولا تحتفظ بنسخة كاملة للعمل دون اتصال. لذلك تصل تحديثات الواجهة، ومنها تصميم الكارنيه، من الموقع عند فتح التطبيق.
 
-Download and open the APK, and allow installation from the chosen source if Android prompts. Do not disable phone security. Management uses the existing owner/staff account and permissions. Members use their mobile number and PIN. Android8+, a current WebView and internet for sign-in/sync are required. These are separate installable applications using the hosted interface, not complete offline native replacements.
+يلزم Android 8 أو أحدث وAndroid System WebView محدّث. الإدارة تستخدم حساب النادي الحالي وصلاحياته، والعضو يسجل برقم هاتفه. يفتح تطبيق الدعم واجهة الدعم المخصصة. بيانات الإصدار ورابط كل ملف وبصمة SHA-256 موجودة في ملفات JSON بجوار ملفات APK داخل `public/downloads/`.
 
-التوقيع تم بنفس مفتاح الإصدار السابق. ملفات metadata بجوار التحميل تحمل SHA256 وحجم الملف وبصمات المصدر. مفتاح التوقيع الخاص غير موجود في حزمة التسليم. لا يوجد نشر على Google Play في هذه الحزمة.
+## Android downloads (English)
 
-The original release signing identity is retained. Adjacent metadata JSON records SHA256, size and source hashes. Private signing material is excluded. This package is not a Google Play release.
+- Club management — **1.1.9**: [Download APK](https://gymeg.vercel.app/downloads/GymEG-Manager-Android-1.1.9.apk)
+- Members — **1.1.8**: [Download APK](https://gymeg.vercel.app/downloads/GymEG-Members-Android-1.1.8.apk)
+- Technical support — **1.0.7**: [Download APK](https://gymeg.vercel.app/downloads/GymEG-Support-Android-1.0.7.apk)
+- GymEG website: [gymeg.vercel.app](https://gymeg.vercel.app/)
+
+Download and open the required APK. Allow installation from that browser only if Android asks. Do not disable device security or bypass system warnings. The three Android apps are separate shells that load their live interfaces from the GymEG website. They require internet and do not provide a complete offline copy. Interface updates, including the member-card design, are served from the website when the app opens.
+
+Android 8+ and a current Android System WebView are required. Management uses the club account and its existing permissions; members sign in with their phone number; the support app opens the dedicated support interface. Version, URL and SHA-256 metadata are stored next to each APK in `public/downloads/`.
 
 ## iPhone
 
-افتح رابط الإدارة أو العضو في Safari، ثم مشاركة ← إضافة إلى الشاشة الرئيسية ← إضافة. فعّل «فتح كتطبيق ويب» إذا ظهر. افتح الأيقونة وسجّل بالحساب المناسب. هذه نسخة ويب قابلة للتثبيت، وليست IPA أو إصدار App Store. يتطلب نشر App Store مشروعًا وشهادات وحساب مطور Apple مستقلًا.
+على iPhone، افتح [GymEG](https://gymeg.vercel.app/) في Safari، ثم اختر مشاركة ← إضافة إلى الشاشة الرئيسية. هذه نسخة ويب قابلة للتثبيت وليست ملف IPA أو إصدار App Store.
 
-Open the relevant management/member link in Safari, choose Share → Add to Home Screen → Add, and enable Open as Web App if shown. Launch the icon and sign in with the appropriate account. This is an installable web app, not an IPA or App Store release. App Store distribution requires a separate Apple developer account, signing and project.
+On iPhone, open [GymEG](https://gymeg.vercel.app/) in Safari, then choose Share → Add to Home Screen. This is an installable web app, not an IPA or App Store release.
 
-## قبول التسليم / Acceptance
+## Signing and verification
 
-تم بناء ملفات APK وفحص توقيعها وتطابق المصدر والروابط. لم تُجرَ تجربة تثبيت فعلية جديدة على Android/iPhone في هذه الدفعة. اختبر الدخول، الفرع والصلاحيات، ظهور بيانات عضو مصرح، الكارت وQR، العودة من الخلفية وتحديث النسخة على هاتف حقيقي قبل الاعتماد التجاري.
+إصدارات Android الحالية تحتفظ بشهادة التوقيع نفسها للإصدارات السابقة، لذا يمكن تثبيتها كتحديث فوق التطبيق الحالي. بصمات الشهادة والملفات موجودة في `docs/identity/android-signing-certificates.json`. مفتاح التوقيع وكلمة مروره مستبعدان من حزم التسليم العامة. تم بناء نسخ Release الثلاث وفحص توقيعها ومحاذاتها؛ لم يتم اختبار تثبيت هذه الإصدارات الجديدة على هاتف فعلي أو التحقق من وصول Push عليها.
 
-APK compilation/signature/source/link checks are complete. A fresh physical Android/iPhone installation was not performed in this delivery. Accept sign-in, branch/role boundaries, authorized member records, pass/QR, background/resume and upgrades on actual phones before commercial reliance.
+The current Android releases retain the same signing certificate as their predecessors, so they can update the existing apps in place. Certificate and APK fingerprints are recorded in `docs/identity/android-signing-certificates.json`. The private signing key and password are excluded from public delivery bundles. All three release APKs were built and their signatures/alignment verified; physical installation and push delivery were not tested for these new versions.

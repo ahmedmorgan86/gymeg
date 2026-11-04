@@ -1,21 +1,31 @@
 # تطبيق الأعضاء Android / Android members app
 
-افتح https://gymos-enterprise.vercel.app/about أو واجهة GYM OS الرئيسية من هاتف Android، واضغط «تحميل تطبيق الأعضاء — Android APK». افتح GymOS-Members-Android-1.0.0.apk ووافق على تثبيت هذا الملف من المتصفح إذا طلب Android ذلك. لا يلزم تعطيل Play Protect، ولا تتجاوز تحذير ملف ضار.
+## التحميل والاستخدام
 
-يلزم Android 8.0 أو أحدث وAndroid System WebView محدث واتصال بالإنترنت. افتح GYM OS Members، ثم أدخل رقم الموبايل المسجل لدى النادي. تقبل الأرقام المصرية 01… أو الدولية +رمز الدولة، والأرقام العربية.
+حمّل [GymEG — الأعضاء Android 1.1.8](https://gymeg.vercel.app/downloads/GymEG-Members-Android-1.1.8.apk) من موقع [GymEG](https://gymeg.vercel.app/)، وافتح الملف واسمح بتثبيته من المتصفح إذا طلب Android ذلك. لا توقف Play Protect ولا تتجاوز تحذيرًا أمنيًا.
 
-أول دخول بالرقم الافتراضي 123456، ثم اختر رقمًا جديدًا خاصًا من 6 أرقام وكرره. لن تُعرض بياناتك قبل تغييره. يمكنك تغييره لاحقًا من داخل الحساب. الرقم الشخصي لا يمكن للإدارة عرضه؛ يمكن للمالك أو المدير إعادة تعيينه إلى 123456، مع إبطال الجلسات وإلزام تغييره مجددًا. لا توجد رسائل بريد أو SMS للتفعيل.
+يلزم Android 8 أو أحدث وAndroid System WebView محدّث واتصال بالإنترنت. التطبيق غلاف Android يفتح بوابة العضو الحية على `https://gymeg.vercel.app/member`؛ واجهة التطبيق والكارت تتحدث من الموقع، لكن التطبيق ليس قاعدة محلية كاملة ولا يعمل دون إنترنت.
 
-الرقم الافتراضي مشترك ومعروف ولا يثبت ملكية الهاتف. من يعرف رقم عضو لم يفعّل حسابه يمكنه محاولة حجز الدخول الأول؛ يفضل إتمام التفعيل الأول مع العضو في النادي. منع ذلك بالكامل يتطلب عامل تفعيل خاصًا أو OTP، ولم تُشغّل خدمة رسائل مدفوعة.
+يسجل العضو برقم الهاتف المسجل لدى النادي. في أول دخول يستخدم الرقم السري الافتراضي 123456 ثم يختار رقمًا شخصيًا من 6 أرقام. يستطيع المالك أو المدير إعادة تعيينه إلى الرقم الافتراضي بناء على طلب العضو، وبعدها يختار العضو رقمًا جديدًا. لا يمكن للإدارة قراءة الرقم الشخصي الحالي. لا يرسل التطبيق رسالة بريد أو SMS للتفعيل.
 
-افتح كارتك لعرض QR والباركود لقارئ النادي. فتح التطبيق أو الكارت وحده لا يسجل حضورًا. اسم وأيقونة المشغّل GYM OS Members؛ اسم وشعار النادي يظهران داخل حسابه. التطبيق غلاف Android محدود لمساحة العضو الحية، وليس قاعدة مستقلة دون إنترنت أو تطبيقًا منشورًا في Google Play.
+يعرض ملف العضو بيانات النادي وصورته وقياساته المتاحة وQR والباركود لتسجيل الحضور. إظهار الكارت لا يسجل الحضور وحده؛ يلزم مسح الرمز عند نقطة الدخول. تُطبّق صلاحيات النادي والفرع على بيانات العضو.
 
-Download from the GYM OS main dashboard or the Arabic/English public site. The member portal contains no installation instructions or APK download controls. Open the APK and authorize that specific browser installation if Android requests it. Do not disable Play Protect or bypass a malware warning. Android 8+, current System WebView and internet are required. Sign in with the saved mobile and temporary PIN 123456, then choose a different six-digit PIN before viewing records. Member-chosen PINs cannot be revealed to staff; owners/managers can reset to the temporary PIN. No email/SMS activation is sent.
+## Download and use
 
-This signed APK is a restricted WebView of the live member portal, not an offline native database or a Google Play release. Launcher branding is GYM OS Members; club branding appears in the account. The production domain is pinned; independent hosting needs rebuilding. Keep the SAME private signing key for updates and increase versionCode. Never publish the keystore/password in source or club packages.
+Download [GymEG Members for Android 1.1.8](https://gymeg.vercel.app/downloads/GymEG-Members-Android-1.1.8.apk) from the [GymEG website](https://gymeg.vercel.app/). Open the APK and allow installation from that browser if requested by Android. Do not disable Play Protect or bypass a security warning.
 
-Verification: compiled APK, v2/v3 signatures, SHA-256, manifest and DEX/resources were checked. Browser/API/database checks cover phone/PIN login, initial-PIN data blocking, PIN change, membership selection and tenant isolation. Physical Android installation, keyboard/lifecycle and OEM WebView behavior remain unverified in this session. Test on the customer's phone before commercial rollout.
+Android 8+, a current Android System WebView and internet access are required. The Android app is a shell for the live member portal at `https://gymeg.vercel.app/member`. Its interface and membership pass are served by the website; it is not a full local database and does not work offline.
 
-Known limitation: the public initial PIN permits first-claim takeover of an unclaimed account by someone knowing its phone number. Club-supervised activation is advised; prevention requires a private activation factor or OTP. No SMS-provider charge was introduced.
+Members sign in with the phone number registered by their club. On first sign-in, use the default PIN `123456`, then choose a personal six-digit PIN. An owner or manager can reset it to the default at the member's request; the member must then choose a new PIN. Staff cannot read the current personal PIN. Account activation does not send email or SMS.
 
-Release signing certificate SHA-256: 6b70cd2aa1e6f6a71189aae8bcfcef4a4409488625083883622736b818160801.
+The member profile shows club data, available photos and measurements, and the QR/barcode used for attendance. Opening the pass alone does not check in the member; the code must be scanned at the entrance. Club and branch permissions scope the displayed data.
+
+## الإصدار والتوقيع / Version and signing
+
+الإصدار الحالي 1.1.8 (versionCode 10). يحتفظ بشهادة التوقيع نفسها للإصدار السابق 1.1.7، لذلك يمكن تثبيته كتحديث فوقه. بصمة الملف والشهادة في `public/downloads/gymeg-members-android.json` و`docs/identity/android-signing-certificates.json`. مفتاح التوقيع وكلمة مروره لا يوجدان في حزمة المصدر العامة.
+
+Current release: 1.1.8 (versionCode 10). It retains the signing certificate from 1.1.7 and can update that version in place. APK and certificate fingerprints are in `public/downloads/gymeg-members-android.json` and `docs/identity/android-signing-certificates.json`. The private signing key and password are not included in the public source bundle.
+
+تم بناء APK وفحص توقيعه ومحاذاته؛ لم يتم تثبيت هذا الإصدار على هاتف فعلي في هذه الدفعة. اختبر تسجيل الدخول والكارت والـQR واستئناف التطبيق على جهاز النادي قبل الاعتماد التشغيلي.
+
+The APK was built and its signature and alignment were verified. This version was not installed on a physical phone in this delivery. Verify sign-in, the pass/QR, and app resume on the club's device before operational use.

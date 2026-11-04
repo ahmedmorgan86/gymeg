@@ -8,9 +8,9 @@ const repo=path.resolve(root,'..');
 const cert=(process.env.GYMEG_ANDROID_CERT_SHA256??'').replaceAll(':','').toLowerCase();
 if(!/^[a-f0-9]{64}$/.test(cert))throw Error('Set GYMEG_ANDROID_CERT_SHA256 to the verified signing certificate fingerprint.');
 const apps=[
- {role:'management',folder:'management',module:'manager',name:'Manager',version:'1.1.8',versionCode:10,package:'com.pushtorq.management',home:'/clubs'},
- {role:'members',folder:'members',module:'members',name:'Members',version:'1.1.7',versionCode:9,package:'com.pushtorq.members',home:'/member'},
- {role:'support',folder:'../android-support',module:'support',name:'Support',version:'1.0.6',versionCode:7,package:'com.gymos.support',home:'/support-login'}
+ {role:'management',folder:'management',module:'manager',name:'Manager',version:'1.1.9',versionCode:11,package:'com.pushtorq.management',home:'/clubs'},
+ {role:'members',folder:'members',module:'members',name:'Members',version:'1.1.8',versionCode:10,package:'com.pushtorq.members',home:'/member'},
+ {role:'support',folder:'../android-support',module:'support',name:'Support',version:'1.0.7',versionCode:8,package:'com.gymos.support',home:'/support-login'}
 ];
 const requestedRole=process.argv[2];
 if(requestedRole&&!apps.some(app=>app.role===requestedRole))throw Error('Optional release target must be management, members, or support.');
