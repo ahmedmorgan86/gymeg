@@ -2,6 +2,18 @@
 
 Arabic/English Cairo interface for Windows and web. Windows source version: 1.1.15. The portable WPF/WebView2 host uses the same Next.js interface as the website.
 
+## Current deliverables — 5 November 2026
+
+| Application | Current source/download version | What it is |
+|---|---:|---|
+| GymEG Desktop | 1.1.15 | Windows WPF/WebView2 host; requires internet and WebView2 Runtime |
+| GymEG Manager | Android 1.1.9 | Signed WebView application for club management |
+| GymEG Members | Android 1.1.8 | Signed WebView application for members |
+| GymEG Support | Android 1.0.7 | Signed WebView application for platform support |
+| iPhone roles | Web app | Install the role-specific website through Safari; no IPA/App Store build |
+
+Versioned APK metadata and file hashes are under `public/downloads/`. `npm run release:check` verifies the current Android manifests, metadata, APK hashes and Windows source version. All three Android apps include the Firebase messaging integration; production credentials and actual device delivery are separate acceptance checks. APKs and the Windows executable have not received complete physical-device acceptance in this source review.
+
 GymEG target origin: https://gymeg.vercel.app/. This source setting does not reserve a Vercel domain or configure Supabase Auth. Verify hosting ownership, redirects and successful sign-in before distributing the new-origin applications. See docs/GymEG_CONTINUATION_VERIFICATION_2026-10-28_AR.md for verified build results and deployment limits.
 
 ## Product access
@@ -32,7 +44,7 @@ Operational backups do not move Auth passwords, staff invitations/grants or devi
 
 Normalized entities/photos are stored separately in PostgreSQL, but current read/validation paths reconstruct complete club state and use a workspace revision. Entitlement limits are not load-test capacity promises.
 
-## Windows 1.1.9
+## Windows 1.1.15
 
 Windows 10/11 x64, self-contained .NET 10, requires official Microsoft Edge WebView2 Runtime. Portable executable; no code signing or automatic updater is provided.
 
@@ -64,11 +76,11 @@ The private start_public_trial function is the narrow, audited write boundary: i
 
 Windows 1.1.6 also saves a DPAPI-protected local first-trial receipt. It never extends the earlier deadline, counts elapsed calendar time while closed, rejects material clock rollback and checks local time against the server at activation. The server remains authoritative; this is not tamper-proof offline DRM against a machine administrator or a new identity. Local receipts are scoped to the Windows profile; reinstalling does not reset the existing account's server claim.
 
-## Provider music - Windows1.1.9 and web
+## Provider music - Windows 1.1.15 and web
 
 External platforms open their actual canonical site in a separate small window. Windows uses a480x680 isolated provider window; web requests a popup with a direct-link fallback. No embedded preview-player fallback remains in the music UI. Local audio stays inside GymEG. Sign in with the provider account in its own window; region, subscription and DRM support determine full playback. No provider restriction is bypassed or full-track playback certified.
 
-Autoplay prompts are limited to supported provider hosts. The web app cannot duck audio in another provider window; announcements and provider volume need actual device acceptance. Windows speech stops its provider window. Use Windows1.1.9 so the host matches the current UI contract.
+Autoplay prompts are limited to supported provider hosts. The web app cannot duck audio in another provider window; announcements and provider volume need actual device acceptance. Windows speech stops its provider window. Use Windows 1.1.15 so the host matches the current UI contract.
 
 ## Release 1.1.8 — member services and operational reports
 
@@ -95,17 +107,17 @@ Interactive member UI preview: /member-preview uses only a fictional, determinis
 The signed direct-download APK and its checksum metadata are in `public/downloads/`. The main staff app and public Arabic/English site link to the APK and download QR; the member space intentionally contains no installation/download instructions. Android source/build instructions are in `android/`; installation and verification limits are in `docs/ANDROID_MEMBER_APP_AR_EN.md`. Members sign in with their saved mobile and initial PIN 123456, then must change it before viewing records. First-claim risks of a shared default are documented in `docs/MEMBER_APP_CONNECTED_AR_EN.md`. Never publish the private signing keystore/password.
 
 
-## Release1.1.9 - current operations and member experience
+## Historical baseline: Release 1.1.9 — later updates may change these details
 
 See docs/GYMAWY_FEATURE_GAP_2026-10-25_AR_EN.md for the evidence matrix and remaining gaps. Current additions include branch cash shifts/expenses/supplier purchasing, HR duty/leave/payroll, day passes, competitions, manual WhatsApp templates, private member conversations, editable membership/class prices, confirmed-attendance profile popups, required PIN changes and private product images/commercial details. New fields are optional tenant metadata; no new SQL migration is needed for this release. Keep the existing base/commercial/auth migrations correctly installed.
 
 The member mobile UI adds a daily dashboard, current-term days, weekly attendance, next confirmed class, private balance and direct pass/program/chat actions, with six accessible navigation destinations and expandable workout days. Offline labels identify stale last-refresh information; phone/PIN authentication is unchanged. Android apps are signed WebView shells loading the hosted interface; the current package versions are listed below.
 
-### Android release — 4 November 2026
+### Android release — 4 November 2026 (historical release notes)
 
 The current signed WebView releases are Manager 1.1.9, Members 1.1.8 and Support 1.0.7. Each loads its role-specific interface from `https://gymeg.vercel.app`; card and web-interface changes are served from the live site. APK signing certificate remains unchanged from the preceding Android releases. Release metadata and SHA-256 values are in `public/downloads/*-android.json`; physical-device installation and push delivery were not re-tested for this release. See `docs/MOBILE_APPS_AR_EN.md` and `docs/identity/SIGNING_AR.md`.
 
-Latest validation:153 unit cases and31 mocked API integration cases passed;7 optional connected-database cases skipped. Typecheck, lint, Next build, production dependency audit and Windows build/branding/music-policy tests passed. Six bilingual manuals total87pages. Logs and acceptance limits: docs/verification/2026-10-25-release119. Real provider/device, customer database/load/restore, fresh physical APK install and independent security acceptance remain outstanding. Internal tickets are not a central staffed helpdesk; statutory payroll, staff sales commissions and advanced cross-branch entitlement policies are not certified complete.
+The validation counts and logs in `docs/verification/2026-10-25-release119` describe that historical release only. They are not evidence that the current source or current APKs passed the same checks. See `docs/COMMERCIAL_READINESS_2026-11-05_AR.md` for the latest scoped review and explicitly unverified acceptance items.
 
 ## Unified member console
 
@@ -113,4 +125,4 @@ The unified Arabic member and attendance console, global confirmed-attendance pr
 
 ## Club message Push alerts
 
-Member-to-club and club-to-member message alerts use tenant/branch-scoped browser Push subscriptions. Subscription payloads are AES-256-GCM encrypted before storage; chat text is never sent in the push notification. Native Android notifications use the separate Firebase project `gymeg-mobile-notifications` for Manager, Members and Support. See `docs/guides/message-notifications.md` for setup, server variables, migration, and platform boundaries. The dedicated service-account JSON is stored as a sensitive Vercel variable for production and preview; FCM sending remains inactive until this source is deployed and an Android build is installed and tested on a real device. Windows WebView background Push is unverified.
+Member-to-club and club-to-member message alerts use tenant/branch-scoped browser Push subscriptions. Subscription payloads are AES-256-GCM encrypted before storage; chat text is never sent in the push notification. Native Android notifications use the separate Firebase project `gymeg-mobile-notifications` for Manager, Members and Support. See `docs/guides/message-notifications.md` for setup, server variables, migration, and platform boundaries. The production site currently runs commit `c5d0fdc`; source integration and production deployment do not prove delivery on a physical device. Android notification permission, token registration, closed-app delivery, iOS PWA behavior, and Windows background Push still require acceptance testing on real devices. Do not treat this as verified push delivery.

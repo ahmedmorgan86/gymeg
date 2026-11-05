@@ -27,6 +27,8 @@ jobs:
       - run: npm test
       - name: Integration tests
         run: npm run test:integration
+      - name: Verify published app version and APK checksums
+        run: npm run release:check
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=low
       - name: Verify Android release signatures and original publisher
