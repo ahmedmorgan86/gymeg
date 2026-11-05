@@ -1,18 +1,18 @@
 # GymEG — GYM MANAGEMENT SYSTEM
 
-Arabic/English Cairo interface for Windows and web. Windows source version: 1.1.15. The portable WPF/WebView2 host uses the same Next.js interface as the website.
+Arabic/English Cairo interface for Windows and web. Windows source version: 1.1.15. The latest verified public Windows download is 1.1.14; the website advertises and serves that package until 1.1.15 is published. The portable WPF/WebView2 host uses the same Next.js interface as the website.
 
 ## Current deliverables — 5 November 2026
 
 | Application | Current source/download version | What it is |
 |---|---:|---|
-| GymEG Desktop | 1.1.15 | Windows WPF/WebView2 host; requires internet and WebView2 Runtime |
+| GymEG Desktop | Download 1.1.14 · source candidate 1.1.15 | Windows WPF/WebView2 host; requires internet and WebView2 Runtime |
 | GymEG Manager | Android 1.1.9 | Signed WebView application for club management |
 | GymEG Members | Android 1.1.8 | Signed WebView application for members |
 | GymEG Support | Android 1.0.7 | Signed WebView application for platform support |
 | iPhone roles | Web app | Install the role-specific website through Safari; no IPA/App Store build |
 
-Versioned APK metadata and file hashes are under `public/downloads/`. `npm run release:check` verifies the current Android manifests, metadata, APK hashes and Windows source version. All three Android apps include the Firebase messaging integration; production credentials and actual device delivery are separate acceptance checks. APKs and the Windows executable have not received complete physical-device acceptance in this source review.
+Versioned APK metadata and file hashes are under `public/downloads/`. `npm run release:check` verifies the current Android manifests, metadata, APK hashes, Windows source candidate and separately advertised Windows download version. All three Android apps include the Firebase messaging integration; production credentials and actual device delivery are separate acceptance checks. APKs and the Windows executable have not received complete physical-device acceptance in this source review.
 
 GymEG target origin: https://gymeg.vercel.app/. This source setting does not reserve a Vercel domain or configure Supabase Auth. Verify hosting ownership, redirects and successful sign-in before distributing the new-origin applications. See docs/GymEG_CONTINUATION_VERIFICATION_2026-10-28_AR.md for verified build results and deployment limits.
 
@@ -44,7 +44,7 @@ Operational backups do not move Auth passwords, staff invitations/grants or devi
 
 Normalized entities/photos are stored separately in PostgreSQL, but current read/validation paths reconstruct complete club state and use a workspace revision. Entitlement limits are not load-test capacity promises.
 
-## Windows 1.1.15
+## Windows download 1.1.14 · source candidate 1.1.15
 
 Windows 10/11 x64, self-contained .NET 10, requires official Microsoft Edge WebView2 Runtime. Portable executable; no code signing or automatic updater is provided.
 
@@ -80,7 +80,7 @@ Windows 1.1.6 also saves a DPAPI-protected local first-trial receipt. It never e
 
 External platforms open their actual canonical site in a separate small window. Windows uses a480x680 isolated provider window; web requests a popup with a direct-link fallback. No embedded preview-player fallback remains in the music UI. Local audio stays inside GymEG. Sign in with the provider account in its own window; region, subscription and DRM support determine full playback. No provider restriction is bypassed or full-track playback certified.
 
-Autoplay prompts are limited to supported provider hosts. The web app cannot duck audio in another provider window; announcements and provider volume need actual device acceptance. Windows speech stops its provider window. Use Windows 1.1.15 so the host matches the current UI contract.
+Autoplay prompts are limited to supported provider hosts. The web app cannot duck audio in another provider window; announcements and provider volume need actual device acceptance. Windows speech stops its provider window. The source candidate is 1.1.15; the downloadable executable remains 1.1.14 until the 1.1.15 release asset is published and verified.
 
 ## Release 1.1.8 — member services and operational reports
 

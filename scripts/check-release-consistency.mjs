@@ -33,5 +33,12 @@ for (const release of releases) {
 }
 
 const windowsProject = await readFile(path.join(root, 'windows/GymOS.Windows.csproj'), 'utf8');
-assert.match(windowsProject, /<Version>1\.1\.15<\/Version>/, 'Windows project version differs from the current release record');
-console.log('Windows: 1.1.15');
+const windowsRelease = await readFile(path.join(root, 'app/lib/windows-release.ts'), 'utf8');
+const sourceVersion = /<Version>([^<]+)<\/Version>/.exec(windowsProject)?.[1];
+const publishedVersion = /windowsVersion='([^']+)'/.exec(windowsRelease)?.[1];
+const candidateVersion = /windowsSourceVersion='([^']+)'/.exec(windowsRelease)?.[1];
+assert.ok(sourceVersion, 'Windows project version is missing');
+assert.equal(candidateVersion, sourceVersion, 'Windows candidate differs from the current source project');
+assert.ok(publishedVersion, 'Verified downloadable Windows version is missing');
+assert.match(windowsRelease, /windows-\$\{windowsVersion\}\/GymEG-Windows-x64-\$\{windowsVersion\}\.exe/, 'Fallback download URL must be built from the version advertised on the website');
+console.log(`Windows: source ${sourceVersion}; verified published download ${publishedVersion}`);
