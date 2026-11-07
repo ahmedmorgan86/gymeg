@@ -16,12 +16,15 @@ public sealed class AnnouncementScheduler : IDisposable {
   private readonly object SyncRoot = new();
 
   private readonly HashSet<string> FiredOccurrences = new();
+  private readonly HashSet<string> ReportedScheduleErrors = new();
   private List<ScheduledItem> Items = new();
+  private DateTimeOffset _previousTickUtc;
 
   public sealed class ScheduledItem {
     public string Id { get; set; } = "";
     public string Name { get; set; } = "";
     public string Branch { get; set; } = "";
+    public string Timezone { get; set; } = "";
     public string Schedule { get; set; } = "daily"; // daily, weekly, once, interval
     public List<int> Days { get; set; } = new();
     public List<string> Times { get; set; } = new();
@@ -93,6 +96,7 @@ public sealed class AnnouncementScheduler : IDisposable {
             Id = itemElem.GetProperty("id").GetString() ?? Guid.NewGuid().ToString(),
             Name = itemElem.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
             Branch = itemElem.TryGetProperty("branch", out var b) ? b.GetString() ?? "" : "",
+            Timezone = itemElem.TryGetProperty("timezone", out var tz) ? tz.GetString() ?? "" : "",
             Schedule = itemElem.TryGetProperty("schedule", out var s) ? s.GetString() ?? "daily" : "daily",
             Interval = itemElem.TryGetProperty("interval", out var inv) && inv.TryGetInt32(out var iVal) ? iVal : 1,
             Enabled = !itemElem.TryGetProperty("enabled", out var en) || en.GetBoolean()
@@ -136,6 +140,10 @@ public sealed class AnnouncementScheduler : IDisposable {
         }
 
         Items = nextItems;
+        lock (SyncRoot) {
+          var currentIds = nextItems.Select(item => item.Id).ToHashSet(StringComparer.Ordinal);
+          ReportedScheduleErrors.RemoveWhere(id => !currentIds.Contains(id));
+        }
         PersistSchedules();
         ReportStatus("تمت مزامنة النداءات المجدولة محليًا (" + Items.Count + ")");
       } catch (Exception ex) {
@@ -183,39 +191,37 @@ public sealed class AnnouncementScheduler : IDisposable {
 
     if (currentList.Length == 0) return;
 
-    var now = DateTime.Now;
-    var todayStr = now.ToString("yyyy-MM-dd");
-    var timeStr = now.ToString("HH:mm");
-    int dayOfWeek = (int)now.DayOfWeek;
+    DateTimeOffset nowUtc;
+    IReadOnlyList<DateTimeOffset> samples;
+    lock (SyncRoot) {
+      nowUtc = DateTimeOffset.UtcNow;
+      samples = AnnouncementScheduleClock.Samples(nowUtc, _previousTickUtc);
+      _previousTickUtc = nowUtc;
+    }
 
     foreach (var item in currentList) {
       if (!item.Enabled) continue;
       if (string.IsNullOrEmpty(item.AudioFile) || !File.Exists(item.AudioFile)) continue;
-
-      bool matchesTime = item.Times.Any(t => NormalizeTime(t) == timeStr);
-      if (!matchesTime) continue;
-
-      string occurrenceKey = $"{item.Id}|{todayStr}|{timeStr}";
-      lock (SyncRoot) {
-        if (FiredOccurrences.Contains(occurrenceKey)) continue;
+      if (string.IsNullOrWhiteSpace(item.Timezone)) {
+        ReportScheduleErrorOnce(item.Id, "لم يُشغّل النداء «" + item.Name + "»: المنطقة الزمنية للنادي غير محددة. افتح إعدادات النادي ثم أعد حفظ الجدول.");
+        continue;
       }
 
-      if (!string.IsNullOrEmpty(item.StartDate) && string.CompareOrdinal(todayStr, item.StartDate) < 0) continue;
-      if (!string.IsNullOrEmpty(item.EndDate) && string.CompareOrdinal(todayStr, item.EndDate) > 0) continue;
-
-      bool shouldFire = false;
-      if (item.Schedule == "daily") shouldFire = true;
-      else if (item.Schedule == "weekly") shouldFire = item.Days.Contains(dayOfWeek);
-      else if (item.Schedule == "once") shouldFire = (item.Date ?? item.StartDate) == todayStr;
-      else if (item.Schedule == "interval") {
-        if (DateTime.TryParse(item.StartDate ?? todayStr, out var startDt)) {
-          int diffDays = (int)(now.Date - startDt.Date).TotalDays;
-          if (diffDays >= 0 && diffDays % Math.Max(1, item.Interval) == 0) shouldFire = true;
+      foreach (var instant in samples) {
+        AnnouncementScheduleClock.Sample local;
+        try { local = AnnouncementScheduleClock.InClubTime(instant, item.Timezone); }
+        catch (TimeZoneNotFoundException) {
+          ReportScheduleErrorOnce(item.Id, "لم يُشغّل النداء «" + item.Name + "»: المنطقة الزمنية غير معروفة: " + item.Timezone);
+          break;
+        } catch (InvalidTimeZoneException) {
+          ReportScheduleErrorOnce(item.Id, "لم يُشغّل النداء «" + item.Name + "»: إعداد المنطقة الزمنية غير صالح.");
+          break;
         }
-      }
 
-      if (shouldFire) {
+        if (!AnnouncementScheduleClock.IsDue(item.Schedule, item.Days, item.Times, item.Date, item.StartDate, item.EndDate, item.Interval, local)) continue;
+        string occurrenceKey = $"{item.Id}|{local.Date:yyyy-MM-dd}|{local.Time:HH:mm}";
         lock (SyncRoot) {
+          if (FiredOccurrences.Contains(occurrenceKey)) continue;
           FiredOccurrences.Add(occurrenceKey);
         }
         _ = Task.Run(() => {
@@ -230,9 +236,11 @@ public sealed class AnnouncementScheduler : IDisposable {
     }
   }
 
-  private static string NormalizeTime(string t) {
-    var parts = t.Trim().Split(':');
-    return parts.Length == 2 ? $"{parts[0].PadLeft(2, '0')}:{parts[1].PadLeft(2, '0')}" : t;
+  private void ReportScheduleErrorOnce(string id, string message) {
+    lock (SyncRoot) {
+      if (!ReportedScheduleErrors.Add(id)) return;
+    }
+    ReportStatus(message);
   }
 
   private void PlayAudioInternal(string id, string name, byte[] wavBytes, bool isScheduled) {

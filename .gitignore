@@ -105,6 +105,8 @@ next-env.d.ts
 
 /tests/windows-devices/bin/
 /tests/windows-devices/obj/
+/tests/windows-announcement-scheduler/bin/
+/tests/windows-announcement-scheduler/obj/
 
 /mobile-android/build/
 /mobile-android/*/build/
