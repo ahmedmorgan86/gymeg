@@ -44,12 +44,17 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Native inventory classification and bridge boundaries
         run: dotnet run --project tests/windows-devices/DevicesSmoke.csproj -c Release
+      - name: Verify announcement schedules use club timezone and recover short timer delays
+        run: dotnet run --project tests/windows-announcement-scheduler/AnnouncementScheduleSmoke.csproj -c Release
       - name: Windows desktop build
         run: dotnet build windows/GymOS.Windows.csproj -c Release
       - name: Publish GYMEG Windows package
         run: dotnet publish windows/GymOS.Windows.csproj -c Release -r win-x64 --self-contained true -p:EnableCompressionInSingleFile=true -o windows/gymeg-release
+      # PRs still build the Windows app, but the 60+ MB package is only kept for
+      # main releases or an explicit manual run to avoid exhausting artifact storage.
       - uses: actions/upload-artifact@v4
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         with:
           name: GYMEG-Windows-x64
           path: windows/gymeg-release/
-          retention-days: 30
+          retention-days: 7

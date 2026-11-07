@@ -1,7 +1,7 @@
 /** The latest Windows package verified as publicly downloadable. */
 export const windowsVersion='1.1.14';
 /** Newer source candidate; only serve after its GitHub release and asset are public. */
-export const windowsSourceVersion='1.1.15';
+export const windowsSourceVersion='1.1.16';
 export const windowsCurrent=`https://github.com/ahmedmorgan86/gymeg/releases/download/windows-${windowsSourceVersion}/GymEG-Windows-x64-${windowsSourceVersion}.exe`;
 export const windowsPrevious=`https://github.com/ahmedmorgan86/gymeg/releases/download/windows-${windowsVersion}/GymEG-Windows-x64-${windowsVersion}.exe`;
 export async function windowsDownload(fetcher:typeof fetch=fetch){
