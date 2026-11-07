@@ -52,8 +52,10 @@ jobs:
         run: dotnet publish windows/GymOS.Windows.csproj -c Release -r win-x64 --self-contained true -p:EnableCompressionInSingleFile=true -o windows/gymeg-release
       # PRs still build the Windows app, but the 60+ MB package is only kept for
       # main releases or an explicit manual run to avoid exhausting artifact storage.
-      - uses: actions/upload-artifact@v4
+      - name: Upload Windows package (storage may be recalculating)
+        uses: actions/upload-artifact@v4
         if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        continue-on-error: true
         with:
           name: GYMEG-Windows-x64
           path: windows/gymeg-release/
