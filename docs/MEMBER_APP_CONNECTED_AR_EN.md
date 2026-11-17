@@ -1,14 +1,16 @@
 # تطبيق الأعضاء المرتبط — الدخول برقم الموبايل / Connected member app — mobile sign-in
 
-يفتح العضو https://gymos-enterprise.vercel.app/member، ويكتب رقم الموبايل المسجل في ملفه والرقم السري الافتراضي 123456 عند أول دخول؛ ثم يختار رقمًا خاصًا من 6 أرقام قبل عرض بياناته. لا يلزم بريد إلكتروني أو تأكيد بريد. رقم الموبايل وحده ليس تصريح دخول. تدعم الواجهة العربية والإنجليزية والأرقام العربية، والأرقام المصرية المحلية 01… أو الدولية مع +رمز الدولة.
+> تحديث 17 نوفمبر 2026: لم يعد هناك رقم سري افتراضي مشترك. تفاصيل الترحيل والتشغيل في `docs/MEMBER_PIN_SECURITY_2026-11-17_AR_EN.md`.
+
+يفتح العضو https://gymos-enterprise.vercel.app/member، ويكتب رقم الموبايل المسجل في ملفه والرقم السري المؤقت الخاص به الذي يولّده النظام لكل عضو؛ ثم يختار رقمًا خاصًا من 6 أرقام قبل عرض بياناته. لا يلزم بريد إلكتروني أو تأكيد بريد. رقم الموبايل وحده ليس تصريح دخول. تدعم الواجهة العربية والإنجليزية والأرقام العربية، والأرقام المصرية المحلية 01… أو الدولية مع +رمز الدولة.
 
 كل عضو حقيقي غير مؤرشف له رقم موبايل صحيح يحصل تلقائيًا على دخول عند الحفظ أو الاستيراد أو الاستعادة. الأعضاء الحاليون يُجهزون عند الترحيل. من ملف العضو، يختار المالك أو المدير «عرض بيانات دخول العضو» ويسلم التعليمات للعضو نفسه. الرقم الناقص أو غير الصحيح يحتاج تعديلًا قبل الدخول. لا نستخدم آخر أرقام الهاتف أو سيريال الكارت كرقم سري.
 
-«إعادة تعيين الرقم السري» يعيد الرقم الافتراضي 123456 مع إلزام التغيير ويبطل الجلسات القديمة. تغيير رقم الموبايل المسجل يجدد الرقم السري ويبطل الجلسات أيضًا. «إيقاف الدخول» يمنع الدخول وتُرفض الجلسة عند طلبها التالي. إذا تطابق رقم الهاتف والرقم السري مع أكثر من عضوية، لا يظهر اختيار النادي/الفرع إلا بعد التحقق منهما، ويُعاد التحقق عند الاختيار. لا يوجد دمج بيانات بين العضويات.
+«إعادة تعيين الرقم السري» يولّد رقمًا سريًا مؤقتًا جديدًا لكل عضو مع إلزام التغيير ويبطل الجلسات القديمة. تغيير رقم الموبايل المسجل يجدد الرقم السري ويبطل الجلسات أيضًا. «إيقاف الدخول» يمنع الدخول وتُرفض الجلسة عند طلبها التالي. إذا تطابق رقم الهاتف والرقم السري مع أكثر من عضوية، لا يظهر اختيار النادي/الفرع إلا بعد التحقق منهما، ويُعاد التحقق عند الاختيار. لا يوجد دمج بيانات بين العضويات.
 
 يمكن تثبيت الموقع من متصفح الهاتف. البيانات الحقيقية تتطلب دخولًا؛ /member-preview عرض وهمي فقط. كارت الحضور وQR لا يحتويان الرقم السري. لا تطبع بيانات الدخول على الكارت. لا تحفظ الأرقام السرية في ملفات التسليم أو النسخ الاحتياطي المعتادة. رابط التطبيق العام لا يحتوي سرًا. لا يرسل النظام رسائل SMS أو WhatsApp تلقائيًا لتسليم الرقم السري.
 
-Members open /member and enter their saved mobile number and temporary PIN 123456, then must choose a different private six-digit PIN before profile data is returned. No email or confirmation message is required. Egyptian local 01… numbers and international +country-code numbers are supported, including Arabic digits. A phone number alone never authenticates a member.
+Members open /member and enter their saved mobile number and their own system-generated temporary PIN, then must choose a different private six-digit PIN before profile data is returned. No email or confirmation message is required. Egyptian local 01… numbers and international +country-code numbers are supported, including Arabic digits. A phone number alone never authenticates a member.
 
 Every eligible saved/imported/restored real member with a valid phone is provisioned automatically. Existing members are backfilled. Owners and managers reveal sign-in details from the member profile and hand them only to the member. Missing/invalid numbers must be corrected first. Explicit reset and phone changes invalidate old sessions; revocation and archiving block access. Multiple matching memberships require a verified account selection and remain isolated.
 

@@ -1,5 +1,5 @@
 import type {PoolClient} from 'pg';
-/** Global registry allocator; the caller wraps it in the owner's scoped transaction. */
+/** Owner-scoped registry allocator; the caller wraps it in the owner's scoped transaction. */
 export async function reserveDailyCard(client:PoolClient,owner:string,member:string,branch:string,day:string){
  const date=day.replaceAll('-','');if(!/^\d{8}$/.test(date))throw Error('invalid date');
  const prior=async()=>{
@@ -15,7 +15,7 @@ export async function reserveDailyCard(client:PoolClient,owner:string,member:str
   // so concurrent retries of the same member return the first committed card.
   const concurrent=await prior();if(concurrent)return concurrent;
   const code=date+'-'+String(counter.rows[0].value).padStart(4,'0');
-  const reserved=await client.query("INSERT INTO gymos.membership_cards(code,owner_id,member_id,branch,status) VALUES($1,$2,$3,$4,'reserved') ON CONFLICT(code) DO NOTHING RETURNING code",[code,owner,member,branch]);
+  const reserved=await client.query("INSERT INTO gymos.membership_cards(code,owner_id,member_id,branch,status) VALUES($1,$2,$3,$4,'reserved') ON CONFLICT(owner_id,code) DO NOTHING RETURNING code",[code,owner,member,branch]);
   if(reserved.rowCount)return code;
  }
  throw Error('Daily card range busy');

@@ -1,3 +1,5 @@
+// LEGACY / SUPERSEDED: historical pnpm/Vinext install helper, not used by package.json.
+// Current setup: npm ci (scripts/install-ci.sh / scripts/install-ci.mjs), then `npm run build`.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {

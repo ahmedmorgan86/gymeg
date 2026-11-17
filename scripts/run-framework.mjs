@@ -1,3 +1,5 @@
+// LEGACY / SUPERSEDED: historical Vinext dev/build launcher, not referenced by package.json.
+// Use `npm run dev` and `npm run build` (next dev/build --webpack) instead.
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readExecutionProfile } from "./execution-profile.mjs";

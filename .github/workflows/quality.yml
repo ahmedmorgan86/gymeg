@@ -22,6 +22,9 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
+      # Next 16 generates route types during dev/build/typegen. Generate them
+      # before typecheck so a fresh checkout does not depend on a prior build.
+      - run: npx next typegen
       - run: npm run typecheck
       - run: npm run lint
       - run: npm test

@@ -30,15 +30,6 @@ async function sendOne(account:ServiceAccount,token:string,url:'/member'|'/clubs
  return{ok:false,expired:false};
 }
 
-/** Send a privacy-safe platform alert to the signed-in support user's Android app. */
-export async function sendSupportFcm(userId:string,tag:string){
- const account=serviceAccount();if(!account)return{configured:false,sent:0,failed:0};
- const rows=await withScope(userId,async client=>(await client.query('SELECT token_ciphertext,token_hash FROM gymos.support_fcm_subscriptions WHERE user_id=$1 ORDER BY created_at DESC LIMIT 10',[userId])).rows);
- let sent=0,failed=0;
- await Promise.all(rows.map(async row=>{try{const result=await sendOne(account,decryptFcmToken(String(row.token_ciphertext)),'/platform',tag);if(result.ok)sent++;else{failed++;if(result.expired)await withScope(userId,client=>client.query('DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2',[userId,row.token_hash]).then(()=>undefined));}}catch{failed++;}}));
- return{configured:true,sent,failed};
-}
-
 /** Send privacy-safe chat alerts to registered native Android devices in one tenant branch. */
 export async function sendCommunityFcm(owner:string,branch:string,recipient:'staff'|'member',recipientId:string|null,url:'/member'|'/clubs',tag:string){
  const account=serviceAccount();if(!account)return{configured:false,sent:0,failed:0};

@@ -1,3 +1,5 @@
+> SUPERSEDED / مُلغى كمرجع حالي — historical record only. Current status: docs/PRODUCTION_READINESS_AUDIT_2026-11-17_AR.md and the final readiness report; counts and claims below are NOT current verification evidence.
+
 # Vercel + Supabase migration verification
 
 2026-10-18
