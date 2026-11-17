@@ -1,29 +1,39 @@
 -- Additive directory: existing operational partitions remain untouched.
-CREATE TABLE gymos.platform_admins(user_id text PRIMARY KEY,created_at timestamptz NOT NULL DEFAULT now());
-CREATE TABLE gymos.commercial_plans(
+-- A legacy branches value that is not valid JSON must never become NULL,
+-- because NULL means "all branches" in the runtime access context. Fall back
+-- to an empty branch list so a malformed import cannot widen a manager's scope.
+CREATE OR REPLACE FUNCTION gymos.safe_branches_json(value text) RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog AS $$
+BEGIN
+ IF value IS NULL THEN RETURN '[]'::jsonb; END IF;
+ RETURN value::jsonb;
+EXCEPTION WHEN invalid_text_representation THEN RETURN '[]'::jsonb;
+END $$;
+CREATE TABLE IF NOT EXISTS gymos.platform_admins(user_id text PRIMARY KEY,created_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS gymos.commercial_plans(
  id text PRIMARY KEY,name text NOT NULL CHECK(length(name) BETWEEN 1 AND 100),currency text NOT NULL DEFAULT 'EGP',
  monthly_minor bigint,annual_minor bigint,perpetual_minor bigint,maintenance_minor bigint,
  limits jsonb NOT NULL,published boolean NOT NULL DEFAULT false,revision integer NOT NULL DEFAULT 0,
  CHECK(monthly_minor IS NULL OR monthly_minor>=0),CHECK(annual_minor IS NULL OR annual_minor>=0),
  CHECK(perpetual_minor IS NULL OR perpetual_minor>=0),CHECK(maintenance_minor IS NULL OR maintenance_minor>=0)
 );
-CREATE TABLE gymos.tenants(
+CREATE TABLE IF NOT EXISTS gymos.tenants(
  id text PRIMARY KEY DEFAULT gen_random_uuid()::text,storage_key text NOT NULL UNIQUE,
  name text NOT NULL CHECK(length(name) BETWEEN 1 AND 120),created_by text NOT NULL,created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE gymos.tenant_memberships(
+CREATE TABLE IF NOT EXISTS gymos.tenant_memberships(
  tenant_id text NOT NULL REFERENCES gymos.tenants(id),user_id text NOT NULL,role text NOT NULL CHECK(role IN('owner','manager','reception')),
  branches jsonb,name text NOT NULL DEFAULT '',revoked boolean NOT NULL DEFAULT false,
  PRIMARY KEY(tenant_id,user_id)
 );
-CREATE INDEX tenant_memberships_user ON gymos.tenant_memberships(user_id) WHERE NOT revoked;
-CREATE TABLE gymos.tenant_licenses(
+CREATE INDEX IF NOT EXISTS tenant_memberships_user ON gymos.tenant_memberships(user_id) WHERE NOT revoked;
+CREATE TABLE IF NOT EXISTS gymos.tenant_licenses(
  tenant_id text PRIMARY KEY REFERENCES gymos.tenants(id),plan_id text NOT NULL REFERENCES gymos.commercial_plans(id),
  mode text NOT NULL CHECK(mode IN('trial','monthly','annual','perpetual')),status text NOT NULL CHECK(status IN('pending','active','suspended')),
  starts_at timestamptz,ends_at timestamptz,maintenance_until timestamptz,
  limits jsonb NOT NULL,revision integer NOT NULL DEFAULT 0,updated_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE TABLE gymos.activation_requests(
+CREATE TABLE IF NOT EXISTS gymos.activation_requests(
  id text PRIMARY KEY,tenant_id text NOT NULL REFERENCES gymos.tenants(id),user_id text NOT NULL,plan_id text NOT NULL REFERENCES gymos.commercial_plans(id),
  mode text NOT NULL CHECK(mode IN('monthly','annual','perpetual','maintenance')),
  status text NOT NULL CHECK(status IN('quote_requested','awaiting_payment','pending_review','approved','rejected','cancelled')),
@@ -31,26 +41,30 @@ CREATE TABLE gymos.activation_requests(
  note text NOT NULL DEFAULT '',review_note text NOT NULL DEFAULT '',created_at timestamptz NOT NULL DEFAULT now(),reviewed_at timestamptz,reviewed_by text,
  CHECK(expected_minor IS NULL OR expected_minor>=0),CHECK(paid_minor IS NULL OR paid_minor>=0)
 );
-CREATE INDEX activation_requests_tenant_date ON gymos.activation_requests(tenant_id,created_at DESC);
-CREATE INDEX activation_requests_pending ON gymos.activation_requests(status,created_at) WHERE status IN('quote_requested','pending_review');
-CREATE UNIQUE INDEX activation_requests_one_open ON gymos.activation_requests(tenant_id) WHERE status IN('quote_requested','awaiting_payment','pending_review');
-CREATE TABLE gymos.platform_settings(id integer PRIMARY KEY CHECK(id=1),payload jsonb NOT NULL DEFAULT '{}',revision integer NOT NULL DEFAULT 0);
-CREATE TABLE gymos.commercial_audit(id text PRIMARY KEY,actor text NOT NULL,tenant_id text,action text NOT NULL,details jsonb NOT NULL DEFAULT '{}',at timestamptz NOT NULL DEFAULT now());
-CREATE INDEX commercial_audit_time ON gymos.commercial_audit(at DESC);
+CREATE INDEX IF NOT EXISTS activation_requests_tenant_date ON gymos.activation_requests(tenant_id,created_at DESC);
+CREATE INDEX IF NOT EXISTS activation_requests_pending ON gymos.activation_requests(status,created_at) WHERE status IN('quote_requested','pending_review');
+CREATE UNIQUE INDEX IF NOT EXISTS activation_requests_one_open ON gymos.activation_requests(tenant_id) WHERE status IN('quote_requested','awaiting_payment','pending_review');
+CREATE TABLE IF NOT EXISTS gymos.platform_settings(id integer PRIMARY KEY CHECK(id=1),payload jsonb NOT NULL DEFAULT '{}',revision integer NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS gymos.commercial_audit(id text PRIMARY KEY,actor text NOT NULL,tenant_id text,action text NOT NULL,details jsonb NOT NULL DEFAULT '{}',at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS commercial_audit_time ON gymos.commercial_audit(at DESC);
 
 INSERT INTO gymos.commercial_plans(id,name,limits,published) VALUES
  ('legacy','مساحة قائمة قبل التحويل التجاري','{"branches":100,"members":100000,"staff":1000}',false),
- ('custom','باقة حسب الاتفاق','{"branches":5,"members":1000,"staff":20}',true);
-INSERT INTO gymos.platform_settings(id) VALUES(1);
+ ('custom','باقة حسب الاتفاق','{"branches":5,"members":1000,"staff":20}',true)
+ ON CONFLICT(id) DO NOTHING;
+INSERT INTO gymos.platform_settings(id) VALUES(1) ON CONFLICT(id) DO NOTHING;
 INSERT INTO gymos.tenants(storage_key,name,created_by)
- SELECT user_id,left(coalesce(payload::jsonb->'settings'->>'name','GYM OS'),120),user_id FROM gymos.gym_states;
+ SELECT user_id,left(coalesce(payload::jsonb->'settings'->>'name','GYM OS'),120),user_id FROM gymos.gym_states
+ ON CONFLICT(storage_key) DO NOTHING;
 INSERT INTO gymos.tenant_memberships(tenant_id,user_id,role,branches,name)
- SELECT id,created_by,'owner',NULL,name FROM gymos.tenants;
+ SELECT id,created_by,'owner',NULL,name FROM gymos.tenants
+ ON CONFLICT(tenant_id,user_id) DO NOTHING;
 INSERT INTO gymos.tenant_memberships(tenant_id,user_id,role,branches,name,revoked)
- SELECT t.id,a.user_id,a.role,a.branches::jsonb,a.name,a.revoked<>0 FROM gymos.gym_access a JOIN gymos.tenants t ON t.storage_key=a.owner_id
+ SELECT t.id,a.user_id,a.role,gymos.safe_branches_json(a.branches),a.name,a.revoked<>0 FROM gymos.gym_access a JOIN gymos.tenants t ON t.storage_key=a.owner_id
  ON CONFLICT(tenant_id,user_id) DO NOTHING;
 INSERT INTO gymos.tenant_licenses(tenant_id,plan_id,mode,status,starts_at,limits)
- SELECT id,'legacy','perpetual','active',now(),'{"branches":100,"members":100000,"staff":1000}'::jsonb FROM gymos.tenants;
+ SELECT id,'legacy','perpetual','active',now(),'{"branches":100,"members":100000,"staff":1000}'::jsonb FROM gymos.tenants
+ ON CONFLICT(tenant_id) DO NOTHING;
 
 -- Runtime receives only verified actor / tenant context from server transactions.
 DO $rls$ DECLARE table_name text;BEGIN
@@ -61,6 +75,19 @@ DO $rls$ DECLARE table_name text;BEGIN
   EXECUTE format('GRANT SELECT,INSERT,UPDATE,DELETE ON gymos.%I TO gymos_app',table_name);
  END LOOP;
 END $rls$;
+DROP POLICY IF EXISTS platform_admin_self ON gymos.platform_admins;
+DROP POLICY IF EXISTS tenants_runtime ON gymos.tenants;
+DROP POLICY IF EXISTS memberships_runtime ON gymos.tenant_memberships;
+DROP POLICY IF EXISTS licenses_read ON gymos.tenant_licenses;
+DROP POLICY IF EXISTS licenses_write ON gymos.tenant_licenses;
+DROP POLICY IF EXISTS licenses_pending ON gymos.tenant_licenses;
+DROP POLICY IF EXISTS plans_read ON gymos.commercial_plans;
+DROP POLICY IF EXISTS plans_write ON gymos.commercial_plans;
+DROP POLICY IF EXISTS requests_runtime ON gymos.activation_requests;
+DROP POLICY IF EXISTS settings_read ON gymos.platform_settings;
+DROP POLICY IF EXISTS settings_write ON gymos.platform_settings;
+DROP POLICY IF EXISTS audit_read ON gymos.commercial_audit;
+DROP POLICY IF EXISTS audit_append ON gymos.commercial_audit;
 CREATE POLICY platform_admin_self ON gymos.platform_admins FOR SELECT TO gymos_app USING(user_id=current_setting('app.actor',true));
 REVOKE INSERT,UPDATE,DELETE ON gymos.platform_admins FROM gymos_app;
 CREATE POLICY tenants_runtime ON gymos.tenants TO gymos_app USING(id=current_setting('app.tenant',true) OR storage_key=current_setting('app.gym_owner',true) OR current_setting('app.platform',true)='1') WITH CHECK(id=current_setting('app.tenant',true) OR current_setting('app.platform',true)='1');
@@ -78,7 +105,7 @@ CREATE POLICY audit_append ON gymos.commercial_audit FOR INSERT TO gymos_app WIT
 REVOKE UPDATE,DELETE ON gymos.commercial_audit FROM gymos_app;
 
 -- Keep legacy staff screens synchronized during the additive migration.
-CREATE FUNCTION gymos.sync_tenant_staff() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,gymos AS $fn$
+CREATE OR REPLACE FUNCTION gymos.sync_tenant_staff() RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,gymos AS $fn$
 DECLARE tenant_key text; license_row gymos.tenant_licenses%ROWTYPE; staff_count integer;BEGIN
  SELECT id INTO tenant_key FROM gymos.tenants WHERE storage_key=NEW.owner_id;
  IF tenant_key IS NOT NULL THEN
@@ -90,7 +117,8 @@ DECLARE tenant_key text; license_row gymos.tenant_licenses%ROWTYPE; staff_count 
    IF staff_count>=(license_row.limits->>'staff')::integer THEN RAISE EXCEPTION 'staffLimit' USING ERRCODE='42501';END IF;
   END IF;
   IF EXISTS(SELECT 1 FROM gymos.tenant_memberships WHERE tenant_id=tenant_key AND user_id=NEW.user_id AND role='owner' AND NOT revoked) THEN RAISE EXCEPTION 'owner_protected' USING ERRCODE='42501';END IF;
-  INSERT INTO gymos.tenant_memberships(tenant_id,user_id,role,branches,name,revoked) VALUES(tenant_key,NEW.user_id,NEW.role,NEW.branches::jsonb,NEW.name,NEW.revoked<>0)
+  INSERT INTO gymos.tenant_memberships(tenant_id,user_id,role,branches,name,revoked) VALUES(tenant_key,NEW.user_id,NEW.role,gymos.safe_branches_json(NEW.branches),NEW.name,NEW.revoked<>0)
   ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=excluded.role,branches=excluded.branches,name=excluded.name,revoked=excluded.revoked;
  END IF;RETURN NEW;END $fn$;
+DROP TRIGGER IF EXISTS sync_tenant_staff ON gymos.gym_access;
 CREATE TRIGGER sync_tenant_staff AFTER INSERT OR UPDATE ON gymos.gym_access FOR EACH ROW EXECUTE FUNCTION gymos.sync_tenant_staff();

@@ -1,3 +1,5 @@
+> SUPERSEDED / مُلغى كمرجع حالي — historical record only. Current status: docs/PRODUCTION_READINESS_AUDIT_2026-11-17_AR.md and the final readiness report; counts and claims below are NOT current verification evidence.
+
 # GYM OS - مراجعة المنتج والإصدار 1.1.5
 
 التاريخ: 20 أكتوبر 2026. مصدر الأساس: 6d597fa، مع تعديلات هذه الجولة. لم تُعدّل بيانات نادي الإنتاج أثناء هذه المراجعة.

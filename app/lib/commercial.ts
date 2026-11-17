@@ -76,8 +76,8 @@ export async function commercialWork(client:PoolClient,platform:boolean,user:Cha
   const review=text(body.note,1000),note=[order.review_note,review].filter(Boolean).join('\n\n');
   if(action==='approve'){
    const reference=String(order.transfer_ref??'').normalize('NFKC').replace(/\s+/g,'').toUpperCase();if(!reference)throw new CommercialError('paymentMismatch',409);
-   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['gymos-transfer:'+order.currency+':'+reference]);
-   if((await client.query("SELECT id FROM gymos.activation_requests WHERE status='approved' AND currency=$1 AND upper(regexp_replace(transfer_ref,'[[:space:]]','','g'))=$2 AND id<>$3 LIMIT 1",[order.currency,reference,order.id])).rowCount)throw new CommercialError('paymentAlreadyUsed',409);
+   await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['gymos-transfer:'+reference]);
+   if((await client.query("SELECT id FROM gymos.activation_requests WHERE upper(regexp_replace(transfer_ref,'[[:space:]]','','g'))=$1 AND id<>$2 LIMIT 1",[reference,order.id])).rowCount)throw new CommercialError('paymentAlreadyUsed',409);
    await client.query('SELECT id FROM gymos.tenants WHERE id=$1 FOR UPDATE',[order.tenant_id]);
    if(body.confirm!=='VERIFIED_TRANSFER'||order.expected_minor===null||order.paid_minor===null||BigInt(order.expected_minor)!==BigInt(order.paid_minor))throw new CommercialError('paymentMismatch',409);
    const current=normalizeLicense((await client.query('SELECT * FROM gymos.tenant_licenses WHERE tenant_id=$1 FOR UPDATE',[order.tenant_id])).rows[0] as License);

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# LEGACY / SUPERSEDED: Vinext build path from the pre-Next.js setup.
+# Use `npm run build` (next build --webpack) for this Next.js 16 app.
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
