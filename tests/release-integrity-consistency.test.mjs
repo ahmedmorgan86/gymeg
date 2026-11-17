@@ -73,9 +73,12 @@ test('signing verifier selection never treats keytool alone as verification', ()
   assert.deepEqual(envSigner, {label: 'ANDROID_APK_SIGNER', command: 'C:\\sdk\\apksigner.bat', prefix: []});
   const jarSigner = selectApkVerifier({env: {ANDROID_APK_SIGNER_JAR: 'C:\\sdk\\apksigner.jar', JAVA: 'C:\\java\\java.exe'}, pathEnv: '', existsSync: () => false, readdirSync: () => []});
   assert.deepEqual(jarSigner, {label: 'ANDROID_APK_SIGNER_JAR', command: 'C:\\java\\java.exe', prefix: ['-jar', 'C:\\sdk\\apksigner.jar']});
-  const present = new Set(['C:\\sdk\\build-tools\\36.0.0\\lib\\apksigner.jar']);
+  // Build the candidate with path.join so the fixture matches the host OS separator,
+  // exactly as selectApkVerifier does (the runner can be Linux while platform is forced to win32).
+  const apksignerJar = path.join('C:\\sdk', 'build-tools', '36.0.0', 'lib', 'apksigner.jar');
+  const present = new Set([apksignerJar]);
   const sdkSigner = selectApkVerifier({env: {ANDROID_HOME: 'C:\\sdk'}, pathEnv: '', existsSync: candidate => present.has(candidate), readdirSync: () => ['36.0.0'], platform: 'win32'});
-  assert.deepEqual(sdkSigner, {label: 'Android SDK 36.0.0 apksigner.jar', command: 'java', prefix: ['-jar', 'C:\\sdk\\build-tools\\36.0.0\\lib\\apksigner.jar']});
+  assert.deepEqual(sdkSigner, {label: 'Android SDK 36.0.0 apksigner.jar', command: 'java', prefix: ['-jar', apksignerJar]});
   const keytoolOnly = selectApkVerifier({env: {}, pathEnv: `C:\\java${path.delimiter}`, existsSync: candidate => candidate.endsWith('keytool.exe'), readdirSync: () => [], platform: 'win32'});
   assert.equal(keytoolOnly, null);
 });
