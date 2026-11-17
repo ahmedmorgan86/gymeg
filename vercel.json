@@ -3,6 +3,12 @@
   "buildCommand": "node scripts/vercel-npm.mjs run build",
   "installCommand": "node scripts/vercel-npm.mjs ci",
   "outputDirectory": ".next",
+  "crons": [
+    {
+      "path": "/api/cron/whatsapp",
+      "schedule": "*/5 * * * *"
+    }
+  ],
   "git": {
     "deploymentEnabled": {
       "codex/gymawy-commercial-gaps": false

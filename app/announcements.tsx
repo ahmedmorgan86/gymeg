@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { GymState, Operation } from './lib/domain';
 import type { Role } from './lib/access';
+import { useConfirmDialog } from '../components/ui/use-confirm-dialog';
 import {
   audioQueue,
   calculateTimeline,
@@ -303,6 +304,7 @@ export default function Announcements({
   state,
   branch,
   owner,
+  ar,
   visible
 }: {
   state: GymState;
@@ -316,6 +318,8 @@ export default function Announcements({
   mutate: (op: Omit<Operation, 'branch'> & {type: string}) => Promise<boolean>;
 }) {
   const scope = `${owner}|${branch}`;
+  const t = (a: string, e: string) => ar ? a : e;
+  const { confirm, dialog } = useConfirmDialog();
   const [items, setItems] = useState<Announcement[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -1048,7 +1052,7 @@ export default function Announcements({
   };
 
   const handleDelete = async (item: Announcement) => {
-    if (!confirm(`هل أنت متأكد من حذف النداء "${item.name}" بالكامل؟`)) return;
+    if (!await confirm({ title: t(`هل أنت متأكد من حذف النداء "${item.name}" بالكامل؟`, `Delete the announcement "${item.name}" completely?`) })) return;
     const remaining = items.filter(x => x.id !== item.id);
     saveToStorage(remaining);
 
@@ -1780,6 +1784,7 @@ export default function Announcements({
           </p>
         )}
       </section>
+      {dialog}
     </section>
   );
 }

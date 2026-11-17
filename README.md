@@ -38,11 +38,23 @@ The designated platform-owner account receives permanently free personal clubs a
 
 ## Data migration and backups
 
-Synchronize old-origin offline attendance before moving. Preserve source backups until acceptance. In commercial mode, backup restore is restricted to the current tenant/its verified legacy partition; an import checkbox does not permit unrelated cross-club restore. A move to a newly created independent tenant requires a reviewed, authorized migration procedure.
+Synchronize old-origin offline attendance before moving. Preserve source backups until acceptance. Backup restore accepts only the current tenant or its verified legacy partition; no API flag permits restoring an unrelated tenant. A move to a newly created independent tenant requires a reviewed, authorized out-of-band migration procedure documented in MIGRATION_AR.md.
 
-Operational backups do not move Auth passwords, staff invitations/grants or device-local music. JSON exports are unencrypted. Backups up to 64 MiB use scoped 384 KiB chunks and SHA256 verification. Live operational state remains capped at 20,000,000 bytes. Activity history is retained in an append-only archive; the live window is 2000 events and the activity page supports older pages. Apply supabase/migrations/20261020183809_reliable_backups_activity_archive.sql before deploying this release. See PRODUCT_REVIEW_2026-10-20.md.
+Operational backups do not move Auth passwords, staff invitations or device-local music; existing staff grants are retained on restore and never imported from the backup file. JSON exports are unencrypted. Backups up to 64 MiB use scoped 384 KiB chunks and SHA256 verification. Live operational state remains capped at 20,000,000 bytes. Activity history is retained in an append-only archive; the live window is 2000 events and the activity page supports older pages. Apply supabase/migrations/20261020183809_reliable_backups_activity_archive.sql and supabase/migrations/20261117134000_backup_transfer_expiry_cleanup.sql before deploying this release. Transfer rows expire after 30 minutes; expired rows are removed opportunistically when a transfer starts and by a disabled 15-minute pg_cron job that can be enabled after deployment. See PRODUCT_REVIEW_2026-10-20.md.
 
 Normalized entities/photos are stored separately in PostgreSQL, but current read/validation paths reconstruct complete club state and use a workspace revision. Entitlement limits are not load-test capacity promises.
+
+## Report export limits
+
+حدود تصدير التقارير: الطلب الواحد يغطي 366 يومًا كحد أقصى وحتى 50,000 حدث مؤرشف (و10,000 صف تفصيلية لتصدير HTML/PDF). يجب تقسيم الفترات الطويلة إلى طلبات منفصلة حسب الفترة؛ عند تجاوز الحد يعيد API رمز 400 أو 413 مع كائن `cap` قابل للقراءة آليًا (`maxDays`, `maxEvents`, `maxRows`). لا يوجد ترقيم صفحات تلقائي.
+
+"Complete report" means every matching record **inside one request**, not an unbounded club lifetime. `/api/reports/export` enforces these exact per-request caps:
+
+- Period: `to - from` may not exceed **366 days** (`periodUpToOneYear`, HTTP 400).
+- Archived activity: at most **50,000 events** per branch selection/period (`narrowPeriod`, HTTP 413). The query fetches 50,001 rows only to detect the cap; there is no automatic pagination.
+- HTML/PDF output: at most **10,000 detail rows** (`useExcelOrNarrowPeriodForPDF`, HTTP 413). The `xlsx` workbook format has no row cap beyond the 50,000-event archive rule.
+
+Large histories must be **split by period** (for example month by month) and exported one request at a time; narrow the period further whenever the 50,000-event cap is reached. When a cap is hit the API returns HTTP 400 or 413 with JSON containing `error`, a human-readable `message`, and a machine-readable `cap` object (`maxDays`, `maxEvents` or `maxRows`). No cap is raised by this release.
 
 ## Windows download 1.1.14 · source candidate 1.1.15
 
