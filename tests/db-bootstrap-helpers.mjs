@@ -26,6 +26,7 @@ CREATE FUNCTION vault.create_secret(secret text,name text,description text) RETU
 CREATE SCHEMA cron;
 CREATE TABLE cron.job(jobid bigserial PRIMARY KEY,jobname text UNIQUE,schedule text,command text,active boolean NOT NULL DEFAULT true);
 CREATE FUNCTION cron.schedule(jobname text,schedule text,command text) RETURNS bigint LANGUAGE sql VOLATILE AS $$ INSERT INTO cron.job(jobname,schedule,command) VALUES(jobname,schedule,command) ON CONFLICT(jobname) DO UPDATE SET schedule=excluded.schedule,command=excluded.command RETURNING jobid $$;
+CREATE FUNCTION cron.alter_job(job_id bigint,schedule text DEFAULT NULL,command text DEFAULT NULL,database text DEFAULT NULL,username text DEFAULT NULL,active boolean DEFAULT NULL) RETURNS void LANGUAGE sql VOLATILE AS $$ UPDATE cron.job AS j SET active=coalesce($6,j.active) WHERE j.jobid=$1 $$;
 CREATE SCHEMA net;
 CREATE FUNCTION net.http_get(url text,headers jsonb,timeout_milliseconds integer) RETURNS bigint LANGUAGE sql VOLATILE AS $$ SELECT 1::bigint $$;
 `;
