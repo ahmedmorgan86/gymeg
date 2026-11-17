@@ -28,5 +28,9 @@ test('Complete ordered bootstrap applies from an empty database and hardened mig
     assert.ok(jobs.some(j=>j.jobname==='gymos-whatsapp-worker'));
     assert.ok(jobs.some(j=>j.jobname==='gymos-attendance-auto-exit'));
     assert.ok(jobs.some(j=>j.jobname==='gymos-backup-transfer-cleanup'));
+    const malformed=(await db.query("SELECT gymos.safe_branches_json('not json') AS value")).rows[0].value;
+    const missing=(await db.query('SELECT gymos.safe_branches_json(NULL) AS value')).rows[0].value;
+    assert.deepEqual(malformed,[],'a later migration must not restore unrestricted scope for malformed grants');
+    assert.deepEqual(missing,[],'a later migration must not restore unrestricted scope for missing grants');
   }finally{await db.close();}
 });
