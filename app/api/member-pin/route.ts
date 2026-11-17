@@ -1,16 +1,20 @@
 import {randomBytes} from 'node:crypto';
 import {codeMemberIdentity} from '../../lib/member-code-session';
 import {memberCodeHash,memberCookie,memberSessionToken} from '../../lib/member-code';
-import {normalizeMemberPin} from '../../lib/member-phone';
+import {isSharedLegacyPin,normalizeMemberPin} from '../../lib/member-phone';
 import {withScope} from '../../lib/database';
 import {reply,sameOrigin} from '../../lib/server-workspace';
+import {licenseState,type License} from '../../lib/licensing';
+import {normalizeLicense} from '../../lib/commercial';
 export async function POST(request:Request){
  if(!sameOrigin(request))return reply({error:'origin'},403);
  if(request.headers.get('content-type')?.split(';')[0]!=='application/json')return reply({error:'invalid'},415);
  try{const raw=await request.text();if(raw.length>2048)return reply({error:'invalid'},413);const body=JSON.parse(raw),current=normalizeMemberPin(body.currentPin),pin=normalizeMemberPin(body.newPin),confirm=normalizeMemberPin(body.confirmPin);
-  if(!current||!pin||pin!==confirm||pin==='123456'||pin===current)return reply({error:'invalidPin'},400);
+  if(!current||!pin||pin!==confirm||isSharedLegacyPin(pin)||pin===current)return reply({error:'invalidPin'},400);
   const identity=await codeMemberIdentity(request),oldToken=memberSessionToken(request);if(!identity||!oldToken)return reply({error:'auth'},401);
-  const token=randomBytes(32).toString('hex');const status=await withScope(identity.owner_id,async c=>{
+  const license=await withScope(identity.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[identity.owner_id])).rows[0] as License|undefined);
+   if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
+   const token=randomBytes(32).toString('hex');const status=await withScope(identity.owner_id,async c=>{
    const bucket=memberCodeHash('pin-change:'+oldToken);await c.query("SELECT set_config('app.member_attempt',$1,true)",[bucket]);const attempts=Number((await c.query("INSERT INTO gymos.member_code_attempts(bucket) VALUES($1) ON CONFLICT(bucket) DO UPDATE SET attempts=CASE WHEN member_code_attempts.started_at<now()-interval '15 minutes' THEN 1 ELSE member_code_attempts.attempts+1 END,started_at=CASE WHEN member_code_attempts.started_at<now()-interval '15 minutes' THEN now() ELSE member_code_attempts.started_at END RETURNING attempts",[bucket])).rows[0].attempts);if(attempts>5)return 429;
    const row=(await c.query('SELECT version,gymos.member_pin_matches($3,pin_hash) AS matches FROM gymos.member_code_access WHERE owner_id=$1 AND member_id=$2 AND NOT revoked AND NOT inactive FOR UPDATE',[identity.owner_id,identity.member_id,current])).rows[0];if(!row||!row.matches||row.version!==identity.version)return 401;
    await c.query('UPDATE gymos.member_code_access SET pin_hash=gymos.member_pin_hash($3),pin_cipher=NULL,pin_must_change=false,version=version+1 WHERE owner_id=$1 AND member_id=$2',[identity.owner_id,identity.member_id,pin]);
