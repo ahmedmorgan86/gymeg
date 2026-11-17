@@ -193,7 +193,7 @@
 
 ### و) Vercel
 
-أُضيفت متغيرات البيئة دون إظهار قيمها: `CRON_SECRET` (secret، وُلّد وعدم الاحتفاظ بقيمته محليًا) و`GYMEG_TRUST_PROXY_IP=1` (config). فحص `vercel.json` أظهر مسار `/api/cron/whatsapp` بالجدول `*/5 * * * *`، ثم رفض Vercel النشر لأن حساب Hobby يسمح بتشغيل يومي واحد فقط؛ صُحّح الجدول إلى `0 20 * * *` (يوميًا) دون ترقية مدفوعة ودون إيقاف الميزة. كما رفض Vercel الالتزام `d2e361c` أولًا لأن مؤلفه `engineering@gymeg.local` غير موثّق؛ أُعيد الدفع بـ commit بمؤلف `41932609+ahmedmorgan86@users.noreply.github.com` الموثّق، فانتقل Vercel إلى محاولة النشر. مع ذلك، النشر النهائي لم يُؤكّد بعد، وآخر نشر إنتاج معروف هو `main@cf2e2ad`. مباشرة API لإنشاء deployment من المتصفح أُوقفت سابقًا بـ `403 challenge_required`. استدعاء cron الحي ما زال `UNVERIFIED`.
+أُضيفت متغيرات البيئة دون إظهار قيمها: `CRON_SECRET` (secret، وُلّد وعدم الاحتفاظ بقيمته محليًا) و`GYMEG_TRUST_PROXY_IP=1` (config). فحص `vercel.json` أظهر مسار `/api/cron/whatsapp` بالجدول `*/5 * * * *`، ثم رفض Vercel النشر لأن حساب Hobby يسمح بتشغيل يومي واحد فقط؛ صُحّح الجدول إلى `0 20 * * *` (يوميًا) دون ترقية مدفوعة ودون إيقاف الميزة. كما رفض Vercel الالتزام `d2e361c` أولًا لأن مؤلفه `engineering@gymeg.local` غير موثّق؛ أُعيد الدفع بـ commit بمؤلف `41932609+ahmedmorgan86@users.noreply.github.com` الموثّق، فانتقل Vercel إلى محاولة النشر. بعد هاتين المحاولتين نُشرت معاينة الـ PR بنجاح (`Ready`،Deployment `HorUrKEgaxEUMfimLb6biwJFvbzq`) وصارت حالة `Vercel` `success` وكل فحوص الـ PR ناجحة؛ أما الإنتاج فما زال `main@cf2e2ad` ولم يُدمج الـ PR. مباشرة API لإنشاء deployment من المتصفح أُوقفت سابقًا بـ `403 challenge_required`. استدعاء cron الحي ما زال `UNVERIFIED`.
 
 ### ز) حدود صريحة
 
