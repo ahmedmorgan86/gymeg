@@ -1,0 +1,15 @@
+"use client";
+import {useEffect,useRef,useState} from 'react';
+import Image from 'next/image';
+import {ShieldCheck} from 'lucide-react';
+import type {Member} from '../lib/domain';
+import {trainingText} from '../lib/training';
+import {clubDesignStyle,presetThemeStyle,type ClubDesign} from '../lib/club-design';
+import type {ThemeId} from '../lib/themes';
+import type {CSSProperties} from 'react';
+export default function MemberDigitalPass({member,gym,logo,branch,ar,theme,design}:{member:Member;gym:string;logo:string|null;branch:string;ar:boolean;theme?:ThemeId;design?:ClubDesign}){
+ const [qr,setQr]=useState<{code:string;image:string}|null>(null),[failed,setFailed]=useState(false);const barcode=useRef<SVGSVGElement>(null);
+ useEffect(()=>{let live=true;if(member.card){void import('qrcode').then(q=>q.toDataURL(member.card!,{width:300,margin:3,errorCorrectionLevel:'M'})).then(image=>{if(live)setQr({code:member.card!,image});}).catch(()=>{if(live)setFailed(true);});void import('jsbarcode').then(({default:draw})=>{if(live&&barcode.current)draw(barcode.current,member.card!,{format:'CODE128',displayValue:false,margin:10,height:48,width:1.5});}).catch(()=>{if(live)setFailed(true);});}return()=>{live=false;};},[member.card]);
+ const themeStyle=theme||design?{...presetThemeStyle(theme),...clubDesignStyle(design)} as CSSProperties&Record<`--${string}`,string|number>:undefined;
+ return <article className={'digital-member-pass'+(design?.memberImage?' has-member-cover':'')} style={themeStyle}><div className="digital-pass-brand"><span>{logo?<Image src={logo} width={42} height={42} unoptimized alt=""/>:<Image src="/icons/brand-members.svg?v=20261029-gymeg" width={42} height={42} alt=""/>}</span><div><b>{gym}</b><small>MEMBERSHIP / ACCESS PASS</small></div><ShieldCheck size={23}/></div><div className="digital-pass-identity">{member.photo?<Image src={member.photo} width={58} height={58} unoptimized alt={ar?'صورة العضو':'Member photo'}/>:<span className="digital-pass-avatar">{trainingText(member.name,ar).trim().slice(0,1)}</span>}<div><small>{ar?'كارت العضوية':'MEMBERSHIP CARD'}</small><h3>{trainingText(member.name,ar)}</h3><p>{trainingText(branch,ar)}</p></div></div><div className="digital-pass-ticket"><div className="digital-qr-frame">{qr&&qr.code===member.card?<Image src={qr.image} width={220} height={220} unoptimized alt={ar?'QR الحضور الخاص بالعضو':'Member attendance QR'}/>:<p role="status">{ar?'جارٍ تجهيز الرمز…':'Preparing your code…'}</p>}</div><p>{ar?'امسح الرمز عند الاستقبال':'SCAN AT THE RECEPTION'}</p><svg ref={barcode} className="digital-barcode" role="img" aria-label={ar?'باركود Code 128':'Code 128 barcode'}/><bdi className="digital-pass-serial">{member.card}</bdi>{failed&&<p role="status">{ar?'تعذر تجهيز الرمز بالكامل. حدّث الصفحة أو استخدم السيريال.':'Code rendering incomplete. Refresh or use the serial.'}</p>}</div><footer><div><small>{ar?'صالح حتى':'VALID THROUGH'}</small><bdi>{member.awaitingSubscription?(ar?'بانتظار باقة':'Awaiting package'):member.expires}</bdi></div><span>GymEG<span className="digital-pass-dot"/></span></footer></article>;
+}
