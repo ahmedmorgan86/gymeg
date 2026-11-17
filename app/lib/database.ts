@@ -20,8 +20,15 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
   const url=new URL(rawUrl);
   const isLocal=url.hostname==='localhost'||url.hostname==='127.0.0.1';
   if(isLocal&&nodeEnv==='production'&&process.env.GYMOS_ALLOW_LOCAL_DB!=='1')throw new Error('Production must use a managed TLS database, not localhost');
+  // pg re-parses the connection string AFTER merging our config object, so any
+  // ssl-related query parameter (sslmode/ssl/sslrootcert/...) replaces the hardened
+  // ssl object below with a bare `{}` — system root CAs only. The database certificate
+  // is issued by a private CA (Supabase Root), so verification then always fails and
+  // every request returns 503. Strip those parameters so our TLS settings always win.
+  for(const param of ['sslmode','ssl','sslrootcert','sslcert','sslkey','sslnegotiation'])url.searchParams.delete(param);
   let caCert: string | undefined;
-  try{caCert=readFileSync(join(process.cwd(),'certs','supabase-ca.crt'),'utf8');}catch{}
+  try{caCert=readFileSync(join(process.cwd(),'certs','supabase-ca.crt'),'utf8');}
+  catch(error){console.error('supabase_ca_read_failed',error instanceof Error?error.message:String(error));}
   const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:caCert?[...rootCertificates,caCert]:undefined};
   return {url,ssl};
 }
