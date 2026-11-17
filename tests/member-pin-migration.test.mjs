@@ -7,6 +7,7 @@ test('PIN migration replaces the shared default, remediates existing rows and re
   assert.match(migration,/ARRAY\['000000','111111','123456','654321'\]/);
   assert.match(migration,/pin:=gymos\.new_member_pin\(\)/);
   assert.match(migration,/gymos\.member_pin_matches\(value,a\.pin_hash\)/);
+  assert.doesNotMatch(migration,/member_code_decrypt/);
   assert.match(migration,/pin_must_change=true/);
   assert.match(migration,/DELETE FROM gymos\.member_code_sessions/);
   assert.doesNotMatch(migration,/pin:='123456'/);

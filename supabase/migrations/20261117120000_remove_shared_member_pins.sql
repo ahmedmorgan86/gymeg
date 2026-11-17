@@ -36,11 +36,13 @@ BEGIN
  FOR s IN SELECT user_id FROM gymos.gym_states LOOP
   PERFORM set_config('app.gym_owner',s.user_id,true);
   FOR target IN
+   -- The hash is authoritative for PIN verification. Decryption is deliberately
+   -- avoided here: legacy ciphertext may be unreadable after a Vault key change,
+   -- and it must not block remediation of accounts whose hash matches a shared PIN.
    SELECT a.member_id
    FROM gymos.member_code_access a
-   CROSS JOIN LATERAL (SELECT CASE WHEN a.pin_cipher IS NOT NULL THEN gymos.member_code_decrypt(a.pin_cipher) END AS pin) decrypted
    WHERE a.pin_hash IS NOT NULL
-     AND (decrypted.pin=ANY(shared) OR EXISTS(SELECT 1 FROM unnest(shared) value WHERE gymos.member_pin_matches(value,a.pin_hash)))
+     AND EXISTS(SELECT 1 FROM unnest(shared) value WHERE gymos.member_pin_matches(value,a.pin_hash))
   LOOP
    pin:=gymos.new_member_pin();
    UPDATE gymos.member_code_access
