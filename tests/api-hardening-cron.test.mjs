@@ -45,11 +45,12 @@ function cronRequest(token) {
   return new Request('https://gym.example/api/cron/whatsapp', {headers});
 }
 
-test('B07: Vercel cron is registered for the WhatsApp worker', async () => {
+test('B07: Vercel cron is registered for the WhatsApp worker on a Hobby-compatible daily schedule', async () => {
   const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
   const entry = config.crons?.find(cron => cron.path === '/api/cron/whatsapp');
   assert.ok(entry, 'vercel.json must schedule /api/cron/whatsapp');
-  assert.match(entry.schedule, /^\*\/\d+ \* \* \* \*$/);
+  // Vercel Hobby allows one run per day only; a */N expression fails deployment.
+  assert.match(entry.schedule, /^\d{1,2} \d{1,2} \* \* \*$/);
 });
 
 test('B07: unauthenticated and wrong-secret cron calls are rejected without a DB lookup', async () => {
