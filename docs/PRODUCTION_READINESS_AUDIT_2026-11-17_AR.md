@@ -137,7 +137,7 @@
 | `npm audit --omit=dev --audit-level=low` | `found 0 vulnerabilities` |
 | `npm run build` | ناجح على Next.js 16.4.6؛ 34 صفحة مولّدة |
 
-لم يُنفَّذ أي نشر للتطبيق أو عملية مالية حقيقية، ولا PR ولا دمج. دُفع الفرع إلى `origin/fix/production-readiness-2026-11-17` حتى `9f1f6f4`.
+لم يُنفَّذ أي نشر للتطبيق أو عملية مالية حقيقية، ولا PR ولا دمج. دُفع الفرع إلى `origin/fix/production-readiness-2026-11-17`.
 
 ## 6. سجل التحقق في الإنتاج (17 نوفمبر 2026)
 
