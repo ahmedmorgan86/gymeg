@@ -86,13 +86,16 @@ DROP TRIGGER IF EXISTS tenants_immutable_identity ON gymos.tenants;
 CREATE TRIGGER tenants_immutable_identity BEFORE UPDATE OF storage_key ON gymos.tenants
  FOR EACH ROW EXECUTE FUNCTION gymos.immutable_tenant_identity();
 
--- C03: invalid legacy branches text must not abort tenant synchronization.
+-- C03: invalid legacy branches text must fail closed to an empty scope.
+-- NULL would mean "all branches" in the runtime access context, so it must
+-- never be returned for a malformed staff grant. Owner rows are inserted
+-- separately with an explicit NULL and remain unrestricted by design.
 CREATE OR REPLACE FUNCTION gymos.safe_branches_json(value text) RETURNS jsonb
 LANGUAGE plpgsql IMMUTABLE SET search_path=pg_catalog AS $$
 BEGIN
- IF value IS NULL THEN RETURN NULL; END IF;
+ IF value IS NULL THEN RETURN '[]'::jsonb; END IF;
  RETURN value::jsonb;
-EXCEPTION WHEN invalid_text_representation THEN RETURN NULL;
+EXCEPTION WHEN invalid_text_representation THEN RETURN '[]'::jsonb;
 END $$;
 REVOKE ALL ON FUNCTION gymos.safe_branches_json(text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION gymos.safe_branches_json(text) TO gymos_app;

@@ -79,6 +79,6 @@ test('Defense-in-depth migration is replay-safe and closes member, phone, tenant
     await db.query("INSERT INTO gymos.tenant_licenses(tenant_id,plan_id,mode,status,starts_at,limits) VALUES('tenant-a','legacy','perpetual','active',now(),'{\"staff\":5}')");
     await db.query("INSERT INTO gymos.gym_access(owner_id,user_id,name,role,branches) VALUES('owner-b','staff-b','B','manager','not-json')");
     const membership=(await db.query("SELECT branches FROM gymos.tenant_memberships WHERE tenant_id='tenant-a' AND user_id='staff-b'")).rows[0];
-    assert.equal(membership.branches,null);
+    assert.deepEqual(membership.branches,[],'malformed staff grants must fail closed to no branches');
   }finally{await db.close();}
 });
