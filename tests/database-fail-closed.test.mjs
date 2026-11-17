@@ -1,13 +1,22 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import pg from 'pg';
 import {databaseSecurityConfig,getPool} from '../app/lib/database.ts';
 
 test('Remote database connections verify TLS certificates and keep SSL parameters',()=>{
  const config=databaseSecurityConfig('postgresql://user:pass@db.example:6543/postgres?sslmode=require&sslrootcert=/certs/ca.crt','production');
  assert.equal(config.ssl.rejectUnauthorized,true);
  assert.ok(Array.isArray(config.ssl.ca));
- assert.equal(config.url.searchParams.get('sslmode'),'require');
- assert.equal(config.url.searchParams.get('sslrootcert'),'/certs/ca.crt');
+ // pg re-parses the connection string after merging config: a present sslmode
+ // would overwrite our ssl object with `{}` (system roots only, no Supabase CA)
+ // and verification would fail, so the ssl-related parameters must be stripped.
+ assert.equal(config.url.searchParams.get('sslmode'),null);
+ assert.equal(config.url.searchParams.get('sslrootcert'),null);
+ // The effective configuration pg will actually use keeps full verification + CA.
+ const client=new pg.Client({connectionString:config.url.href,ssl:config.ssl});
+ const effective=client.connectionParameters.ssl;
+ assert.equal(effective.rejectUnauthorized,true);
+ assert.ok(Array.isArray(effective.ca)&&effective.ca.length>1,'CA chain must survive pg connection-string parsing');
 });
 
 test('Production refuses localhost and unconfigured databases instead of serving mock data',()=>{
