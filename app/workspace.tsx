@@ -62,7 +62,7 @@ type Page="memberConsole"|"community"|"competitions"|"hr"|"book"|"engagement"|"c
 type Modal={type:"offline"|"member"|"renew"|"payment"|"checkin"|"class"|"booking"|"decision"|"complete"|"void"|"demo"|"branch"|"archive";member?:Member;item?:Pulse;gymClass?:GymClass;id?:string;approved?:boolean};
 const palette=["purple","orange","blue","pink","green"];
 export default function Workspace(){
- const [packet,storePacket]=useState<Packet|null>(null),[error,setError]=useState(""),[lang,setLang]=usePreference<"ar"|"en">("gymos.language","ar"),[page,setPage]=useState<Page>("memberConsole"),[operationTab,setOperationTab]=useState('reception'),[renewalMember,setRenewalMember]=useState(''),[communityMember,setCommunityMember]=useState(''),[branch,setBranch]=useState("main"),[mobile,setMobile]=useState(false),[sectionSearch,setSectionSearch]=useState(""),[globalSearch,setGlobalSearch]=useState(""),[searchOpen,setSearchOpen]=useState(false),searchContainerRef=useRef<HTMLDivElement>(null),[search,setSearch]=useState(""),[profileId,setProfileId]=useState<string|null>(null),[filter,setFilter]=useState("all"),[pulseFilter,setPulseFilter]=useState("proposed"),[period,setPeriod]=useState(7),[tablePage,setTablePage]=useState(1),[busy,setBusy]=useState(false),[modal,setModal]=useState<Modal|null>(null),[toast,setToast]=useState<{text:string;error:boolean}|null>(null),[memberActionAnchor,setMemberActionAnchor]=useState<{ member: Member, top: number, left?: number, right?: number } | null>(null);
+ const [packet,storePacket]=useState<Packet|null>(null),[error,setError]=useState(""),[lang,setLang]=usePreference<"ar"|"en">("gymos.language","ar"),[page,setPage]=useState<Page>("memberConsole"),[operationTab,setOperationTab]=useState('reception'),[renewalMember,setRenewalMember]=useState(''),[communityMember,setCommunityMember]=useState(''),[branch,setBranch]=useState("main"),[mobile,setMobile]=useState(false),[sectionSearch,setSectionSearch]=useState(""),[globalSearch,setGlobalSearch]=useState(""),[searchOpen,setSearchOpen]=useState(false),searchContainerRef=useRef<HTMLDivElement>(null),[search,setSearch]=useState(""),[profileId,setProfileId]=useState<string|null>(null),[filter,setFilter]=useState("all"),[pulseFilter,setPulseFilter]=useState("proposed"),[period,setPeriod]=useState(7),[tablePage,setTablePage]=useState(1),[busy,setBusy]=useState(false),[modal,setModal]=useState<Modal|null>(null),[toast,setToast]=useState<{text:string;error:boolean}|null>(null),[memberActionAnchor,setMemberActionAnchor]=useState<{ member: Member, top: number, left: number } | null>(null);
  const [legacyProfile,setLegacyProfile]=useState(false);
  const [presenceCheck,setPresenceCheck]=useState<PresenceCheck|null>(null);
  const presencePending=useRef(false);
@@ -249,13 +249,8 @@ export default function Workspace(){
                               const menuHeight = 170;
                               const fitsBelow = (rect.bottom + menuHeight + 10) <= window.innerHeight;
                               const top = fitsBelow ? rect.bottom + 4 : Math.max(10, rect.top - menuHeight - 4);
-                              if (ar) {
-                                const right = Math.max(10, window.innerWidth - rect.right);
-                                setMemberActionAnchor({ member: m, top, right });
-                              } else {
-                                const left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left));
-                                setMemberActionAnchor({ member: m, top, left });
-                              }
+                              const left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, ar ? (rect.right - menuWidth < 10 ? rect.left : rect.right - menuWidth) : rect.left));
+                              setMemberActionAnchor({ member: m, top, left });
                             }}
                           >
                             <Ellipsis size={20}/>
@@ -404,7 +399,7 @@ export default function Workspace(){
             style={{
               position: 'fixed',
               top: memberActionAnchor.top,
-              ...(memberActionAnchor.right !== undefined ? { right: memberActionAnchor.right } : { left: memberActionAnchor.left }),
+              left: memberActionAnchor.left,
               width: 175,
               background: 'var(--surface, #1e1b2e)',
               border: '1px solid var(--line, #383158)',
