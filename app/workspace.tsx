@@ -23,6 +23,7 @@ import Copyright from './copyright';
 import {licenseState,trialWorkspaceLocked} from './lib/licensing';
 import Image from "next/image";
 import {useEffect,useEffectEvent,useRef,useState,type FormEvent,type CSSProperties,type ReactNode} from "react";
+import {createPortal} from "react-dom";
 import {Music2,Activity,ArrowDownLeft,ArrowUpRight,ArrowRight,ArrowLeft,BarChart3,Bell,Building2,CalendarDays,Check,CheckCircle2,ChevronDown,ChevronLeft,ChevronRight,Clock,Download,Dumbbell,Ellipsis,LayoutDashboard,Loader2,LogOut,Menu,Plus,RefreshCw,Search,Settings,ShieldCheck,Sparkles,Trash2,Users,Wallet,X,Zap,type LucideIcon} from "lucide-react";
 import {addDays,dayAt,days,type GymState,type Member,type Operation,type Pulse,type GymClass} from "./lib/domain";
 import ClubDesignEditor from './club-design-editor';
@@ -125,7 +126,255 @@ export default function Workspace(){
   <div className="dashboard-grid"><section className="card"><div className="card-head"><div><h2>{t("قريب من التجديد","Ready for the next chapter")}</h2><p>{t("اشتراكات تنتهي خلال ٧ أيام.","Memberships expiring within 7 days.")}</p></div><button className="text-button" onClick={()=>go("members")}>{t("عرض الكل","View all")}{arrow}</button></div>{renewals.length?<div className="renewal-list">{renewals.slice(0,4).map((m,i)=><div key={m.id}><div className="person">{Avatar({m:m,index:i})}<span><b>{label(m)}</b><small>{m.demo?t("عضو تجريبي","Demo member"):t("عضو النادي","Club member")}</small></span></div><span className="badge soon">{days(today,m.expires)===0?t("ينتهي اليوم","Expires today"):t(`خلال ${days(today,m.expires)} أيام`,`In ${days(today,m.expires)} days`)}</span><button className="icon-button" aria-label={t("تجديد اشتراك","Renew membership")} onClick={()=>openRenewal(m)} disabled={!canEdit}>{arrow}</button></div>)}</div>:Empty({title:t("الاشتراكات مستقرة","All clear for this week"),detail:t("لا يوجد تجديد مستحق خلال أسبوع.","No memberships expire within a week.")})}</section><section className="card"><div className="card-head"><div><h2>{t("الحصص القادمة","Up next on the floor")}</h2><p>{t("حركة منظمة، وتجربة أفضل.","Good sessions. Better experiences.")}</p></div><button className="icon-button" aria-label={t("عرض الحصص","View classes")} onClick={()=>go("classes")}><CalendarDays size={19}/></button></div>{ClassList({})}</section></div>
   <section className="pulse-strip"><span className="pulse-symbol"><Zap size={25}/></span><div><span className="eyebrow">GymEG PULSE</span><h3>{t("إشارات مفهومة. قرارات بإيدك.","Clear signals. Decisions in your hands.")}</h3><p>{t(`عندك ${proposals.length} مقترح للمراجعة. مفيش رسالة أو إجراء مالي بيتنفذ تلقائيًا.`,`${proposals.length} proposals to review. No messages or financial actions run automatically.`)}</p></div><button className="button dark-button" onClick={()=>go("pulse")}>{t("افتح Pulse","Open Pulse")}{arrow}</button></section>
  </>;}
- function MembersPage(){const results=members.filter(m=>{if(filter!=="all"&&status(m)!==filter)return false;if(!search.trim())return true;const q=search.trim().toLocaleLowerCase(),st=status(m),stText=statusText(st).toLocaleLowerCase(),cardCodes=(m.cards??[]).map(c=>c.code.toLocaleLowerCase());return [m.name,m.phone,m.extraPhone,m.id,m.card,m.membershipNumber,st,stText,...cardCodes].some(v=>typeof v==="string"&&v.toLocaleLowerCase().includes(q));});const pages=Math.max(1,Math.ceil(results.length/25));const slice=results.slice((Math.min(tablePage,pages)-1)*25,Math.min(tablePage,pages)*25);return <>{SectionHead({eyebrow:"YOUR COMMUNITY",title:t("الأعضاء والاشتراكات","Members & memberships"),description:t("ابحث عن العضو وافتح ملفه، أو أضف عضوًا جديدًا.","Find a member and open their profile, or add a new member."),actions:<><button className="button secondary" onClick={()=>exportCsv("members")}><Download size={16}/>{t("تصدير","Export")}</button><button className="button primary" onClick={()=>setModal({type:"member"})} disabled={!canEdit}><Plus size={17}/>{t("إضافة عضو","Add member")}</button></>})}<section className="card table-card"><div className="table-toolbar"><div className="tabs">{["all","active","soon","expired","frozen","quota","scheduled","archived"].map(value=><button className={filter===value?"selected":""} key={value} onClick={()=>{setFilter(value);setTablePage(1);}}>{value==="all"?t("كل الأعضاء","All members"):statusText(value)}</button>)}</div><div className="inline-search"><Search size={16}/><input aria-label={t("بحث الأعضاء","Search members")} value={search} placeholder={t("اسم، هاتف، أو رقم العضو...","Name, phone or member ID...")} onChange={e=>{setSearch(e.target.value);setTablePage(1);}}/></div></div>{results.length>0?<div className="table-scroll" tabIndex={0} role="region" aria-label="جدول قابل للتمرير / Scrollable table"><table><thead><tr>{[t("العضو","Member"),t("الهاتف","Phone"),t("الاشتراك حتى","Valid through"),t("آخر زيارة","Last visit"),t("الحالة","Status"),t("إجراءات","Actions")].map(v=><th key={v}>{v}</th>)}</tr></thead><tbody>{slice.map((m,i)=>{const last=visits.filter(v=>v.member===m.id).map(v=>v.day).sort().at(-1);return <tr key={m.id}><td><div className="person">{Avatar({m:m,index:i})}<span><button className="member-link" onClick={()=>setProfileId(m.id)}>{label(m)}</button><small>{m.demo?t("تجريبي","Demo"):t("عضو النادي","Club member")} · {date(m.joined)}</small></span></div></td><td><bdi>{m.phone||"—"}</bdi></td><td>{date(m.expires,{day:"numeric",month:"short",year:"numeric"})}</td><td>{last?date(last):t("لا توجد زيارة","No visit yet")}</td><td><span className={"badge "+status(m)}>{statusText(status(m))}</span></td><td><div className="row-actions"><button className="icon-button" aria-label={t("تسجيل حضور","Check in")} onClick={()=>setModal({type:"checkin",member:m})} disabled={!canEdit}><CheckCircle2 size={18}/></button><details className="action-menu"><summary aria-label={t("خيارات العضو","Member options")}><Ellipsis size={20}/></summary><div>{[{name:t("تعديل البيانات","Edit details"),type:"member"},{name:t("تجديد الاشتراك","Renew membership"),type:"renew"},{name:t("تسجيل تحصيل","Record collection"),type:"payment"},{name:m.archived?t("استعادة العضو","Restore member"):t("أرشفة العضو","Archive member"),type:"archive"}].map(a=><button key={a.type} onClick={e=>{e.currentTarget.closest("details")?.removeAttribute("open");if(a.type==='renew')openRenewal(m);else setModal({type:a.type as Modal["type"],member:m});}} disabled={!canEdit}>{a.name}</button>)}</div></details></div></td></tr>;})}</tbody></table></div>:Empty({title:t("لسه مفيش نتيجة هنا","No matches yet"),detail:t("جرّب بحث مختلف أو أضف أول عضو.","Try a different search or add your first member.")})}<div className="table-footer"><span>{t(`${results.length} عضو · صفحة ${Math.min(tablePage,pages)} من ${pages}`,`${results.length} members · page ${Math.min(tablePage,pages)} of ${pages}`)}</span><div><button className="icon-button" aria-label={t("الصفحة السابقة","Previous page")} disabled={tablePage<=1} onClick={()=>setTablePage(p=>p-1)}>{ar?<ChevronRight size={17}/>:<ChevronLeft size={17}/>}</button><button className="icon-button" aria-label={t("الصفحة التالية","Next page")} disabled={tablePage>=pages} onClick={()=>setTablePage(p=>p+1)}>{ar?<ChevronLeft size={17}/>:<ChevronRight size={17}/>}</button></div></div></section></>;}
+ function MembersPage(){
+    const [menuAnchor, setMenuAnchor] = useState<{ member: Member, top: number, left?: number, right?: number } | null>(null);
+
+    useEffect(() => {
+      if (!menuAnchor) return;
+      const close = () => setMenuAnchor(null);
+      const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+      window.addEventListener('scroll', close, true);
+      window.addEventListener('resize', close);
+      window.addEventListener('keydown', handleKey);
+      return () => {
+        window.removeEventListener('scroll', close, true);
+        window.removeEventListener('resize', close);
+        window.removeEventListener('keydown', handleKey);
+      };
+    }, [menuAnchor]);
+
+    const normalizeSearch = (str: string) =>
+      str
+        .toLocaleLowerCase()
+        .replace(/[أإآ]/g, 'ا')
+        .replace(/ة/g, 'ه')
+        .replace(/ى/g, 'ي')
+        .replace(/[\u064B-\u065F]/g, '');
+
+    const results = members.filter(m => {
+      if (filter !== 'all' && status(m) !== filter) return false;
+      if (!search.trim()) return true;
+      const q = normalizeSearch(search.trim());
+      const st = status(m);
+      const stText = statusText(st);
+      const cardCodes = (m.cards ?? []).map(c => c.code);
+      return [m.name, m.phone, m.extraPhone, m.id, m.card, m.membershipNumber, st, stText, ...cardCodes].some(
+        v => typeof v === 'string' && normalizeSearch(v).includes(q)
+      );
+    });
+
+    const pages = Math.max(1, Math.ceil(results.length / 25));
+    const slice = results.slice((Math.min(tablePage, pages) - 1) * 25, Math.min(tablePage, pages) * 25);
+
+    return <>
+      {SectionHead({
+        eyebrow: 'YOUR COMMUNITY',
+        title: t('الأعضاء والاشتراكات', 'Members & memberships'),
+        description: t('ابحث عن العضو وافتح ملفه، أو أضف عضوًا جديدًا.', 'Find a member and open their profile, or add a new member.'),
+        actions: <>
+          <button className="button secondary" onClick={() => exportCsv('members')}><Download size={16}/>{t('تصدير', 'Export')}</button>
+          <button className="button primary" onClick={() => setModal({ type: 'member' })} disabled={!canEdit}><Plus size={17}/>{t('إضافة عضو', 'Add member')}</button>
+        </>
+      })}
+      <section className="card table-card">
+        <div className="table-toolbar">
+          <div className="tabs">
+            {['all', 'active', 'soon', 'expired', 'frozen', 'quota', 'scheduled', 'archived'].map(value => (
+              <button
+                className={filter === value ? 'selected' : ''}
+                key={value}
+                onClick={() => { setFilter(value); setTablePage(1); setMenuAnchor(null); }}
+              >
+                {value === 'all' ? t('كل الأعضاء', 'All members') : statusText(value)}
+              </button>
+            ))}
+          </div>
+          <div className="inline-search">
+            <Search size={16}/>
+            <input
+              aria-label={t('بحث الأعضاء', 'Search members')}
+              value={search}
+              placeholder={t('اسم، هاتف، أو رقم العضو...', 'Name, phone or member ID...')}
+              onChange={e => { setSearch(e.target.value); setTablePage(1); setMenuAnchor(null); }}
+            />
+          </div>
+        </div>
+        {results.length > 0 ? (
+          <div className="table-scroll" tabIndex={0} role="region" aria-label="جدول قابل للتمرير / Scrollable table">
+            <table>
+              <thead>
+                <tr>
+                  {[t('العضو', 'Member'), t('الهاتف', 'Phone'), t('الاشتراك حتى', 'Valid through'), t('آخر زيارة', 'Last visit'), t('الحالة', 'Status'), t('إجراءات', 'Actions')].map(v => (
+                    <th key={v}>{v}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {slice.map((m, i) => {
+                  const last = visits.filter(v => v.member === m.id).map(v => v.day).sort().at(-1);
+                  return (
+                    <tr key={m.id}>
+                      <td>
+                        <div className="person">
+                          {Avatar({ m: m, index: i })}
+                          <span>
+                            <button className="member-link" onClick={() => setProfileId(m.id)}>{label(m)}</button>
+                            <small>{m.demo ? t('تجريبي', 'Demo') : t('عضو النادي', 'Club member')} · {date(m.joined)}</small>
+                          </span>
+                        </div>
+                      </td>
+                      <td><bdi>{m.phone || '—'}</bdi></td>
+                      <td>{date(m.expires, { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+                      <td>{last ? date(last) : t('لا توجد زيارة', 'No visit yet')}</td>
+                      <td><span className={'badge ' + status(m)}>{statusText(status(m))}</span></td>
+                      <td>
+                        <div className="row-actions">
+                          <button
+                            className="icon-button"
+                            aria-label={t('تسجيل حضور', 'Check in')}
+                            onClick={() => setModal({ type: 'checkin', member: m })}
+                            disabled={!canEdit}
+                          >
+                            <CheckCircle2 size={18}/>
+                          </button>
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={t('خيارات العضو', 'Member options')}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (menuAnchor?.member.id === m.id) {
+                                setMenuAnchor(null);
+                                return;
+                              }
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const menuWidth = 175;
+                              const menuHeight = 170;
+                              const fitsBelow = (rect.bottom + menuHeight + 10) <= window.innerHeight;
+                              const top = fitsBelow ? rect.bottom + 4 : Math.max(10, rect.top - menuHeight - 4);
+                              if (ar) {
+                                const right = Math.max(10, window.innerWidth - rect.right);
+                                setMenuAnchor({ member: m, top, right });
+                              } else {
+                                const left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left));
+                                setMenuAnchor({ member: m, top, left });
+                              }
+                            }}
+                          >
+                            <Ellipsis size={20}/>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          Empty({
+            title: t('لسه مفيش نتيجة هنا', 'No matches yet'),
+            detail: t('جرّب بحث مختلف أو أضف أول عضو.', 'Try a different search or add your first member.')
+          })
+        )}
+        <div className="table-footer">
+          <span>{t(`${results.length} عضو · صفحة ${Math.min(tablePage, pages)} من ${pages}`, `${results.length} members · page ${Math.min(tablePage, pages)} of ${pages}`)}</span>
+          <div>
+            <button
+              className="icon-button"
+              aria-label={t('الصفحة السابقة', 'Previous page')}
+              disabled={tablePage <= 1}
+              onClick={() => { setTablePage(p => p - 1); setMenuAnchor(null); }}
+            >
+              {ar ? <ChevronRight size={17}/> : <ChevronLeft size={17}/>}
+            </button>
+            <button
+              className="icon-button"
+              aria-label={t('الصفحة التالية', 'Next page')}
+              disabled={tablePage >= pages}
+              onClick={() => { setTablePage(p => p + 1); setMenuAnchor(null); }}
+            >
+              {ar ? <ChevronLeft size={17}/> : <ChevronRight size={17}/>}
+            </button>
+          </div>
+        </div>
+      </section>
+      {menuAnchor && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 999999,
+            pointerEvents: 'auto',
+            background: 'transparent',
+          }}
+          onClick={() => setMenuAnchor(null)}
+        >
+          <div
+            role="menu"
+            aria-label={t('خيارات العضو', 'Member options')}
+            style={{
+              position: 'fixed',
+              top: menuAnchor.top,
+              ...(menuAnchor.right !== undefined ? { right: menuAnchor.right } : { left: menuAnchor.left }),
+              width: 175,
+              background: 'var(--surface, #1e1b2e)',
+              border: '1px solid var(--line, #383158)',
+              boxShadow: '0 14px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
+              borderRadius: 10,
+              padding: 6,
+              zIndex: 1000000,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {[
+              { name: t('تعديل البيانات', 'Edit details'), type: 'member' },
+              { name: t('تجديد الاشتراك', 'Renew membership'), type: 'renew' },
+              { name: t('تسجيل تحصيل', 'Record collection'), type: 'payment' },
+              {
+                name: menuAnchor.member.archived
+                  ? t('استعادة العضو', 'Restore member')
+                  : t('أرشفة العضو', 'Archive member'),
+                type: 'archive'
+              }
+            ].map(a => (
+              <button
+                key={a.type}
+                type="button"
+                style={{
+                  fontSize: 'calc(11px * var(--reading-scale,1))',
+                  display: 'block',
+                  padding: '9px 12px',
+                  width: '100%',
+                  textAlign: 'start',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text, #fff)',
+                  cursor: canEdit ? 'pointer' : 'not-allowed',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                className="portal-action-menu-item"
+                onClick={() => {
+                  const member = menuAnchor.member;
+                  setMenuAnchor(null);
+                  if (a.type === 'renew') openRenewal(member);
+                  else setModal({ type: a.type as Modal['type'], member });
+                }}
+                disabled={!canEdit}
+              >
+                {a.name}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>;
+}
  function AttendancePage(){return <>{SectionHead({eyebrow:"SHOW UP. GROW STRONGER.",title:t("حضور الأعضاء","Member attendance"),description:t("سجل زيارات اليوم بدون تكرار، وتابع إيقاع النادي.","Record today's visits once and keep your club moving."),actions:<button className="button primary" onClick={()=>setModal({type:"checkin"})} disabled={!canEdit}><Plus size={17}/>{t("تسجيل حضور","Check in")}</button>})}<div className="attendance-hero"><span className="attendance-icon"><CheckCircle2 size={32}/></span><div><strong>{visits.filter(v=>v.day===today).length}</strong><span>{t("حضور مسجل اليوم","check-ins today")}</span></div><div className="attendance-streak"><Activity size={24}/><span>{t("كل يوم يفرق.","Every day counts.")}</span></div></div><AttendancePresence state={s!} branch={branch} owner={packet!.owner} ar={ar} canEdit={canEdit&&!packet!.support} busy={busy} check={presenceCheck} onMember={m=>setProfileId(m.id)} onExit={id=>void mutate({type:'visit.exit',id})}/><section className="card table-card"><div className="card-head"><h2>{t("آخر الزيارات","Recent visits")}</h2><span className="badge neutral">{t("آخر ١٠٠ سجل","Last 100 records")}</span></div><div className="table-scroll" tabIndex={0} role="region" aria-label="جدول قابل للتمرير / Scrollable table"><table><thead><tr><th>{t("العضو","Member")}</th><th>{t("التاريخ","Date")}</th><th>{t("وقت الحضور","Check-in time")}</th><th>{t("وقت المغادرة","Check-out time")}</th><th>{t("مدة البقاء","Time in club")}</th><th>{t("نوع السجل","Record")}</th></tr></thead><tbody>{[...visits].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map((v,i)=>{const m=memberById(v.member),timing=visitTiming(v,new Date().toISOString());return <tr key={v.id}><td>{m&&<div className="person">{Avatar({m:m,index:i})}<b>{label(m)}</b></div>}</td><td>{date(v.day,{day:"numeric",month:"long",year:"numeric"})}</td><td>{date(v.at,{hour:"2-digit",minute:"2-digit",timeZone:s!.settings.timezone})}</td><td>{timing.departure?date(timing.departure,{hour:'2-digit',minute:'2-digit',timeZone:s!.settings.timezone}):timing.expired?t('انتهت تلقائيًا دون تسجيل مغادرة','Expired without checkout'):t('لم يغادر بعد','Still checked in')}</td><td>{durationLabel(timing.durationMs,ar)}{(v.sessions?.length??0)>0&&<small>{t(' · مجموع فترات اليوم',' · total of today’s sessions')}</small>}</td><td><span className={"badge "+(m?.demo?"neutral":"active")}>{m?.demo?t("تجريبي","Demo"):t("حضور مؤكد","Checked in")}</span></td></tr>;})}</tbody></table></div>{!visits.length&&Empty({title:t("أول خطوة تبدأ هنا","Your first check-in starts here"),detail:t("سجّل حضور عضو باشتراك نشط.","Check in a member with an active subscription.")})}</section></>;}
  function PulsePage(){return <>{SectionHead({eyebrow:"DETERMINISTIC INTELLIGENCE",title:t("متابعة الأعضاء والاشتراكات","Member & membership follow-up"),description:t("قواعد واضحة من الحضور والاشتراكات. كل إجراء محتاج قرارك.","Clear rules from attendance and membership. Every action needs your decision."),actions:<button className="button primary" disabled={!canEdit||(busy)} onClick={()=>void mutate({type:"pulse.evaluate"})}><Sparkles size={17}/>{t("تحليل الآن","Evaluate now")}</button>})}<div className="pulse-intro"><span className="pulse-symbol"><Zap size={27}/></span><p>{t("Pulse لا يرسل رسائل ولا يغيّر اشتراكات أو مبالغ. بعد موافقتك يفتح مهمة متابعة بشرية.","Pulse never sends messages or changes memberships or money. Approval opens a human review task.")}</p><ShieldCheck size={23}/></div><div className="tabs standalone">{["proposed","approved","completed","all"].map(v=><button key={v} className={pulseFilter===v?"selected":""} onClick={()=>setPulseFilter(v)}>{v==="all"?t("كل السجل","All history"):statusText(v)}<span>{pulses.filter(p=>v==="all"||p.status===v).length}</span></button>)}</div><div className="pulse-grid">{pulses.filter(p=>pulseFilter==="all"||p.status===pulseFilter).slice().reverse().map(p=>{const m=memberById(p.member);if(!m)return null;const wa=memberWhatsAppLink(s!,m,branch,p.rule==='gap'?'absence':p.rule,ar,new Date().toISOString());return <section className={"card insight "+p.rule} key={p.id}><div className="insight-top"><span className={"stat-icon "+(p.rule==="expired"?"orange":p.rule==="renewal"?"purple":"blue")}><Zap size={19}/></span><span className={"badge "+p.status}>{statusText(p.status)}</span></div><h2>{p.rule==="gap"?t("غياب يستحق المتابعة","An attendance gap to review"):p.rule==="renewal"?t("التجديد قرب","A renewal is coming up"):t("الاشتراك انتهى","A membership has expired")}</h2><div className="person">{Avatar({m:m})}<b>{label(m)}</b></div><p>{p.rule==="gap"?t(`مر ${p.value} يومًا من آخر حضور أو الانضمام. الحد ١٤ يومًا.`,`${p.value} days since the last visit or join date. Threshold: 14 days.`):p.rule==="renewal"?t(`يتبقى ${p.value} يومًا على انتهاء الاشتراك. النافذة من صفر إلى ٧ أيام.`,`${p.value} days until expiry. The rule includes days 0 through 7.`):t(`انتهى الاشتراك منذ ${p.value} أيام.`,`${p.value} days since membership expiry.`)}</p><details className="evidence"><summary>{t("الدليل وتاريخ التقييم","Evidence & evaluation date")}<ChevronDown size={14}/></summary><p>{t("تاريخ التقييم: ","Evaluated: ")}{p.asOf}<br/>{t("مرجع آخر حضور/انضمام: ","Last visit / joined baseline: ")}{p.evidence}<br/>{t("انتهاء الاشتراك: ","Membership expiry: ")}{m.expires}<br/>{t("إصدار القواعد: 1.0","Rule version: 1.0")}</p></details>{p.note&&<p className="decision-note">{p.note}</p>}<div className="insight-actions">{canEdit&&wa&&<a className="button secondary" href={wa} target="_blank" rel="noopener noreferrer">{t("فتح واتساب العضو","Open member WhatsApp")}</a>}{p.status==="proposed"?<><button className="button primary" onClick={()=>setModal({type:"decision",item:p,approved:true})} disabled={!canEdit}><Check size={16}/>{t("اعتماد","Approve")}</button><button className="button secondary" onClick={()=>setModal({type:"decision",item:p,approved:false})} disabled={!canEdit}>{t("رفض","Reject")}</button></>:p.status==="approved"?<button className="button primary" onClick={()=>setModal({type:"complete",item:p})} disabled={!canEdit}><CheckCircle2 size={16}/>{t("إتمام المراجعة","Complete review")}</button>:<span className="muted small">{t("محفوظ في سجل المراجعة","Saved in review history")}</span>}</div></section>;})}</div>{!pulses.some(p=>pulseFilter==="all"||p.status===pulseFilter)&&<section className="card">{Empty({title:t("كل شيء تحت المتابعة","You're all caught up"),detail:t("شغّل التحليل عند تحديث الحضور أو الاشتراكات.","Evaluate Pulse when attendance or memberships change.")})}</section>}</>;}
 
