@@ -62,7 +62,7 @@ type Page="memberConsole"|"community"|"competitions"|"hr"|"book"|"engagement"|"c
 type Modal={type:"offline"|"member"|"renew"|"payment"|"checkin"|"class"|"booking"|"decision"|"complete"|"void"|"demo"|"branch"|"archive";member?:Member;item?:Pulse;gymClass?:GymClass;id?:string;approved?:boolean};
 const palette=["purple","orange","blue","pink","green"];
 export default function Workspace(){
- const [packet,storePacket]=useState<Packet|null>(null),[error,setError]=useState(""),[lang,setLang]=usePreference<"ar"|"en">("gymos.language","ar"),[page,setPage]=useState<Page>("memberConsole"),[operationTab,setOperationTab]=useState('reception'),[renewalMember,setRenewalMember]=useState(''),[communityMember,setCommunityMember]=useState(''),[branch,setBranch]=useState("main"),[mobile,setMobile]=useState(false),[sectionSearch,setSectionSearch]=useState(""),[globalSearch,setGlobalSearch]=useState(""),[searchOpen,setSearchOpen]=useState(false),searchContainerRef=useRef<HTMLDivElement>(null),[search,setSearch]=useState(""),[profileId,setProfileId]=useState<string|null>(null),[filter,setFilter]=useState("all"),[pulseFilter,setPulseFilter]=useState("proposed"),[period,setPeriod]=useState(7),[tablePage,setTablePage]=useState(1),[busy,setBusy]=useState(false),[modal,setModal]=useState<Modal|null>(null),[toast,setToast]=useState<{text:string;error:boolean}|null>(null);
+ const [packet,storePacket]=useState<Packet|null>(null),[error,setError]=useState(""),[lang,setLang]=usePreference<"ar"|"en">("gymos.language","ar"),[page,setPage]=useState<Page>("memberConsole"),[operationTab,setOperationTab]=useState('reception'),[renewalMember,setRenewalMember]=useState(''),[communityMember,setCommunityMember]=useState(''),[branch,setBranch]=useState("main"),[mobile,setMobile]=useState(false),[sectionSearch,setSectionSearch]=useState(""),[globalSearch,setGlobalSearch]=useState(""),[searchOpen,setSearchOpen]=useState(false),searchContainerRef=useRef<HTMLDivElement>(null),[search,setSearch]=useState(""),[profileId,setProfileId]=useState<string|null>(null),[filter,setFilter]=useState("all"),[pulseFilter,setPulseFilter]=useState("proposed"),[period,setPeriod]=useState(7),[tablePage,setTablePage]=useState(1),[busy,setBusy]=useState(false),[modal,setModal]=useState<Modal|null>(null),[toast,setToast]=useState<{text:string;error:boolean}|null>(null),[memberActionAnchor,setMemberActionAnchor]=useState<{ member: Member, top: number, left?: number, right?: number } | null>(null);
  const [legacyProfile,setLegacyProfile]=useState(false);
  const [presenceCheck,setPresenceCheck]=useState<PresenceCheck|null>(null);
  const presencePending=useRef(false);
@@ -95,13 +95,26 @@ export default function Workspace(){
  useEffect(()=>{document.documentElement.lang=lang;document.documentElement.dir=ar?"rtl":"ltr";localStorage.setItem("gymos.language",lang);},[lang,ar]);
  useEffect(()=>{const root=document.documentElement;const vars={...presetThemeStyle(selectedTheme.id),...clubDesignStyle(s?.settings.design)};for(const [key,value] of Object.entries(vars))root.style.setProperty(key,String(value));root.style.colorScheme=selectedTheme.dark?"dark":"light";return()=>{for(const key of Object.keys(vars))root.style.removeProperty(key);root.style.removeProperty('color-scheme');};},[selectedTheme,s?.settings.design]);
  useEffect(()=>{if(!toast)return;const timer=setTimeout(()=>setToast(null),6000);return()=>clearTimeout(timer);},[toast]);
+  useEffect(() => {
+    if (!memberActionAnchor) return;
+    const close = () => setMemberActionAnchor(null);
+    const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', handleKey);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', handleKey);
+    };
+  }, [memberActionAnchor]);
  useEffect(()=>{const onKey=(e:KeyboardEvent)=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="k"){e.preventDefault();searchRef.current?.focus();setSearchOpen(true);}};const onClickOutside=(e:MouseEvent)=>{if(searchContainerRef.current&&!searchContainerRef.current.contains(e.target as Node)){setSearchOpen(false);}};window.addEventListener("keydown",onKey);document.addEventListener("mousedown",onClickOutside);return()=>{window.removeEventListener("keydown",onKey);document.removeEventListener("mousedown",onClickOutside);};},[]);
  useEffect(()=>{if(!modal)return;const previous=document.activeElement as HTMLElement|null;const timer=setTimeout(()=>dialogRef.current?.querySelector<HTMLElement>("input,select,button")?.focus(),30);function key(e:KeyboardEvent){if(e.key==="Escape"&&!busy)setModal(null);if(e.key==="Tab"){const nodes=Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled]),input:not([disabled]),select,textarea,a[href]')??[]);if(!nodes.length)return;const first=nodes[0],last=nodes.at(-1)!;if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}}}document.addEventListener("keydown",key);return()=>{clearTimeout(timer);document.removeEventListener("keydown",key);previous?.focus();};},[modal,busy]);
  async function dispatchSms(id:string){if(!packet||busy)return;setBusy(true);try{const response=await fetch('/api/sms-dispatch',{method:'POST',headers:{'Content-Type':'application/json','X-GymOS-Tenant':packet.owner},body:JSON.stringify({id,revision:packet.revision}),signal:AbortSignal.timeout(30000)});const result=await response.json();notify(response.ok?t('قُبل الطلب لدى المزود؛ التسليم غير مؤكد.','Provider accepted the request; delivery is unconfirmed.'):result.error==='notConfigured'?t('مزود SMS غير مفعّل.','SMS provider is not enabled.'):t('راجع حالة الرسالة قبل أي محاولة أخرى.','Check message status before any further action.'),!response.ok);}catch{notify(t('نتيجة الاتصال غير مؤكدة. حدّث الحالة ولا تكرر الإرسال.','Connection outcome uncertain. Refresh status; do not repeat sending.'),true);}finally{await load();setBusy(false);}}
  async function mutate(operation:Omit<Operation,"branch">&{type:string}){if(!packet||busy)return false;if(packet.support){notify(t("جلسة دعم للقراءة فقط؛ لا يسمح بتعديل بيانات النادي.","Read-only support session; club records cannot be edited."),true);return false;}if(packet.license&&!licenseState(packet.license).writable){notify(t("الترخيص للقراءة فقط. راجع إدارة الأندية للتفعيل أو التجديد.","Read-only license. Open Clubs to activate or renew."),true);return false;}if(!receptionPermitted(packet.role,operation.type,packet.state.settings.receptionGrants?.[packet.user.id])){notify(errors.forbidden,true);return false;}if(!navigator.onLine){notify(t("هذه العملية تحتاج اتصالًا بالخادم.","This operation requires a server connection."),true);return false;}setBusy(true);const op={...operation,branch} as Operation;const json=JSON.stringify(op);if(pending.current?.json!==json)pending.current={json,id:crypto.randomUUID(),revision:packet.revision};try{const response=await fetch("/api/workspace",{method:"POST",signal:AbortSignal.timeout(["legacy.import","demo.seed"].includes(op.type)?240000:45000),headers:{"Content-Type":"application/json","X-GymOS-Tenant":packet.owner},body:JSON.stringify({operation:op,requestId:pending.current.id,revision:pending.current.revision})});const data=await response.json() as Packet&{error?:string};if(!response.ok){pending.current=null;if(response.status===409)await load();notify(errors[data.error??"invalid"]??errors.invalid,true);return false;}pending.current=null;setPacket(data);notify(t("تم حفظ التغيير.","Changes saved."));return true;}catch{notify(t("الاتصال انقطع. حاول بنفس العملية مجددًا لاستلام نتيجتها بدون تكرار.","Connection interrupted. Retry the same operation to retrieve its result without duplication."),true);return false;}finally{setBusy(false);}}
  const globalScan=useEffectEvent(async(code:string)=>{if(!packet)return;const candidate=packet.state.members.find(m=>m.branch===branch&&(m.card===code||m.cards?.some(c=>c.code===code)));if(candidate){setLegacyProfile(false);setProfileId(candidate.id);}await mutate({type:'visit.scan',code});});
  useEffect(()=>{let buffer='',last=0,lastCode='',lastRead=0;const key=(e:KeyboardEvent)=>{const target=e.target as HTMLElement|null;if(e.ctrlKey||e.metaKey||e.altKey||e.isComposing||target?.closest?.('input,textarea,select,[contenteditable="true"]'))return;const now=performance.now();if(now-last>80)buffer='';last=now;if(e.key==='Enter'){if(buffer.length>=4&&/^[A-Za-z0-9._-]+$/.test(buffer)){const code=buffer.toUpperCase();e.preventDefault();if(code!==lastCode||now-lastRead>2000){lastCode=code;lastRead=now;void globalScan(code);}}buffer='';}else if(e.key.length===1)buffer=(buffer+e.key).slice(-64);else buffer='';};window.addEventListener('keydown',key);return()=>window.removeEventListener('keydown',key);},[]);
- function go(next:Page,targetMember?:string){setPage(next);setRenewalMember('');setOperationTab('reception');if(next==='community'&&targetMember)setCommunityMember(targetMember);setMobile(false);window.scrollTo({top:0,behavior:'auto'});setFilter("all");setTablePage(1);setSearch("");}
+ function go(next:Page,targetMember?:string){setMemberActionAnchor(null);setPage(next);setRenewalMember('');setOperationTab('reception');if(next==='community'&&targetMember)setCommunityMember(targetMember);setMobile(false);window.scrollTo({top:0,behavior:'auto'});setFilter("all");setTablePage(1);setSearch("");}
  function openRenewal(m:Member){setProfileId(null);go('operations');setRenewalMember(m.id);setOperationTab('plans');}
  function status(m:Member){const issue=s?membershipIssue(s,m,today):null;return m.archived?"archived":m.awaitingSubscription?"pendingPlan":issue==="frozen"?"frozen":issue==="quota"?"quota":m.joined>today||(membershipPeriods(m).length>0&&!membershipPeriod(m,today)&&m.expires>=today)?"scheduled":m.expires<today?"expired":days(today,m.expires)<=7?"soon":"active";}
  function statusText(value:string){return({pendingPlan:t("بانتظار باقة","Awaiting package"),frozen:t("مجمّد","Frozen"),quota:t("الزيارات انتهت","No visits left"),scheduled:t("لم يبدأ","Scheduled"),active:t("نشط","Active"),soon:t("قريب التجديد","Renew soon"),expired:t("انتهى الاشتراك","Expired"),archived:t("مؤرشف","Archived"),proposed:t("بانتظار المراجعة","Needs review"),approved:t("معتمد","Approved"),completed:t("مكتمل","Completed"),rejected:t("مرفوض","Rejected"),cancelled:t("ملغى","Cancelled")})[value]??value;}
@@ -127,22 +140,6 @@ export default function Workspace(){
   <section className="pulse-strip"><span className="pulse-symbol"><Zap size={25}/></span><div><span className="eyebrow">GymEG PULSE</span><h3>{t("إشارات مفهومة. قرارات بإيدك.","Clear signals. Decisions in your hands.")}</h3><p>{t(`عندك ${proposals.length} مقترح للمراجعة. مفيش رسالة أو إجراء مالي بيتنفذ تلقائيًا.`,`${proposals.length} proposals to review. No messages or financial actions run automatically.`)}</p></div><button className="button dark-button" onClick={()=>go("pulse")}>{t("افتح Pulse","Open Pulse")}{arrow}</button></section>
  </>;}
  function MembersPage(){
-    const [menuAnchor, setMenuAnchor] = useState<{ member: Member, top: number, left?: number, right?: number } | null>(null);
-
-    useEffect(() => {
-      if (!menuAnchor) return;
-      const close = () => setMenuAnchor(null);
-      const handleKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
-      window.addEventListener('scroll', close, true);
-      window.addEventListener('resize', close);
-      window.addEventListener('keydown', handleKey);
-      return () => {
-        window.removeEventListener('scroll', close, true);
-        window.removeEventListener('resize', close);
-        window.removeEventListener('keydown', handleKey);
-      };
-    }, [menuAnchor]);
-
     const normalizeSearch = (str: string) =>
       str
         .toLocaleLowerCase()
@@ -183,7 +180,7 @@ export default function Workspace(){
               <button
                 className={filter === value ? 'selected' : ''}
                 key={value}
-                onClick={() => { setFilter(value); setTablePage(1); setMenuAnchor(null); }}
+                onClick={() => { setFilter(value); setTablePage(1); setMemberActionAnchor(null); }}
               >
                 {value === 'all' ? t('كل الأعضاء', 'All members') : statusText(value)}
               </button>
@@ -195,7 +192,7 @@ export default function Workspace(){
               aria-label={t('بحث الأعضاء', 'Search members')}
               value={search}
               placeholder={t('اسم، هاتف، أو رقم العضو...', 'Name, phone or member ID...')}
-              onChange={e => { setSearch(e.target.value); setTablePage(1); setMenuAnchor(null); }}
+              onChange={e => { setSearch(e.target.value); setTablePage(1); setMemberActionAnchor(null); }}
             />
           </div>
         </div>
@@ -243,8 +240,8 @@ export default function Workspace(){
                             aria-label={t('خيارات العضو', 'Member options')}
                             onClick={(e) => {
                               e.stopPropagation();
-                              if (menuAnchor?.member.id === m.id) {
-                                setMenuAnchor(null);
+                              if (memberActionAnchor?.member.id === m.id) {
+                                setMemberActionAnchor(null);
                                 return;
                               }
                               const rect = e.currentTarget.getBoundingClientRect();
@@ -254,10 +251,10 @@ export default function Workspace(){
                               const top = fitsBelow ? rect.bottom + 4 : Math.max(10, rect.top - menuHeight - 4);
                               if (ar) {
                                 const right = Math.max(10, window.innerWidth - rect.right);
-                                setMenuAnchor({ member: m, top, right });
+                                setMemberActionAnchor({ member: m, top, right });
                               } else {
                                 const left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, rect.left));
-                                setMenuAnchor({ member: m, top, left });
+                                setMemberActionAnchor({ member: m, top, left });
                               }
                             }}
                           >
@@ -284,7 +281,7 @@ export default function Workspace(){
               className="icon-button"
               aria-label={t('الصفحة السابقة', 'Previous page')}
               disabled={tablePage <= 1}
-              onClick={() => { setTablePage(p => p - 1); setMenuAnchor(null); }}
+              onClick={() => { setTablePage(p => p - 1); setMemberActionAnchor(null); }}
             >
               {ar ? <ChevronRight size={17}/> : <ChevronLeft size={17}/>}
             </button>
@@ -292,89 +289,16 @@ export default function Workspace(){
               className="icon-button"
               aria-label={t('الصفحة التالية', 'Next page')}
               disabled={tablePage >= pages}
-              onClick={() => { setTablePage(p => p + 1); setMenuAnchor(null); }}
+              onClick={() => { setTablePage(p => p + 1); setMemberActionAnchor(null); }}
             >
               {ar ? <ChevronLeft size={17}/> : <ChevronRight size={17}/>}
             </button>
           </div>
         </div>
       </section>
-      {menuAnchor && typeof document !== 'undefined' && createPortal(
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 999999,
-            pointerEvents: 'auto',
-            background: 'transparent',
-          }}
-          onClick={() => setMenuAnchor(null)}
-        >
-          <div
-            role="menu"
-            aria-label={t('خيارات العضو', 'Member options')}
-            style={{
-              position: 'fixed',
-              top: menuAnchor.top,
-              ...(menuAnchor.right !== undefined ? { right: menuAnchor.right } : { left: menuAnchor.left }),
-              width: 175,
-              background: 'var(--surface, #1e1b2e)',
-              border: '1px solid var(--line, #383158)',
-              boxShadow: '0 14px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
-              borderRadius: 10,
-              padding: 6,
-              zIndex: 1000000,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {[
-              { name: t('تعديل البيانات', 'Edit details'), type: 'member' },
-              { name: t('تجديد الاشتراك', 'Renew membership'), type: 'renew' },
-              { name: t('تسجيل تحصيل', 'Record collection'), type: 'payment' },
-              {
-                name: menuAnchor.member.archived
-                  ? t('استعادة العضو', 'Restore member')
-                  : t('أرشفة العضو', 'Archive member'),
-                type: 'archive'
-              }
-            ].map(a => (
-              <button
-                key={a.type}
-                type="button"
-                style={{
-                  fontSize: 'calc(11px * var(--reading-scale,1))',
-                  display: 'block',
-                  padding: '9px 12px',
-                  width: '100%',
-                  textAlign: 'start',
-                  borderRadius: 6,
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--text, #fff)',
-                  cursor: canEdit ? 'pointer' : 'not-allowed',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
-                className="portal-action-menu-item"
-                onClick={() => {
-                  const member = menuAnchor.member;
-                  setMenuAnchor(null);
-                  if (a.type === 'renew') openRenewal(member);
-                  else setModal({ type: a.type as Modal['type'], member });
-                }}
-                disabled={!canEdit}
-              >
-                {a.name}
-              </button>
-            ))}
-          </div>
-        </div>,
-        document.body
-      )}
     </>;
 }
+
  function AttendancePage(){return <>{SectionHead({eyebrow:"SHOW UP. GROW STRONGER.",title:t("حضور الأعضاء","Member attendance"),description:t("سجل زيارات اليوم بدون تكرار، وتابع إيقاع النادي.","Record today's visits once and keep your club moving."),actions:<button className="button primary" onClick={()=>setModal({type:"checkin"})} disabled={!canEdit}><Plus size={17}/>{t("تسجيل حضور","Check in")}</button>})}<div className="attendance-hero"><span className="attendance-icon"><CheckCircle2 size={32}/></span><div><strong>{visits.filter(v=>v.day===today).length}</strong><span>{t("حضور مسجل اليوم","check-ins today")}</span></div><div className="attendance-streak"><Activity size={24}/><span>{t("كل يوم يفرق.","Every day counts.")}</span></div></div><AttendancePresence state={s!} branch={branch} owner={packet!.owner} ar={ar} canEdit={canEdit&&!packet!.support} busy={busy} check={presenceCheck} onMember={m=>setProfileId(m.id)} onExit={id=>void mutate({type:'visit.exit',id})}/><section className="card table-card"><div className="card-head"><h2>{t("آخر الزيارات","Recent visits")}</h2><span className="badge neutral">{t("آخر ١٠٠ سجل","Last 100 records")}</span></div><div className="table-scroll" tabIndex={0} role="region" aria-label="جدول قابل للتمرير / Scrollable table"><table><thead><tr><th>{t("العضو","Member")}</th><th>{t("التاريخ","Date")}</th><th>{t("وقت الحضور","Check-in time")}</th><th>{t("وقت المغادرة","Check-out time")}</th><th>{t("مدة البقاء","Time in club")}</th><th>{t("نوع السجل","Record")}</th></tr></thead><tbody>{[...visits].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map((v,i)=>{const m=memberById(v.member),timing=visitTiming(v,new Date().toISOString());return <tr key={v.id}><td>{m&&<div className="person">{Avatar({m:m,index:i})}<b>{label(m)}</b></div>}</td><td>{date(v.day,{day:"numeric",month:"long",year:"numeric"})}</td><td>{date(v.at,{hour:"2-digit",minute:"2-digit",timeZone:s!.settings.timezone})}</td><td>{timing.departure?date(timing.departure,{hour:'2-digit',minute:'2-digit',timeZone:s!.settings.timezone}):timing.expired?t('انتهت تلقائيًا دون تسجيل مغادرة','Expired without checkout'):t('لم يغادر بعد','Still checked in')}</td><td>{durationLabel(timing.durationMs,ar)}{(v.sessions?.length??0)>0&&<small>{t(' · مجموع فترات اليوم',' · total of today’s sessions')}</small>}</td><td><span className={"badge "+(m?.demo?"neutral":"active")}>{m?.demo?t("تجريبي","Demo"):t("حضور مؤكد","Checked in")}</span></td></tr>;})}</tbody></table></div>{!visits.length&&Empty({title:t("أول خطوة تبدأ هنا","Your first check-in starts here"),detail:t("سجّل حضور عضو باشتراك نشط.","Check in a member with an active subscription.")})}</section></>;}
  function PulsePage(){return <>{SectionHead({eyebrow:"DETERMINISTIC INTELLIGENCE",title:t("متابعة الأعضاء والاشتراكات","Member & membership follow-up"),description:t("قواعد واضحة من الحضور والاشتراكات. كل إجراء محتاج قرارك.","Clear rules from attendance and membership. Every action needs your decision."),actions:<button className="button primary" disabled={!canEdit||(busy)} onClick={()=>void mutate({type:"pulse.evaluate"})}><Sparkles size={17}/>{t("تحليل الآن","Evaluate now")}</button>})}<div className="pulse-intro"><span className="pulse-symbol"><Zap size={27}/></span><p>{t("Pulse لا يرسل رسائل ولا يغيّر اشتراكات أو مبالغ. بعد موافقتك يفتح مهمة متابعة بشرية.","Pulse never sends messages or changes memberships or money. Approval opens a human review task.")}</p><ShieldCheck size={23}/></div><div className="tabs standalone">{["proposed","approved","completed","all"].map(v=><button key={v} className={pulseFilter===v?"selected":""} onClick={()=>setPulseFilter(v)}>{v==="all"?t("كل السجل","All history"):statusText(v)}<span>{pulses.filter(p=>v==="all"||p.status===v).length}</span></button>)}</div><div className="pulse-grid">{pulses.filter(p=>pulseFilter==="all"||p.status===pulseFilter).slice().reverse().map(p=>{const m=memberById(p.member);if(!m)return null;const wa=memberWhatsAppLink(s!,m,branch,p.rule==='gap'?'absence':p.rule,ar,new Date().toISOString());return <section className={"card insight "+p.rule} key={p.id}><div className="insight-top"><span className={"stat-icon "+(p.rule==="expired"?"orange":p.rule==="renewal"?"purple":"blue")}><Zap size={19}/></span><span className={"badge "+p.status}>{statusText(p.status)}</span></div><h2>{p.rule==="gap"?t("غياب يستحق المتابعة","An attendance gap to review"):p.rule==="renewal"?t("التجديد قرب","A renewal is coming up"):t("الاشتراك انتهى","A membership has expired")}</h2><div className="person">{Avatar({m:m})}<b>{label(m)}</b></div><p>{p.rule==="gap"?t(`مر ${p.value} يومًا من آخر حضور أو الانضمام. الحد ١٤ يومًا.`,`${p.value} days since the last visit or join date. Threshold: 14 days.`):p.rule==="renewal"?t(`يتبقى ${p.value} يومًا على انتهاء الاشتراك. النافذة من صفر إلى ٧ أيام.`,`${p.value} days until expiry. The rule includes days 0 through 7.`):t(`انتهى الاشتراك منذ ${p.value} أيام.`,`${p.value} days since membership expiry.`)}</p><details className="evidence"><summary>{t("الدليل وتاريخ التقييم","Evidence & evaluation date")}<ChevronDown size={14}/></summary><p>{t("تاريخ التقييم: ","Evaluated: ")}{p.asOf}<br/>{t("مرجع آخر حضور/انضمام: ","Last visit / joined baseline: ")}{p.evidence}<br/>{t("انتهاء الاشتراك: ","Membership expiry: ")}{m.expires}<br/>{t("إصدار القواعد: 1.0","Rule version: 1.0")}</p></details>{p.note&&<p className="decision-note">{p.note}</p>}<div className="insight-actions">{canEdit&&wa&&<a className="button secondary" href={wa} target="_blank" rel="noopener noreferrer">{t("فتح واتساب العضو","Open member WhatsApp")}</a>}{p.status==="proposed"?<><button className="button primary" onClick={()=>setModal({type:"decision",item:p,approved:true})} disabled={!canEdit}><Check size={16}/>{t("اعتماد","Approve")}</button><button className="button secondary" onClick={()=>setModal({type:"decision",item:p,approved:false})} disabled={!canEdit}>{t("رفض","Reject")}</button></>:p.status==="approved"?<button className="button primary" onClick={()=>setModal({type:"complete",item:p})} disabled={!canEdit}><CheckCircle2 size={16}/>{t("إتمام المراجعة","Complete review")}</button>:<span className="muted small">{t("محفوظ في سجل المراجعة","Saved in review history")}</span>}</div></section>;})}</div>{!pulses.some(p=>pulseFilter==="all"||p.status===pulseFilter)&&<section className="card">{Empty({title:t("كل شيء تحت المتابعة","You're all caught up"),detail:t("شغّل التحليل عند تحديث الحضور أو الاشتراكات.","Evaluate Pulse when attendance or memberships change.")})}</section>}</>;}
 
@@ -463,7 +387,81 @@ export default function Workspace(){
     <footer className="page-footer"><Copyright/><button onClick={()=>void load()} disabled={busy}><RefreshCw size={12}/>{t("تحديث البيانات","Refresh data")}</button></footer>
    </div></main>
   </div>
- </div>{profileId&&memberById(profileId)&&<ConsoleDialog priority dark={selectedTheme.dark} ar={ar} theme={{...presetThemeStyle(selectedTheme.id),colorScheme:selectedTheme.dark?"dark":"light",...clubDesignStyle(s?.settings.design)} as CSSProperties} title={t("ملف العضو — القسم الحالي محفوظ","Member profile — current section preserved")} close={()=>setProfileId(null)}><MemberConsoleDetails key={profileId} member={memberById(profileId)!} state={s!} branch={branch} owner={packet.owner} actor={packet.user.id} role={packet.role} busy={busy} ar={ar} readOnly={Boolean(packet.support)||Boolean(packet.license&&!licenseState(packet.license).writable)} serverNow={packet.serverNow} mutate={mutate} reload={load}/><details><summary>{t("الملف المتقدم والصحة والتدريب ودخول تطبيق العضو","Advanced profile, health, training & member app access")}</summary><button className="button secondary" onClick={()=>setLegacyProfile(true)}>{t("فتح الملف المتقدم","Open advanced profile")}</button></details></ConsoleDialog>}{legacyProfile&&profileId&&memberById(profileId)&&<MemberProfile owner={packet.owner} key={profileId} member={memberById(profileId)!} state={s!} ar={ar} canEdit={canEdit} financial={packet.role!=="reception"} busy={busy} onClose={()=>setLegacyProfile(false)} mutate={mutate}/>}<div className={selectedTheme.dark?"theme-dark":""} dir={ar?"rtl":"ltr"}>{ModalContent()}</div>{toast&&<div className={"toast "+(toast.error?"error":"")} role="status">{toast.error?<X size={18}/>:<CheckCircle2 size={18}/>}<span>{toast.text}</span><button onClick={()=>setToast(null)} aria-label={t("إغلاق","Dismiss")}><X size={15}/></button></div>}{dialog}</DeviceScopeProvider>;
+ </div>{profileId&&memberById(profileId)&&<ConsoleDialog priority dark={selectedTheme.dark} ar={ar} theme={{...presetThemeStyle(selectedTheme.id),colorScheme:selectedTheme.dark?"dark":"light",...clubDesignStyle(s?.settings.design)} as CSSProperties} title={t("ملف العضو — القسم الحالي محفوظ","Member profile — current section preserved")} close={()=>setProfileId(null)}><MemberConsoleDetails key={profileId} member={memberById(profileId)!} state={s!} branch={branch} owner={packet.owner} actor={packet.user.id} role={packet.role} busy={busy} ar={ar} readOnly={Boolean(packet.support)||Boolean(packet.license&&!licenseState(packet.license).writable)} serverNow={packet.serverNow} mutate={mutate} reload={load}/><details><summary>{t("الملف المتقدم والصحة والتدريب ودخول تطبيق العضو","Advanced profile, health, training & member app access")}</summary><button className="button secondary" onClick={()=>setLegacyProfile(true)}>{t("فتح الملف المتقدم","Open advanced profile")}</button></details></ConsoleDialog>}{legacyProfile&&profileId&&memberById(profileId)&&<MemberProfile owner={packet.owner} key={profileId} member={memberById(profileId)!} state={s!} ar={ar} canEdit={canEdit} financial={packet.role!=="reception"} busy={busy} onClose={()=>setLegacyProfile(false)} mutate={mutate}/>}<div className={selectedTheme.dark?"theme-dark":""} dir={ar?"rtl":"ltr"}>{ModalContent()}</div>{toast&&<div className={"toast "+(toast.error?"error":"")} role="status">{toast.error?<X size={18}/>:<CheckCircle2 size={18}/>}<span>{toast.text}</span><button onClick={()=>setToast(null)} aria-label={t("إغلاق","Dismiss")}><X size={15}/></button></div>}{memberActionAnchor && typeof document !== 'undefined' && createPortal(
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 999999,
+            pointerEvents: 'auto',
+            background: 'transparent',
+          }}
+          onClick={() => setMemberActionAnchor(null)}
+        >
+          <div
+            role="menu"
+            aria-label={t('خيارات العضو', 'Member options')}
+            style={{
+              position: 'fixed',
+              top: memberActionAnchor.top,
+              ...(memberActionAnchor.right !== undefined ? { right: memberActionAnchor.right } : { left: memberActionAnchor.left }),
+              width: 175,
+              background: 'var(--surface, #1e1b2e)',
+              border: '1px solid var(--line, #383158)',
+              boxShadow: '0 14px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06)',
+              borderRadius: 10,
+              padding: 6,
+              zIndex: 1000000,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {[
+              { name: t('تعديل البيانات', 'Edit details'), type: 'member' },
+              { name: t('تجديد الاشتراك', 'Renew membership'), type: 'renew' },
+              { name: t('تسجيل تحصيل', 'Record collection'), type: 'payment' },
+              {
+                name: memberActionAnchor.member.archived
+                  ? t('استعادة العضو', 'Restore member')
+                  : t('أرشفة العضو', 'Archive member'),
+                type: 'archive'
+              }
+            ].map(a => (
+              <button
+                key={a.type}
+                type="button"
+                style={{
+                  fontSize: 'calc(11px * var(--reading-scale,1))',
+                  display: 'block',
+                  padding: '9px 12px',
+                  width: '100%',
+                  textAlign: 'start',
+                  borderRadius: 6,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--text, #fff)',
+                  cursor: canEdit ? 'pointer' : 'not-allowed',
+                  transition: 'background 0.15s, color 0.15s',
+                }}
+                className="portal-action-menu-item"
+                onClick={() => {
+                  const member = memberActionAnchor.member;
+                  setMemberActionAnchor(null);
+                  if (a.type === 'renew') openRenewal(member);
+                  else setModal({ type: a.type as Modal['type'], member });
+                }}
+                disabled={!canEdit}
+              >
+                {a.name}
+              </button>
+            ))}
+          </div>
+        </div>,
+        document.body
+      )}
+      {dialog}</DeviceScopeProvider>;
 }
 
 function SettingsPanel({state,admin,ar,busy,branch,onBranch,onModal,demo,onLanguage,onExport,mutate}:{state:GymState;admin:boolean;ar:boolean;busy:boolean;branch:string;onBranch:(id:string)=>void;onModal:(modal:Modal)=>void;demo:boolean;onLanguage:()=>void;onExport:(kind:"members"|"payments")=>void;mutate:(operation:Omit<Operation,"branch">&{type:string})=>Promise<boolean>}){const s=state,canEdit=admin,t=(a:string,b:string)=>ar?a:b,selectedTheme=themes.find(theme=>theme.id===state.settings.theme)??themes[0];return <fieldset className="workspace-permissions" disabled={!admin}>{SectionHead({eyebrow:"MAKE IT YOURS",title:t("مساحتك. بطابع ناديك.","Your space. Your club's character."),description:t("اضبط الهوية والفروع والتجربة من مكان واحد.","Identity, branches and demo data in one place.")})}<TaskPanels ar={ar} labels={[t("بيانات النادي والفروع","Club details & branches"),t("المظهر والألوان","Appearance & colors"),t("الجهاز والتفضيلات","Device & preferences"),t("بيانات التجربة","Sample data")]}>
