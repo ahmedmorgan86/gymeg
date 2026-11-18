@@ -246,7 +246,7 @@ export default function Workspace(){
                               }
                               const rect = e.currentTarget.getBoundingClientRect();
                               const menuWidth = 175;
-                              const menuHeight = 170;
+                              const menuHeight = 210;
                               const fitsBelow = (rect.bottom + menuHeight + 10) <= window.innerHeight;
                               const top = fitsBelow ? rect.bottom + 4 : Math.max(10, rect.top - menuHeight - 4);
                               const left = Math.max(10, Math.min(window.innerWidth - menuWidth - 10, ar ? (rect.right - menuWidth < 10 ? rect.left : rect.right - menuWidth) : rect.left));
@@ -417,6 +417,7 @@ export default function Workspace(){
               { name: t('تعديل البيانات', 'Edit details'), type: 'member' },
               { name: t('تجديد الاشتراك', 'Renew membership'), type: 'renew' },
               { name: t('تسجيل تحصيل', 'Record collection'), type: 'payment' },
+              { name: t('الرقم السري وتطبيق العضو', 'Member PIN & app'), type: 'portal' },
               {
                 name: memberActionAnchor.member.archived
                   ? t('استعادة العضو', 'Restore member')
@@ -445,6 +446,7 @@ export default function Workspace(){
                   const member = memberActionAnchor.member;
                   setMemberActionAnchor(null);
                   if (a.type === 'renew') openRenewal(member);
+                  else if (a.type === 'portal') setProfileId(member.id);
                   else setModal({ type: a.type as Modal['type'], member });
                 }}
                 disabled={!canEdit}
