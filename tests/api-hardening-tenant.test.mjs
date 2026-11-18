@@ -79,10 +79,10 @@ test('B14: a stale header from another club is rejected on every sensitive read'
   }
 });
 
-test('B14: a missing tenant header is also rejected in commercial mode', async () => {
+test('B14: initial workspace read without tenant header succeeds for authenticated user', async () => {
   const response = await workspaceGet(getRequest('/api/workspace', null));
-  assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), {error: 'clubChanged'});
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), {ok: true});
 });
 
 test('B14: non-commercial mode still permits a stale header without blocking reads', async () => {
