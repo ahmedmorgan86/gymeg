@@ -207,9 +207,12 @@ export class WorkspaceSyncManager {
     try {
       let hasMore = true;
       while (hasMore && !this.unmounted) {
-        const url = `/api/workspace/changes?after=${this.currentRevision}`;
+        const current = this.options.getCurrentPacket();
+        const currentRev = current?.revision ?? this.currentRevision;
+        const url = `/api/workspace/changes?after=${currentRev}`;
         const res = await fetch(url, {
           method: 'GET',
+          credentials: 'same-origin',
           headers: {
             'Accept': 'application/json',
             'X-GymOS-Tenant': this.options.owner
@@ -244,6 +247,9 @@ export class WorkspaceSyncManager {
           }
         }
 
+        if (!data.events || data.events.length === 0) {
+          this.currentRevision = Math.max(this.currentRevision, data.toRevision);
+        }
         hasMore = data.hasMore;
       }
 

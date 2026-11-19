@@ -1,11 +1,10 @@
-import {context, reply, sameOrigin} from '../../../lib/server-workspace';
+import {context, reply} from '../../../lib/server-workspace';
+import {CommercialError} from '../../../lib/licensing';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {withScope} from '../../../lib/database';
 
 export async function GET(request: Request) {
   try {
-    if (!sameOrigin(request)) return reply({error: 'origin'}, 403);
-
     const ctx = await context();
     if (!ctx) return reply({error: 'auth'}, 401);
 
@@ -127,6 +126,10 @@ export async function GET(request: Request) {
 
     return reply(result);
   } catch (err) {
-    return reply({error: 'unavailable'}, 503);
+    if (err instanceof CommercialError) return reply({error: err.code}, err.status);
+    return reply(
+      {error: err instanceof Error && err.message === 'forbidden' ? 'forbidden' : 'unavailable'},
+      err instanceof Error && err.message === 'forbidden' ? 403 : 503
+    );
   }
 }
