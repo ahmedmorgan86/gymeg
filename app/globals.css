@@ -45,7 +45,7 @@ button,input,select,textarea{font-weight:600}.cards-page label{font-size:calc(14
 
 .workspace-permissions{border:0;padding:0;margin:0;min-width:0}.theme-gallery{padding:28px;margin-bottom:24px}.theme-gallery p{color:var(--muted);margin:10px 0 20px}.theme-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.theme-grid>button{position:relative;border:2px solid var(--line);padding:14px;border-radius:14px;text-align:start;display:grid;gap:12px;min-height:120px}.theme-grid>button[aria-pressed=true]{box-shadow:0 0 0 2px var(--purple)}.theme-grid>button>svg{position:absolute;inset-inline-end:12px;bottom:15px}.theme-swatch{display:flex;gap:8px;padding:10px;border-radius:8px}.theme-swatch i{height:20px;width:28px;border-radius:5px}
 
-.theme-dark .button.primary{color:var(--bg)}.theme-dark .sidebar nav button.active{color:var(--text)}
+.theme-dark .button.primary{color:var(--club-accent-text,#fff)!important;}.theme-dark .sidebar nav button.active{color:var(--text)}
 
 /* Enterprise interaction and information hierarchy */
 .member-link{font-weight:800;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:4px}.member-link:hover,.member-link:focus-visible{text-decoration-color:var(--purple);color:var(--purple)}
