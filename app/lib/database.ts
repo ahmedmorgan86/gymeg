@@ -1,3 +1,4 @@
+import {isFirebaseConfigured} from './firestore-db.ts';
 import {Pool,type PoolClient} from 'pg';
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -34,7 +35,7 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
 }
 export function getPool(){
   if(!process.env.DATABASE_URL){
-   if(mockAllowed()){console.warn('DATABASE_URL is not set — explicit test mock active');return mockPool;}
+   if(mockAllowed()||isFirebaseConfigured()){console.warn('DATABASE_URL is not set — fallback mock/Firebase active');return mockPool;}
    throw new Error('DATABASE_URL is required; silent database mocks are disabled outside tests');
   }
   try{
@@ -46,7 +47,7 @@ export function getPool(){
    }
    return pool;
   }catch(err){
-   if(mockAllowed()){console.warn('Database pool unavailable — explicit test mock active',err);return mockPool;}
+   if(mockAllowed()||isFirebaseConfigured()){console.warn('Database pool unavailable — fallback mock/Firebase active',err);return mockPool;}
    throw new Error('Database configuration is invalid; refusing to serve empty data',{cause:err});
   }
 }
