@@ -11,7 +11,7 @@ export async function POST(request:Request){try{
  if(!sameOrigin(request))return reply({error:'origin'},403);
  if(request.headers.get('content-type')?.split(';')[0]!=='application/json')return reply({error:'invalid'},415);
  const ctx=await context();
- if(!ctx)return reply({error:'auth'},401);
+ if(!ctx||ctx.support)return reply({error:'forbidden'},403);
  assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));
  if(ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);
  const raw=await request.text();

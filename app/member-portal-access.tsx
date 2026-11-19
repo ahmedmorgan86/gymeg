@@ -1,14 +1,14 @@
 "use client";
-import {useState} from 'react';
+import {useState, useEffect} from 'react';
 import {useConfirmDialog} from '../components/ui/use-confirm-dialog';
 
-type AccessProps = {member: string; owner: string; ar: boolean; busy: boolean};
+type AccessProps = {member: string; owner: string; ar: boolean; busy: boolean; autoLoad?: boolean};
 
 export default function MemberPortalAccess(props: AccessProps) {
   return <MemberPhoneAccess key={props.owner + ':' + props.member} {...props} />;
 }
 
-function MemberPhoneAccess({member, owner, ar, busy}: AccessProps) {
+function MemberPhoneAccess({member, owner, ar, busy, autoLoad}: AccessProps) {
   const [credentials, setCredentials] = useState<{
     phone: string;
     pin: string | null;
@@ -23,6 +23,12 @@ function MemberPhoneAccess({member, owner, ar, busy}: AccessProps) {
 
   const t = (a: string, e: string) => (ar ? a : e);
   const {confirm, dialog} = useConfirmDialog();
+
+  useEffect(() => {
+    if (autoLoad) {
+      void action('read');
+    }
+  }, [autoLoad]);
 
   async function action(act: 'read' | 'rotate' | 'revoke' | 'requireChange' | 'setPin', pinValue?: string) {
     setPending(true);
@@ -153,6 +159,41 @@ function MemberPhoneAccess({member, owner, ar, busy}: AccessProps) {
       {revoked && (
         <div style={{background: '#ef44441a', border: '1px solid #ef444440', padding: '10px 14px', borderRadius: 8, color: '#ef4444', fontSize: 13, fontWeight: 700}}>
           ⚠️ {t('دخول هذا العضو لتطبيق الموبايل موقوف حاليًا. أعد تعيين رقم سري لتفعيل الدخول مجددًا.', 'Mobile access for this member is currently disabled. Reset PIN to re-enable.')}
+        </div>
+      )}
+
+      {!credentials && (
+        <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, padding: '14px 18px', background: 'var(--surface-soft, #22222f)', border: '1px solid var(--line, #38384a)', borderRadius: 10}}>
+          <div>
+            <b style={{fontSize: 14, color: 'var(--text, #f0edf9)', display: 'block'}}>
+              📱 {t('بيانات الدخول لتطبيق الموبايل', 'Member app sign-in credentials')}
+            </b>
+            <span style={{fontSize: 12, color: 'var(--muted, #9a96ae)'}}>
+              {t('انقر لعرض رقم الموبايل المسجل وكلمة المرور المؤقتة ومشاركتها عبر واتساب.', 'Click to view registered mobile, temporary PIN, and share via WhatsApp.')}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="button primary"
+            style={{
+              color: '#ffffff',
+              background: 'linear-gradient(105deg, #7c3aed, #9333ea)',
+              border: 'none',
+              padding: '10px 20px',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 14,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(124, 58, 237, 0.35)'
+            }}
+            disabled={busy || pending}
+            onClick={() => void action('read')}
+          >
+            👁️ {pending ? t('جارٍ التحميل...', 'Loading...') : t('عرض بيانات دخول العضو', 'Show Member Sign-in Details')}
+          </button>
         </div>
       )}
 

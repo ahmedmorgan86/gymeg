@@ -11,4 +11,38 @@ export async function persistSpace(owner:string,current:{state:GymState;revision
  const events=!archived||restore?[...new Map([...current.state.events,...next.events].map(e=>[e.id,e])).values()]:next.events.filter(e=>!known.has(e.id));
  for(let i=0;i<events.length;i+=500){const batch=JSON.stringify(events.slice(i,i+500));const mismatch=await client.query("SELECT 1 FROM gymos.gym_activity_archive a JOIN jsonb_array_elements($2::jsonb) x ON a.event_id=x->>'id' WHERE a.owner_id=$1 AND a.payload<>x LIMIT 1",[owner,batch]);if(mismatch.rowCount)throw new Error('Immutable activity conflict');await client.query("INSERT INTO gymos.gym_activity_archive(owner_id,event_id,branch,at,payload) SELECT $1,x->>'id',x->>'branch',x->>'at',x FROM jsonb_array_elements($2::jsonb) x ON CONFLICT(owner_id,event_id) DO NOTHING",[owner,batch]);}
  const before=splitState(current.state),after=splitState({...next,events:next.events.slice(-RECENT_EVENTS)}),changes=entityChanges(before.entities,after.entities,first),{upserts,removed}=changes;for(let i=0;i<removed.length;i+=1000)await client.query('DELETE FROM gymos.gym_entities e USING jsonb_to_recordset($2::jsonb) AS x(collection text,entity_id text) WHERE e.owner_id=$1 AND e.collection=x.collection AND e.entity_id=x.entity_id',[owner,JSON.stringify(removed.slice(i,i+1000).map(e=>({collection:e.collection,entity_id:e.entity_id})))]);if(upserts.length)await client.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT $1,x.collection,x.entity_id,x.position,x.branch,x.payload FROM jsonb_to_recordset($2::jsonb) AS x(collection text,entity_id text,position integer,branch text,payload jsonb) ON CONFLICT(owner_id,collection,entity_id) DO UPDATE SET position=excluded.position,branch=excluded.branch,payload=excluded.payload',[owner,JSON.stringify(upserts)]);for(const [id,content]of Object.entries(after.photos))if(first||before.photos[id]!==content)await client.query('INSERT INTO gymos.gym_photos(owner_id,member_id,content) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET content=excluded.content',[owner,id,content]);for(const id of Object.keys(before.photos))if(!(id in after.photos))await client.query('DELETE FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,id]);after.metadata._activityArchive=1;const newRevision=current.revision+1;await client.query('UPDATE gymos.gym_states SET payload=$1,revision=revision+1,updated_at=$2 WHERE user_id=$3',[JSON.stringify(after.metadata),new Date().toISOString(),owner]);
-  try{const eventsToLog=[...upserts.map(u=>({id:crypto.randomUUID(),event_type:'entity.upsert',collection:u.collection,entity_id:u.entity_id,branch:u.branch??null,payload:u.payload})),...removed.map(r=>({id:crypto.randomUUID(),event_type:'entity.delete',collection:r.collection,entity_id:r.entity_id,branch:null,payload:null})),...(JSON.stringify(before.metadata)!==JSON.stringify(after.metadata)?[{id:crypto.randomUUID(),event_type:'metadata.update',collection:'_metadata',entity_id:'settings',branch:null,payload:after.metadata}]:[])];if(eventsToLog.length){for(let i=0;i<eventsToLog.length;i+=500){const chunk=eventsToLog.slice(i,i+500);await client.query('INSERT INTO gymos.workspace_events(id,owner_id,tenant_id,revision,event_type,collection,entity_id,branch,payload) SELECT x.id,$1,$2,$3,x.event_type,x.collection,x.entity_id,x.branch,x.payload FROM jsonb_to_recordset($4::jsonb) AS x(id text,event_type text,collection text,entity_id text,branch text,payload jsonb) ON CONFLICT(owner_id,revision,id) DO NOTHING',[owner,tenantId,newRevision,JSON.stringify(chunk)]);}}await client.query('INSERT INTO gymos.workspace_outbox(id,owner_id,tenant_id,channel,event,payload) VALUES($1,$2,$3,$4,$5,$6)',[crypto.randomUUID(),owner,tenantId,`club:${tenantId}:workspace`,'workspace.updated',JSON.stringify({revision:newRevision,tenantId,timestamp:new Date().toISOString()})]);}catch{}if(first||restore||JSON.stringify(current.state.members.map(m=>[m.id,m.branch,m.demo,m.archived,m.phone]))!==JSON.stringify(next.members.map(m=>[m.id,m.branch,m.demo,m.archived,m.phone])))await syncMemberAccess(client,next.members);await client.query('COMMIT');try{void processWorkspaceOutbox(owner);}catch{}return true;}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}
+  try{
+    await client.query('SAVEPOINT events_sp');
+    const eventsToLog=[...upserts.map(u=>({id:crypto.randomUUID(),event_type:'entity.upsert',collection:u.collection,entity_id:u.entity_id,branch:u.branch??null,payload:u.payload})),...removed.map(r=>({id:crypto.randomUUID(),event_type:'entity.delete',collection:r.collection,entity_id:r.entity_id,branch:null,payload:null})),...(JSON.stringify(before.metadata)!==JSON.stringify(after.metadata)?[{id:crypto.randomUUID(),event_type:'metadata.update',collection:'_metadata',entity_id:'settings',branch:null,payload:after.metadata}]:[])];
+    if(eventsToLog.length){
+      for(let i=0;i<eventsToLog.length;i+=500){
+        const chunk=eventsToLog.slice(i,i+500);
+        await client.query('INSERT INTO gymos.workspace_events(id,owner_id,tenant_id,revision,event_type,collection,entity_id,branch,payload) SELECT x.id,$1,$2,$3,x.event_type,x.collection,x.entity_id,x.branch,x.payload FROM jsonb_to_recordset($4::jsonb) AS x(id text,event_type text,collection text,entity_id text,branch text,payload jsonb) ON CONFLICT(owner_id,revision,id) DO NOTHING',[owner,tenantId,newRevision,JSON.stringify(chunk)]);
+      }
+    }
+    await client.query('INSERT INTO gymos.workspace_outbox(id,owner_id,tenant_id,channel,event,payload) VALUES($1,$2,$3,$4,$5,$6)',[crypto.randomUUID(),owner,tenantId,`club:${tenantId}:workspace`,'workspace.updated',JSON.stringify({revision:newRevision,tenantId,timestamp:new Date().toISOString()})]);
+    await client.query('RELEASE SAVEPOINT events_sp');
+  }catch(eventErr){
+    try{await client.query('ROLLBACK TO SAVEPOINT events_sp');}catch{}
+    console.warn('[Workspace Events Safe Rollback]:',eventErr);
+  }
+  if(first||restore||JSON.stringify(current.state.members.map(m=>[m.id,m.branch,m.demo,m.archived,m.phone]))!==JSON.stringify(next.members.map(m=>[m.id,m.branch,m.demo,m.archived,m.phone]))){
+    try{
+      await client.query('SAVEPOINT member_access_sp');
+      await syncMemberAccess(client,next.members);
+      await client.query('RELEASE SAVEPOINT member_access_sp');
+    }catch(syncErr){
+      try{await client.query('ROLLBACK TO SAVEPOINT member_access_sp');}catch{}
+      console.warn('[Member Access Sync Safe Rollback]:',syncErr);
+    }
+  }
+  await client.query('COMMIT');
+  try{void processWorkspaceOutbox(owner);}catch{}
+  return true;
+ }catch(error){
+  await client.query('ROLLBACK');
+  throw error;
+ }finally{
+  client.release();
+ }
+}
