@@ -1,5 +1,4 @@
 import { cookies } from 'next/headers';
-import { getAuth } from 'firebase-admin/auth';
 import { isFirebaseConfigured, getFirestoreDb } from './firestore-db.ts';
 
 export async function serverAuth() {
@@ -20,8 +19,28 @@ export async function serverAuth() {
         }
 
         try {
+          // Fast-path: native base64url session token
+          try {
+            const parsed = JSON.parse(Buffer.from(sessionToken, 'base64url').toString('utf8'));
+            if (parsed && (parsed.uid || parsed.id || parsed.email)) {
+              return {
+                data: {
+                  user: {
+                    id: parsed.uid || parsed.id || 'owner',
+                    email: parsed.email || 'owner@example.com',
+                    user_metadata: { name: parsed.name || 'Owner' },
+                  },
+                },
+                error: null,
+              };
+            }
+          } catch {
+            // Not a native base64url JSON session token, try Firebase Auth if configured
+          }
+
           if (isFirebaseConfigured()) {
             getFirestoreDb(); // ensure admin app is initialized
+            const { getAuth } = await import('firebase-admin/auth');
             const auth = getAuth();
             try {
               const decoded = await auth.verifySessionCookie(sessionToken, true);
@@ -52,17 +71,7 @@ export async function serverAuth() {
             }
           }
 
-          const parsed = JSON.parse(Buffer.from(sessionToken, 'base64url').toString('utf8'));
-          return {
-            data: {
-              user: {
-                id: parsed.uid || parsed.id || 'owner',
-                email: parsed.email || 'owner@example.com',
-                user_metadata: { name: parsed.name || 'Owner' },
-              },
-            },
-            error: null,
-          };
+          return { data: { user: null }, error: null };
         } catch (e) {
           return { data: { user: null }, error: e };
         }
@@ -107,6 +116,7 @@ export async function serverAuth() {
         if (isFirebaseConfigured()) {
           try {
             getFirestoreDb();
+            const { getAuth } = await import('firebase-admin/auth');
             const link = await getAuth().generatePasswordResetLink(email);
             return { error: null, link };
           } catch (err: any) {
