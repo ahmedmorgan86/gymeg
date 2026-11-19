@@ -272,3 +272,12 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 .hud-meta-grid b{font-size:16px;font-weight:800}
 .hud-quick-actions{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
 .hud-quick-actions button{flex:1;min-height:46px;font-size:14px;font-weight:800;border-radius:10px}
+
+/* Accessible High-Priority AlertDialog Overlay and Box (Guaranteed Viewport Centering & Top-Level z-index) */
+[data-slot="alert-dialog-overlay"]{position:fixed!important;inset:0!important;z-index:9998!important;background:rgba(10,10,20,0.72)!important;backdrop-filter:blur(6px)!important}
+[data-slot="alert-dialog-content"]{position:fixed!important;top:50%!important;left:50%!important;transform:translate(-50%,-50%)!important;z-index:9999!important;width:min(92vw,480px)!important;max-height:90vh!important;overflow-y:auto!important;background:var(--surface,#1e1e2d)!important;color:var(--text,#f0edf9)!important;border:1.5px solid var(--line,#3f3f58)!important;border-radius:18px!important;padding:24px!important;box-shadow:0 25px 70px rgba(0,0,0,0.65)!important;display:grid!important;gap:16px!important}
+[data-slot="alert-dialog-title"]{font-size:18px!important;font-weight:800!important;color:var(--text,#f0edf9)!important;margin:0!important}
+[data-slot="alert-dialog-description"]{font-size:14px!important;color:var(--muted,#9a96ae)!important;line-height:1.6!important;margin:4px 0 0!important}
+[data-slot="alert-dialog-footer"]{display:flex!important;gap:10px!important;justify-content:flex-end!important;flex-wrap:wrap!important;margin-top:10px!important}
+[data-slot="alert-dialog-action"]{background:var(--accent,var(--purple,#7c3aed))!important;color:#ffffff!important;font-weight:700!important;padding:9px 18px!important;border-radius:8px!important;border:none!important;cursor:pointer!important}
+[data-slot="alert-dialog-cancel"]{background:var(--surface-soft,#272738)!important;color:var(--text,#f0edf9)!important;border:1px solid var(--line,#38384a)!important;font-weight:600!important;padding:9px 16px!important;border-radius:8px!important;cursor:pointer!important}
