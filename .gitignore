@@ -128,3 +128,7 @@ next-env.d.ts
 
 __pycache__/
 *.pyc
+
+*serviceAccount*.json
+*adminsdk*.json
+
