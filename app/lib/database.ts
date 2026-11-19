@@ -27,10 +27,7 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
   // is issued by a private CA (Supabase Root), so verification then always fails and
   // every request returns 503. Strip those parameters so our TLS settings always win.
   for(const param of ['sslmode','ssl','sslrootcert','sslcert','sslkey','sslnegotiation'])url.searchParams.delete(param);
-  let caCert: string | undefined;
-  try{caCert=readFileSync(join(process.cwd(),'certs','supabase-ca.crt'),'utf8');}
-  catch(error){console.error('supabase_ca_read_failed',error instanceof Error?error.message:String(error));}
-  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:caCert?[...rootCertificates,caCert]:undefined};
+  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:[...rootCertificates]};
   return {url,ssl};
 }
 export function getPool(){

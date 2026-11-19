@@ -10,20 +10,17 @@ export interface BroadcastPayload {
 }
 
 /**
- * Broadcasts a lightweight revision notification to the gym's private Supabase Realtime channel.
- * Uses the Supabase Realtime REST Broadcast endpoint for high throughput and sub-15ms delivery.
+ * Broadcasts a lightweight revision notification to the gym's private channel.
  */
 export async function sendRealtimeBroadcast(
   tenantId: string,
   event: string,
   payload: BroadcastPayload
 ): Promise<boolean> {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || 
-              process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 
-              process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const url = process.env.REALTIME_BROADCAST_URL;
+  const key = process.env.REALTIME_BROADCAST_KEY;
 
-  if (!url || !key || url.includes('placeholder')) {
+  if (!url || !key) {
     // Graceful skip in test / offline environments
     return false;
   }

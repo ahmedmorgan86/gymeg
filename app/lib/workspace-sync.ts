@@ -86,7 +86,7 @@ export function applyWorkspaceDeltas(prev: Packet | null, events: DeltaEvent[]):
 }
 
 /**
- * Manages Supabase Realtime channel subscription and incremental Delta recovery.
+ * Manages real-time channel subscription and incremental Delta recovery.
  */
 export class WorkspaceSyncManager {
   private status: SyncStatus = 'connecting';
@@ -120,16 +120,16 @@ export class WorkspaceSyncManager {
   }
 
   /**
-   * Starts realtime subscription using the browser Supabase client.
+   * Starts realtime subscription.
    */
-  public async start(supabaseClient?: any) {
+  public async start(realtimeClient?: any) {
     this.unmounted = false;
     this.setStatus('connecting');
 
-    if (supabaseClient && typeof supabaseClient.channel === 'function') {
+    if (realtimeClient && typeof realtimeClient.channel === 'function') {
       try {
         const topic = `club:${this.options.tenantId}:workspace`;
-        this.channel = supabaseClient.channel(topic, {
+        this.channel = realtimeClient.channel(topic, {
           config: {
             broadcast: { ack: false, self: false }
           }
