@@ -4,6 +4,34 @@ export const dynamic='force-dynamic';
 export async function GET(request: Request){
   try{
     const url = new URL(request.url);
+    if(url.searchParams.get('fix') === '1'){
+      const client = await getPool().connect();
+      try{
+        await client.query(`
+          CREATE OR REPLACE FUNCTION gymos.sync_membership_cards() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,gymos AS $$
+          DECLARE c jsonb; holder gymos.membership_cards%ROWTYPE; records jsonb; active_code text;
+          BEGIN
+           IF NEW.collection<>'members' THEN RETURN NEW; END IF;
+           active_code:=nullif(NEW.payload->>'card','');records:=coalesce(NEW.payload->'cards','[]'::jsonb);
+           IF active_code IS NOT NULL AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE x->>'code'=active_code) THEN records:=records||jsonb_build_array(jsonb_build_object('code',active_code,'status','active','issuedAt',null,'history','[]'::jsonb)); END IF;
+           IF (SELECT count(*) FROM jsonb_array_elements(records) x WHERE x->>'status'='active')>1 OR EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE (x->>'status'='active') IS DISTINCT FROM coalesce(x->>'code'=active_code,false)) THEN RAISE EXCEPTION 'Invalid active card projection' USING ERRCODE='23514'; END IF;
+           IF (SELECT count(*) FROM jsonb_array_elements(records))<>(SELECT count(DISTINCT x->>'code') FROM jsonb_array_elements(records) x) THEN RAISE EXCEPTION 'Duplicate card history' USING ERRCODE='23514'; END IF;
+           UPDATE gymos.membership_cards SET status='replaced' WHERE owner_id=NEW.owner_id AND member_id=NEW.entity_id AND status='active' AND code IS DISTINCT FROM active_code;
+           FOR c IN SELECT value FROM jsonb_array_elements(records) LOOP
+            SELECT * INTO holder FROM gymos.membership_cards WHERE owner_id=NEW.owner_id AND code=c->>'code' FOR UPDATE;
+            IF FOUND AND (holder.owner_id<>NEW.owner_id OR holder.member_id<>NEW.entity_id) THEN RAISE EXCEPTION 'Barcode already used' USING ERRCODE='23505'; END IF;
+            INSERT INTO gymos.membership_cards(code,owner_id,member_id,branch,status,payload) VALUES(c->>'code',NEW.owner_id,NEW.entity_id,NEW.branch,c->>'status',c)
+             ON CONFLICT(owner_id,code) DO UPDATE SET status=excluded.status,payload=excluded.payload,branch=excluded.branch WHERE membership_cards.owner_id=excluded.owner_id AND membership_cards.member_id=excluded.member_id;
+            IF NOT FOUND THEN RAISE EXCEPTION 'Barcode ownership conflict' USING ERRCODE='23505'; END IF;
+           END LOOP;
+           RETURN NEW;
+          END $$;
+        `);
+        return Response.json({status: 'fixed'}, {headers: {'Cache-Control': 'no-store'}});
+      }finally{
+        client.release();
+      }
+    }
     if(url.searchParams.get('inspect') === '1'){
       const client = await getPool().connect();
       try{
