@@ -2,6 +2,7 @@ import {context, reply} from '../../../lib/server-workspace';
 import {CommercialError} from '../../../lib/licensing';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {withScope} from '../../../lib/database';
+import {isFirebaseConfigured, firestoreReadSpace} from '../../../lib/firestore-db';
 
 export async function GET(request: Request) {
   try {
@@ -24,6 +25,17 @@ export async function GET(request: Request) {
         requiresSnapshot: true,
         fromRevision: 0,
         toRevision: 0,
+        hasMore: false,
+        events: []
+      });
+    }
+
+    if (isFirebaseConfigured()) {
+      const {revision} = await firestoreReadSpace(ctx.owner);
+      return reply({
+        requiresSnapshot: after < revision,
+        fromRevision: after,
+        toRevision: revision,
         hasMore: false,
         events: []
       });
