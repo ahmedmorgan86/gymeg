@@ -1,9 +1,12 @@
 import { initializeApp, cert, getApps, type App } from 'firebase-admin/app';
+import { createHash } from 'node:crypto';
 import { getFirestore, type Firestore, FieldValue } from 'firebase-admin/firestore';
 import { emptyState, type GymState } from './domain.ts';
 import { normalize } from './extensions.ts';
 import { assembleState, splitState, entityChanges, type Entity } from './entity-state.ts';
-import { RECENT_EVENTS } from './activity-archive.ts';
+import { assertGrowth, CommercialError, licenseState, type License } from './licensing.ts';
+import {memberAccessRef,memberCredentialFor} from './firebase-member-auth.ts';
+import {newMemberPin,normalizeMemberPhone} from './member-phone.ts';
 
 let firestoreInstance: Firestore | null = null;
 
@@ -18,31 +21,33 @@ export function isFirebaseConfigured(): boolean {
 export function getFirestoreDb(): Firestore {
   if (firestoreInstance) return firestoreInstance;
 
-  if (getApps().length === 0) {
+  const existingApp = getApps().find(app => app.name === 'gymeg-workspace');
+  if (!existingApp) {
     const rawSa = process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT;
     const projectId =
       process.env.GYMEG_FIREBASE_PROJECT_ID ||
       process.env.FIREBASE_PROJECT_ID ||
-      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
-      'gymeg-app';
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+
+    if (!projectId) throw new Error('GYMEG Firebase project ID is required');
 
     if (rawSa) {
       try {
         const sa = typeof rawSa === 'string' ? JSON.parse(rawSa) : rawSa;
+        if (sa.project_id !== projectId) throw new Error('GYMEG Firebase service account project mismatch');
         initializeApp({
           credential: cert(sa),
-          projectId: sa.project_id || projectId,
-        });
+          projectId,
+        }, 'gymeg-workspace');
       } catch (err) {
-        console.error('Failed to parse GYMEG_FIREBASE_SERVICE_ACCOUNT, falling back to projectId', err);
-        initializeApp({ projectId });
+        throw new Error('Invalid GYMEG Firebase service account; refusing to use another project', { cause: err });
       }
     } else {
-      initializeApp({ projectId });
+      initializeApp({ projectId }, 'gymeg-workspace');
     }
   }
 
-  firestoreInstance = getFirestore();
+  firestoreInstance = getFirestore(getApps().find(app => app.name === 'gymeg-workspace')!);
   return firestoreInstance;
 }
 
@@ -108,8 +113,36 @@ export async function firestorePersistSpace(
   const db = getFirestoreDb();
   const stateDocRef = db.collection('gym_states').doc(owner);
 
+  // Domain operations retain a recent window. Archive events that leave that
+  // window before changing the state document. Replays are idempotent and an
+  // interrupted save can leave a harmless duplicate, never a missing event.
+  const retained = new Set(next.events.map(event => event.id));
+  const removedEvents = current.state.events.filter(event => !retained.has(event.id));
+  for (let offset = 0; offset < removedEvents.length; offset += 200) {
+    const batch = db.batch();
+    for (const event of removedEvents.slice(offset, offset + 200)) {
+      const docId = createHash('sha256').update(owner + '\0' + event.id).digest('hex');
+      batch.set(db.collection('gym_activity_archive').doc(docId), { owner_id: owner, event_id: event.id, at: event.at, branch: event.branch, payload: event });
+    }
+    await batch.commit();
+  }
+
   return await db.runTransaction(async (tx) => {
     const snap = await tx.get(stateDocRef);
+    const tenantId = owner.startsWith('tenant:') ? owner.slice(7) : null;
+    const licenseDoc = tenantId ? await tx.get(db.collection('tenant_licenses').doc(tenantId)) : null;
+    if (tenantId) {
+      const license = licenseDoc?.data() as License | undefined;
+      if (!license || !licenseState(license).writable) throw new CommercialError('licenseReadOnly', 403);
+      assertGrowth(license.limits, { branches: current.state.branches.length, members: current.state.members.length }, { branches: next.branches.length, members: next.members.length });
+    }
+    const priorMembers = new Map(current.state.members.map(member => [member.id, member]));
+    const updatedMembers = new Map(next.members.map(member => [member.id, member]));
+    const changedMembers = [...new Set([...priorMembers.keys(), ...updatedMembers.keys()])].filter(id => {
+      const before = priorMembers.get(id), after = updatedMembers.get(id);
+      return !before || !after || before.phone !== after.phone || before.branch !== after.branch || before.archived !== after.archived || before.demo !== after.demo;
+    });
+    const credentials = await Promise.all(changedMembers.map(id => tx.get(memberAccessRef(owner, id))));
     if (!snap.exists) return false;
     const curData = snap.data() as { payload: string; revision: number };
 
@@ -119,6 +152,16 @@ export async function firestorePersistSpace(
     }
 
     const first = JSON.parse(curData.payload)._entityStorage !== 1;
+    for (let i = 0; i < changedMembers.length; i++) {
+      const id = changedMembers[i], member = updatedMembers.get(id), before = priorMembers.get(id), prior = credentials[i].data();
+      const ref = memberAccessRef(owner, id);
+      if (!member || member.archived || member.demo || !normalizeMemberPhone(member.phone)) {
+        if (prior) tx.update(ref, { inactive: true, version: (prior.version || 0) + 1 });
+      } else if (!prior || before?.phone !== member.phone) {
+        tx.set(ref, { owner_id: owner, ...memberCredentialFor(member, newMemberPin(), (prior?.version || 0) + 1) });
+      } else if (before?.branch !== member.branch) tx.update(ref, { branch: member.branch });
+      else if (prior.inactive) tx.update(ref, { inactive: false, version: (prior.version || 0) + 1 });
+    }
     if (first || restore) {
       const recoveryRef = db.collection('gym_recovery').doc(crypto.randomUUID());
       tx.set(recoveryRef, {
@@ -130,7 +173,9 @@ export async function firestorePersistSpace(
     }
 
     const before = splitState(current.state);
-    const after = splitState({ ...next, events: next.events.slice(-RECENT_EVENTS) });
+    // Keep every activity event until a durable Firestore archive and cursor
+    // reader are deployed. Truncating here would permanently lose old events.
+    const after = splitState(next);
     const { upserts, removed } = entityChanges(before.entities, after.entities, first);
 
     // Entity deletes
@@ -186,10 +231,10 @@ export async function firestorePersistSpace(
     tx.set(db.collection('workspace_outbox').doc(outboxId), {
       id: outboxId,
       owner_id: owner,
-      tenant_id: owner,
-      channel: `club:${owner}:workspace`,
+      tenant_id: tenantId || owner,
+      channel: `club:${tenantId || owner}:workspace`,
       event: 'workspace.updated',
-      payload: { revision: newRevision, tenantId: owner, timestamp: new Date().toISOString() },
+      payload: { revision: newRevision, tenantId: tenantId || owner, timestamp: new Date().toISOString() },
       created_at: new Date().toISOString(),
       processed_at: null,
     });

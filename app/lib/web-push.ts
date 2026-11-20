@@ -3,6 +3,8 @@ import webPush from 'web-push';
 import {withScope} from './database';
 import {decryptPushSubscription,pushEncryptionConfigured} from './push-crypto';
 import {sendCommunityFcm,firebaseMessagingConfigured} from './firebase-messaging';
+import {isFirebaseConfigured} from './firestore-db.ts';
+import {eligibleWebPushSubscriptions} from './firestore-web-push';
 export type PushRecipient='staff'|'member';
 const subject=()=>process.env.GYMEG_VAPID_SUBJECT?.trim()||'';
 const publicKey=()=>process.env.GYMEG_VAPID_PUBLIC_KEY?.trim()||'';
@@ -19,6 +21,16 @@ export async function sendCommunityPush(owner:string,branch:string,recipient:Pus
  if(!webConfigured&&!fcmConfigured)return {configured:false,sent:0,failed:0};
  const native=await sendCommunityFcm(owner,branch,recipient,recipientId,url,tag);
  if(!webConfigured)return native;
+ if(isFirebaseConfigured()){
+  const rows=await eligibleWebPushSubscriptions(owner,branch,recipient,recipientId);
+  webPush.setVapidDetails(subject(),publicKey(),privateKey());
+  let sent=0,failed=0;
+  await Promise.all(rows.map(async row=>{
+   try{await webPush.sendNotification(decryptPushSubscription(row.subscription_ciphertext),JSON.stringify({title:'GymEG',body:'وصلتك رسالة جديدة من ناديك / You have a new club message.',url,tag:'club-message-'+tag.slice(0,24)}),{TTL:120,urgency:'high',timeout:8000});sent++;}
+   catch(error){failed++;if([404,410].includes(Number((error as {statusCode?:unknown})?.statusCode)))await row.ref.delete();}
+  }));
+  return {configured:true,sent:sent+native.sent,failed:failed+native.failed};
+ }
  const rows=await withScope(owner,async client=>(await client.query(
   `SELECT p.subscription_id,p.subscription_ciphertext
      FROM gymos.push_subscriptions p

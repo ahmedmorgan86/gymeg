@@ -16,6 +16,7 @@ export async function serverAuth() {
             const auth = getAuth();
             try {
               const decoded = await auth.verifySessionCookie(sessionToken, true);
+              if (!decoded.email_verified) return { data: { user: null }, error: null };
               return {
                 data: {
                   user: {
@@ -51,10 +52,12 @@ export async function serverAuth() {
             cache: 'no-store',
           });
           if (!response.ok) return { data: { session: null }, error: { message: 'Invalid credentials', status: 401 } };
-          const result = await response.json() as { idToken?: string };
+          const result = await response.json() as { idToken?: string; registered?: boolean };
           if (!result.idToken) throw new Error('Missing Firebase ID token');
           getFirestoreDb();
           const { getAuth } = await import('firebase-admin/auth');
+          const verified = await getAuth().verifyIdToken(result.idToken, true);
+          if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
           const tokenPayload = await getAuth().createSessionCookie(result.idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
           store.set('gymos_session', tokenPayload, {
             httpOnly: true,
@@ -69,19 +72,43 @@ export async function serverAuth() {
         }
       },
 
+      async signUp({ email, password, name }: { email: string; password: string; name: string }) {
+        const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+        if (!apiKey || !isFirebaseConfigured()) return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        try {
+          const endpoint = 'https://identitytoolkit.googleapis.com/v1/accounts:';
+          const response = await fetch(endpoint + 'signUp?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, returnSecureToken: true }), cache: 'no-store',
+          });
+          if (!response.ok) return { data: { session: null }, error: { message: 'Registration failed', status: 400 } };
+          const result = await response.json() as { idToken?: string; localId?: string };
+          if (!result.idToken || !result.localId) throw new Error('Invalid Firebase response');
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          await getAuth().updateUser(result.localId, { displayName: name });
+          const verification = await fetch(endpoint + 'sendOobCode?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken: result.idToken }), cache: 'no-store',
+          });
+          if (!verification.ok) throw new Error('Verification email failed');
+          return { data: { session: null }, error: null };
+        } catch { return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } }; }
+      },
+
       async signOut(_options?: { scope?: string }) {
         store.delete('gymos_session');
         store.delete('sb-token');
         return { error: null };
       },
 
-      async resetPasswordForEmail(email: string, _options?: { redirectTo?: string }) {
+      async resetPasswordForEmail(email: string) {
         const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
         if (!apiKey || !isFirebaseConfigured()) return { error: { message: 'Auth unavailable', status: 503 } };
         try {
           const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=' + encodeURIComponent(apiKey), {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestType: 'PASSWORD_RESET', email, continueUrl: _options?.redirectTo }), cache: 'no-store',
+            body: JSON.stringify({ requestType: 'PASSWORD_RESET', email }), cache: 'no-store',
           });
           if (!response.ok && response.status >= 500) return { error: { message: 'Auth unavailable', status: 503 } };
           return { error: null };

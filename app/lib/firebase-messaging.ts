@@ -2,14 +2,16 @@ import 'server-only';
 import {createPrivateKey,createSign} from 'node:crypto';
 import {withScope} from './database';
 import {decryptFcmToken} from './push-crypto';
+import {isFirebaseConfigured} from './firestore-db.ts';
+import {eligibleFcmSubscriptions} from './firestore-fcm';
 
 type ServiceAccount={project_id:string;client_email:string;private_key:string};
 let cached:{accessToken:string;expiresAt:number}|null=null;
 const b64url=(value:string|Buffer)=>Buffer.from(value).toString('base64url');
 function serviceAccount():ServiceAccount|null{
  try{
-  const value=JSON.parse(process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT??'') as Partial<ServiceAccount>;
-  const expectedProject=process.env.GYMEG_FIREBASE_PROJECT_ID?.trim()||'gymeg-mobile-notifications';
+  const value=JSON.parse(process.env.GYMEG_MOBILE_NOTIFICATIONS_SERVICE_ACCOUNT??process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT??'') as Partial<ServiceAccount>;
+  const expectedProject=process.env.GYMEG_MOBILE_NOTIFICATIONS_PROJECT_ID?.trim()||'gymeg-mobile-notifications';
   if(value.project_id!==expectedProject||value.client_email!=='gymeg-fcm-sender@gymeg-mobile-notifications.iam.gserviceaccount.com'||typeof value.private_key!=='string')return null;
   if(createPrivateKey(value.private_key).asymmetricKeyType!=='rsa')return null;
   return value as ServiceAccount;
@@ -33,6 +35,11 @@ async function sendOne(account:ServiceAccount,token:string,url:'/member'|'/clubs
 /** Send privacy-safe chat alerts to registered native Android devices in one tenant branch. */
 export async function sendCommunityFcm(owner:string,branch:string,recipient:'staff'|'member',recipientId:string|null,url:'/member'|'/clubs',tag:string){
  const account=serviceAccount();if(!account)return{configured:false,sent:0,failed:0};
+ if(isFirebaseConfigured()){
+  const rows=await eligibleFcmSubscriptions(owner,branch,recipient,recipientId);let sent=0,failed=0;
+  await Promise.all(rows.map(async row=>{try{const result=await sendOne(account,decryptFcmToken(row.token_ciphertext),url,tag);if(result.ok)sent++;else{failed++;if(result.expired)await row.ref.delete();}}catch{failed++;}}));
+  return{configured:true,sent,failed};
+ }
  const rows=await withScope(owner,async client=>(await client.query(
   `SELECT f.subscription_id,f.token_ciphertext
      FROM gymos.fcm_subscriptions f

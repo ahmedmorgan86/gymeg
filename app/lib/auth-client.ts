@@ -28,8 +28,16 @@ export const authClient = {
     email: ({ email, password }: { email: string; password: string }) => sameOriginSignIn(email, password),
   },
   signUp: {
-    email: async ({ email, password }: { email: string; password: string; name: string; returnTo?: string }) => {
-      return sameOriginSignIn(email, password);
+    email: async ({ email, password, name }: { email: string; password: string; name: string; returnTo?: string }) => {
+      try {
+        const response = await fetch('/api/register', {
+          method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password, name }),
+          signal: AbortSignal.timeout(20000),
+        });
+        const result = await response.json();
+        return { data: { session: null }, error: response.ok ? null : { code: typeof result.error === 'string' ? result.error : 'auth_failed' } };
+      } catch { return { data: { session: null }, error: { code: 'connection' } }; }
     },
   },
   signOut: async () => {
