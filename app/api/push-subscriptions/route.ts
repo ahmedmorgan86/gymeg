@@ -6,6 +6,9 @@ import {CommercialError,licenseState} from '../../lib/licensing';
 import {normalizeLicense} from '../../lib/commercial';
 import {webPushConfigured,webPushPublicKey} from '../../lib/web-push';
 import {endpointDigest,encryptPushSubscription,isAllowedWebPushEndpoint,type WebPushSubscription} from '../../lib/push-crypto';
+import {isFirebaseConfigured} from '../../lib/firestore-db';
+import {firebaseMemberLicense} from '../../lib/firebase-member-auth';
+import {setWebPushSubscription} from '../../lib/firestore-web-push';
 
 export const dynamic='force-dynamic';
 export const runtime='nodejs';
@@ -28,7 +31,7 @@ export async function POST(request:Request){
    if(identity.pin_must_change)return reply({error:'pinChangeRequired'},403);
    owner=identity.owner_id;recipientType='member';recipientId=identity.member_id;branch=identity.branch;
    const {state}=await readSpace(owner);if(!state.members.some(m=>m.id===recipientId&&m.branch===branch&&!m.demo&&!m.archived))return reply({error:'notLinked'},404);
-   const license=await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
+   const license=isFirebaseConfigured()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
    const ctx=await context();if(!ctx)return reply({error:'auth'},401);if(ctx.support||!['owner','manager'].includes(ctx.role))return reply({error:'forbidden'},403);
@@ -36,6 +39,10 @@ export async function POST(request:Request){
    owner=ctx.owner;recipientType='staff';recipientId=ctx.user.userId;branch=body.branch??'';
    if(!branch||(ctx.branches&&!ctx.branches.includes(branch)))return reply({error:'forbidden'},403);
    const {state}=await readSpace(owner);if(!state.branches.some(b=>b.id===branch))return reply({error:'notFound'},404);
+  }
+  if(isFirebaseConfigured()){
+   await setWebPushSubscription(owner,branch,recipientType,recipientId,subscription,body.action==='subscribe');
+   return reply({ok:true,subscribed:body.action==='subscribe'});
   }
   const endpointHash=endpointDigest(subscription.endpoint),ciphertext=encryptPushSubscription(subscription);
   await withScope(owner,async client=>{
