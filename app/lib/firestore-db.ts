@@ -24,24 +24,30 @@ export function getFirestoreDb(): Firestore {
   const existingApp = getApps().find(app => app.name === 'gymeg-workspace');
   if (!existingApp) {
     const rawSa = process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT;
-    const projectId =
-      process.env.GYMEG_FIREBASE_PROJECT_ID ||
-      process.env.FIREBASE_PROJECT_ID ||
-      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-
-    if (!projectId) throw new Error('GYMEG Firebase project ID is required');
-
+    let sa;
     if (rawSa) {
       try {
-        const sa = typeof rawSa === 'string' ? JSON.parse(rawSa) : rawSa;
-        if (sa.project_id !== projectId) throw new Error('GYMEG Firebase service account project mismatch');
-        initializeApp({
-          credential: cert(sa),
-          projectId,
-        }, 'gymeg-workspace');
+        sa = typeof rawSa === 'string' ? JSON.parse(rawSa) : rawSa;
       } catch (err) {
         throw new Error('Invalid GYMEG Firebase service account; refusing to use another project', { cause: err });
       }
+    }
+    // The service-account JSON already carries project_id, so it alone is
+    // enough to connect; an explicit project env still wins and must match.
+    const projectId =
+      process.env.GYMEG_FIREBASE_PROJECT_ID ||
+      process.env.FIREBASE_PROJECT_ID ||
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+      sa?.project_id;
+
+    if (!projectId) throw new Error('GYMEG Firebase project ID is required');
+
+    if (sa) {
+      if (sa.project_id !== projectId) throw new Error('GYMEG Firebase service account project mismatch');
+      initializeApp({
+        credential: cert(sa),
+        projectId,
+      }, 'gymeg-workspace');
     } else {
       initializeApp({ projectId }, 'gymeg-workspace');
     }

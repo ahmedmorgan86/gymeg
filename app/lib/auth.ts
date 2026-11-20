@@ -72,6 +72,32 @@ export async function serverAuth() {
         }
       },
 
+      // Establishes the same session as signInWithPassword from a Firebase ID
+      // token minted for an external provider (the Google OAuth callback
+      // exchanges the Google credential through accounts:signInWithIdp first).
+      async signInWithFirebaseToken(idToken: string) {
+        if (!idToken || !isFirebaseConfigured()) {
+          return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        }
+        try {
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          const verified = await getAuth().verifyIdToken(idToken, true);
+          if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
+          const tokenPayload = await getAuth().createSessionCookie(idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
+          store.set('gymos_session', tokenPayload, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 60 * 60 * 24 * 7,
+          });
+          return { data: { session: { access_token: tokenPayload } }, error: null };
+        } catch {
+          return { data: { session: null }, error: { message: 'Auth failed', status: 401 } };
+        }
+      },
+
       async signUp({ email, password, name }: { email: string; password: string; name: string }) {
         const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
         if (!apiKey || !isFirebaseConfigured()) return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
