@@ -2,6 +2,8 @@ import {getPool} from '../../../lib/database';
 import {reply} from '../../../lib/server-workspace';
 import {runWhatsApp} from '../../../lib/whatsapp-server';
 import {timingSafeEqual} from 'node:crypto';
+import {isFirebaseConfigured} from '../../../lib/firestore-db';
+import {markWhatsAppRun,runWhatsAppFirestore,whatsappOwners} from '../../../lib/firestore-whatsapp';
 export const maxDuration=60;
 // Vercel Cron sends Authorization: Bearer $CRON_SECRET when CRON_SECRET is set.
 // The legacy Supabase pg_cron job (installed disabled) uses a Vault token that
@@ -16,8 +18,13 @@ export async function GET(request:Request){
   if(!/^Bearer [^\s]{16,}$/.test(actual))return reply({error:'forbidden'},403);
   const presented=actual.slice(7);
   const cronSecret=process.env.CRON_SECRET;
-  const authorized=Boolean(cronSecret&&secretEquals(presented,cronSecret))||await legacyTokenValid(presented);
+  const authorized=Boolean(cronSecret&&secretEquals(presented,cronSecret))||!isFirebaseConfigured()&&await legacyTokenValid(presented);
   if(!authorized)return reply({error:'forbidden'},403);
+  if(isFirebaseConfigured()){
+    let sent=0;const deadline=Date.now()+40000;
+    for(const owner of await whatsappOwners()){if(Date.now()>deadline)break;try{sent+=(await runWhatsAppFirestore(owner,undefined,deadline)).sent;await markWhatsAppRun(owner);}catch{/* isolate tenant failures */}}
+    return reply({sent});
+  }
   const client=await getPool().connect();
   let owners;
   try{await client.query('BEGIN');await client.query("SELECT set_config('app.messaging_worker','1',true)");owners=(await client.query("SELECT owner_id FROM gymos.whatsapp_connections GROUP BY owner_id ORDER BY min(COALESCE(last_run_at,'1970-01-01'::timestamptz)) LIMIT 100")).rows;await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
