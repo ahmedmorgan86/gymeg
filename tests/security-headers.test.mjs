@@ -17,8 +17,10 @@ test('All routes receive baseline defense-in-depth security headers',async()=>{
  assert.ok(apk?.headers.some(h=>h.key==='Content-Disposition'));
 });
 
-test('Password recovery links are built from the configured HTTPS site only',async()=>{
- const source=await readFile(new URL('../app/api/password/route.ts',import.meta.url),'utf8');
- assert.doesNotMatch(source,/NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL/);
- assert.match(source,/siteOrigin\(\)/);
+test('Password recovery uses Firebase hosted action without an untrusted redirect',async()=>{
+ const route=await readFile(new URL('../app/api/password/route.ts',import.meta.url),'utf8');
+ const auth=await readFile(new URL('../app/lib/auth.ts',import.meta.url),'utf8');
+ assert.match(route,/resetPasswordForEmail\(body\.email\.trim\(\)\)/);
+ assert.match(auth,/requestType: 'PASSWORD_RESET', email/);
+ assert.doesNotMatch(auth,/continueUrl:.*redirectTo/);
 });
