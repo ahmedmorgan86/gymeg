@@ -1,5 +1,4 @@
 import {serverAuth} from '../../lib/auth';
-import {siteOrigin} from '../../lib/seo';
 import {sameOrigin} from '../../lib/server-workspace';
 import {consumeAuthRateLimit} from '../../lib/auth-rate-limit';
 export const dynamic='force-dynamic';
@@ -18,11 +17,9 @@ export async function POST(request:Request){
     if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email.trim()))return reply({error:'invalid'},400);
     const limit=consumeAuthRateLimit('password:request',request,body.email,5);
     if(!limit.allowed)return limited(limit.retryAfter);
-    // Never build a one-time recovery link from an untrusted public variable or
-    // from request headers. The configured HTTPS site origin is authoritative.
-    const redirectTo=new URL('/auth/callback',siteOrigin());
-    redirectTo.searchParams.set('next','/reset-password');
-    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim(),{redirectTo:redirectTo.href});
+    // Firebase's hosted password action verifies the one-time code and updates
+    // the password. The retired OAuth callback cannot consume Firebase codes.
+    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim());
     if(error?.status===429){const r=reply({error:'rate'},429);r.headers.set('Retry-After','60');return r;}
     if(error&&error.status&&error.status>=500)return reply({error:'unavailable'},503);
     return reply({ok:true});
