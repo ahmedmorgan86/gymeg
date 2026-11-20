@@ -119,8 +119,9 @@ export async function serverAuth() {
             const { getAuth } = await import('firebase-admin/auth');
             const link = await getAuth().generatePasswordResetLink(email);
             return { error: null, link };
-          } catch (err: any) {
-            return { error: { message: err?.message || 'reset_failed', status: 400 } };
+          } catch (err) {
+            const message = err instanceof Error ? err.message : 'reset_failed';
+            return { error: { message, status: 400 } };
           }
         }
         return { error: null };
