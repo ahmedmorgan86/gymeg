@@ -8,7 +8,7 @@ export interface DeltaEvent {
   collection?: string;
   entityId?: string;
   branch?: string | null;
-  payload?: any;
+  payload?: unknown;
 }
 
 export interface DeltaResponse {
@@ -48,8 +48,9 @@ export function applyWorkspaceDeltas(prev: Packet | null, events: DeltaEvent[]):
     }
 
     if (ev.eventType === 'metadata.update' && ev.payload) {
-      if (ev.payload.settings) {
-        nextState.settings = {...nextState.settings, ...ev.payload.settings};
+      const meta = ev.payload as {settings?: Partial<GymState['settings']>};
+      if (meta.settings) {
+        nextState.settings = {...nextState.settings, ...meta.settings};
       }
       continue;
     }
@@ -59,22 +60,23 @@ export function applyWorkspaceDeltas(prev: Packet | null, events: DeltaEvent[]):
       continue;
     }
 
-    const list = [...(nextState[col] as any[])];
+    const list = [...(nextState[col] as Array<{id?: string}>)];
 
     if (ev.eventType === 'entity.delete') {
       const idx = list.findIndex(item => item.id === ev.entityId);
       if (idx !== -1) {
         list.splice(idx, 1);
-        (nextState as any)[col] = list;
+        (nextState as Record<string, unknown>)[col] = list;
       }
     } else if (ev.eventType === 'entity.upsert' && ev.payload) {
+      const entity = ev.payload as {id?: string};
       const idx = list.findIndex(item => item.id === ev.entityId);
       if (idx !== -1) {
-        list[idx] = ev.payload;
+        list[idx] = entity;
       } else {
-        list.push(ev.payload);
+        list.push(entity);
       }
-      (nextState as any)[col] = list;
+      (nextState as Record<string, unknown>)[col] = list;
     }
   }
 
@@ -85,6 +87,17 @@ export function applyWorkspaceDeltas(prev: Packet | null, events: DeltaEvent[]):
   };
 }
 
+/** Minimal structural types for a Supabase-compatible realtime client. */
+interface RealtimeChannelLike {
+  on(type: string, filter: Record<string, unknown>, callback: (payload: {payload?: {revision?: unknown}}) => void): RealtimeChannelLike;
+  subscribe(callback: (status: string) => void): unknown;
+  unsubscribe(): unknown;
+}
+
+interface RealtimeClientLike {
+  channel(topic: string, options?: unknown): RealtimeChannelLike;
+}
+
 /**
  * Manages real-time channel subscription and incremental Delta recovery.
  */
@@ -92,9 +105,9 @@ export class WorkspaceSyncManager {
   private status: SyncStatus = 'connecting';
   private currentRevision: number;
   private syncing = false;
-  private channel: any = null;
+  private channel: RealtimeChannelLike | null = null;
   private unmounted = false;
-  private reconnectTimer: any = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private retryAttempt = 0;
 
   private options: SyncOptions;
@@ -122,7 +135,7 @@ export class WorkspaceSyncManager {
   /**
    * Starts realtime subscription.
    */
-  public async start(realtimeClient?: any) {
+  public async start(realtimeClient?: RealtimeClientLike | null) {
     this.unmounted = false;
     this.setStatus('connecting');
 
@@ -136,7 +149,7 @@ export class WorkspaceSyncManager {
         });
 
         this.channel
-          .on('broadcast', { event: 'workspace.updated' }, (payload: any) => {
+          .on('broadcast', { event: 'workspace.updated' }, (payload) => {
             const remoteRev = payload?.payload?.revision;
             if (typeof remoteRev === 'number' && remoteRev > this.currentRevision) {
               void this.pullDeltas();
