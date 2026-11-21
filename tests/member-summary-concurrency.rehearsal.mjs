@@ -83,61 +83,6 @@ try{
   const snDirty=(await pool.query("SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0].n;
   const total2=await visitsNow();
   check('5b snapshot: never raced; the 3 rows added after the check are not in the stored inputs AND the member stays dirty (the writer trigger marked it)',sn.status==='ok'&&snStored?.visitCount===total2-3&&snDirty===1,`status=${sn.status} visitCount=${snStored?.visitCount} actual=${total2} dirty=${snDirty}`);
-}finally{c.release();}};
-try{
-  // 1
-  await seed(owner);
-  let fired=false;
-  const r1=await scoped(owner,c=>readMemberCandidates({query:async(s,v)=>{const r=await c.query(s,v);if(!fired&&/FROM gymos.gym_member_summary_dirty/.test(s)&&/gen/.test(s)){fired=true;await visit(owner,'v-race');}return r;}},owner,null,{refresh:true}));
-  const dirty=(await pool.query('SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0].n;
-  const st=(await pool.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0]?.stored;
-  check('1 writer between mark read and clear',dirty===1||(st&&st.visitCount===1),`status=${r1.status} dirty=${dirty} visitCount=${st?.visitCount}`);
-  // 2
-  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
-  const holder=await pool.connect();await holder.query('BEGIN');await holder.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);await holder.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))',[`msum:${owner}`]);
-  const second=await scoped(owner,c=>refreshDirtySummaries(c,owner));
-  await holder.query('ROLLBACK');holder.release();
-  check('2 second refresher is busy while the first holds the lock',second.status==='busy',`status=${second.status}`);
-  // 3
-  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
-  const lt0=(await pool.query('SHOW lock_timeout')).rows[0].lock_timeout;
-  const w=await pool.connect();await w.query('BEGIN');await w.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
-  const r3p=withSnapshotScope(owner,async c=>{const x=await refreshDirtySummaries(c,owner);const ok=(await c.query('SELECT 1 AS one')).rows[0].one===1;return{x,ok};});
-  await new Promise(r=>setTimeout(r,50));await w.query("INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'m1','{}') ON CONFLICT(owner_id,member_id) DO UPDATE SET stored='{}'",[owner]);await w.query('COMMIT');w.release();
-  const r3=await r3p;check('3 snapshot refresher vs same-row writer',['ok','busy'].includes(r3.x.status)&&r3.ok,`status=${r3.x.status} usable=${r3.ok} (busy expected when the writer commits first; both are acceptable, a stale row is not)`);
-  const after=(await pool.query("SELECT stored,(SELECT count(*)::int FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1) AS dirty FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0];
-  check('3b no stale row with a cleared mark',!after||after.dirty>0||after.stored.visitCount!==undefined,JSON.stringify(after).slice(0,120));
-  check('3c lock_timeout not leaked',(await pool.query('SHOW lock_timeout')).rows[0].lock_timeout===lt0);
-  // 4 runtime role: own owner works, other owner sees/changes nothing
-  const other=owner+'-x';await seed(other);await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);await pool.query('SELECT gymos.backfill_member_summaries($1)',[other]);
-  const asRole=async(o,work)=>{const c=await pool.connect();try{await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);const r=await work(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});return{error:e.code||String(e)};}finally{c.release();}};
-  const own=await asRole(owner,c=>refreshDirtySummaries(c,owner));
-  check('4a runtime role refreshes its own owner',own.status==='ok',`status=${own.status} error=${own.error??''}`);
-  const cross=await asRole(owner,async c=>({d:(await c.query('SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[other])).rows[0].n,u:(await c.query("DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1",[other])).rowCount}));
-  check('4b runtime role sees and deletes nothing of another owner',cross.d===0&&cross.u===0,JSON.stringify(cross));
-  const otherDirty=(await pool.query('SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[other])).rows[0].n;
-  check('4c other owner marks untouched',otherDirty===1,`dirty=${otherDirty}`);
-  const snap=async()=>JSON.stringify([(await pool.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id=$1 ORDER BY 1",[other])).rows,(await pool.query("SELECT member_id,gen FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY 1",[other])).rows,(await pool.query("SELECT count(*)::int n FROM gymos.gym_member_summary_ready WHERE owner_id=$1",[other])).rows]);
-  const before=await snap();
-  const denied=async(label,sql,vals)=>{const r=await asRole(owner,c=>c.query(sql,vals));check(label,r.error==='42501'||(r.rowCount===0&&!r.error),JSON.stringify({e:r.error,n:r.rowCount}));};
-  await denied('4d forged summary insert for another owner is 42501',"INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'mx','{}')",[other]);
-  await denied('4e conflict-update of another owner row is denied or affects 0 rows',"INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'m1','{\"forged\":1}') ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored",[other]);
-  await denied('4f plain UPDATE of another owner summary affects 0 rows',"UPDATE gymos.gym_member_summaries SET stored='{\"forged\":1}' WHERE owner_id=$1",[other]);
-  await denied('4g runtime role cannot INSERT a dirty mark (table grant is SELECT,DELETE)',"INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) VALUES($1,'m1',1)",[owner]);
-  await denied('4h runtime role cannot INSERT a ready marker',"INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES($1)",[other]);
-  check('4i foreign owner rows are byte-identical after every attempt',(await snap())===before);
-  // 5 growth between the counters check and the history read
-  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
-  const grow=async(c)=>{let fired=false;return{query:async(s,v)=>{const r=await c.query(s,v);if(!fired&&/gym_entity_counters/.test(s)){fired=true;for(let i=0;i<3;i++)await visit(owner,'v-grow'+i+Date.now());}return r;}};};
-  const visitsNow=async()=>(await pool.query("SELECT count(*)::int n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits'",[owner])).rows[0].n;
-  const rc=await scoped(owner,async c=>refreshDirtySummaries(await grow(c),owner));
-  const rcStored=(await pool.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0]?.stored;
-  const rcDirty=(await pool.query("SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0].n;
-  const total=await visitsNow();
-  check('5a READ COMMITTED growth: raced (nothing stored from partial rows), or stored inputs include ALL visits, or member stays dirty',rc.status==='raced'||(rc.status==='ok'&&rcStored?.visitCount===total)||rcDirty===1,`status=${rc.status} visitCount=${rcStored?.visitCount} actual=${total} dirty=${rcDirty}`);
-  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
-  const sn=await withSnapshotScope(owner,async c=>refreshDirtySummaries(await grow(c),owner));
-  check('5b snapshot: growth after the counters check is not seen, never raced',sn.status!=='raced',`status=${sn.status}`);
 }finally{
   for(const t of ['gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready','gym_entity_counters','gym_entities'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id LIKE 'rh-%'`).catch(()=>{});
   await pool.query("DELETE FROM gymos.gym_states WHERE user_id LIKE 'rh-%'").catch(()=>{});
