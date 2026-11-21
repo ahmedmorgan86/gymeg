@@ -88,3 +88,29 @@ test('bulk invoice: intermediate data per payment is only its own allocations; n
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{name}','null') WHERE owner_id='B1' AND collection='members' AND entity_id=$1".replace('$1',"'"+m1.id+"'"));
   assert.equal((await readReportPaymentsRefs(scope,{owner:'B1',branch:'a',branches:null,from:'2026-03-01',to:'2026-03-31'})).rows[0].name,null);
 });
+test('refs reader: visible odd invoice, ghost/moved/position-drifted refs and missing readiness are refused; hidden-branch odd does not block',async()=>{
+  const s=fixture();s.visits=[];s.payments=[];s.invoices=[];const [m1,m2]=s.members;m1.branch='a';m2.branch='b';
+  s.payments.push({id:'pp',member:m1.id,branch:'a',minor:700,day:'2026-03-06',method:'cash',voided:false});
+  s.invoices.push({id:'ok',member:m1.id,title:'T',total:900,due:'2026-03-20',branch:'a',allocations:[{payment:'pp',minor:25}],category:'coaching',voided:false});
+  await seed('G1',s);
+  let nq=0;const rd=(q={})=>readReportPaymentsRefs(scope,{owner:'G1',branch:'a',branches:['a'],from:'2026-03-01',to:'2026-03-'+(31-(nq++%9)),...q}); // vary the range: an ok result is cached per owner version (direct refs tampering does not bump it; any invoice write does)
+  assert.equal((await rd()).status,'ok');
+  const put=(id,br,al)=>db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('G1','invoices',$1,50,$2,$3)",[id,br,JSON.stringify({id,member:m2.id,title:'T',total:1,due:'2026-03-20',branch:br,allocations:al,category:'x',voided:false})]);
+  await put('hid','b',null);assert.equal((await rd()).status,'ok','hidden-branch odd must not block');
+  await put('vis','a',null);let r=await rd();assert.deepEqual([r.status,r.reason],['unavailable','unsupported-allocation-shape']);
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='G1' AND entity_id='vis'");assert.equal((await rd()).status,'ok');
+  // ghost ref (invoice row gone, ref left behind), position drift, branch drift
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='G1' AND entity_id='ok'");
+  await db.query("INSERT INTO gymos.invoice_allocation_refs VALUES('G1','ok',0,'pp',md5('pp'),true,'25',1,'a')");
+  r=await rd();assert.deepEqual([r.status,r.reason],['unavailable','refs-drift']);
+  await db.query("DELETE FROM gymos.invoice_allocation_refs WHERE owner_id='G1'");
+  await put('ok2','a',[{payment:'pp',minor:3}]);assert.equal((await rd()).status,'ok');
+  await db.query("UPDATE gymos.invoice_allocation_refs SET invoice_position=7 WHERE owner_id='G1'");r=await rd();assert.equal(r.reason,'refs-drift');
+  await db.query("SELECT gymos.invoice_allocation_refs_rebuild('G1',NULL,100)");assert.equal((await rd()).status,'ok');
+  // readiness is per owner
+  await db.query("DELETE FROM gymos.invoice_allocation_refs_state WHERE owner_id='G1'");r=await rd();assert.equal(r.reason,'refs-not-ready');
+  assert.equal((await db.query("SELECT gymos.invoice_allocation_refs_complete('G1') x")).rows[0].x,true);assert.equal((await rd()).status,'ok');
+  // complete refuses while drift exists
+  await db.query("DELETE FROM gymos.invoice_allocation_refs_state WHERE owner_id='G1'");await db.query("DELETE FROM gymos.invoice_allocation_refs WHERE owner_id='G1'");
+  assert.equal((await db.query("SELECT gymos.invoice_allocation_refs_complete('G1') x")).rows[0].x,false);
+});

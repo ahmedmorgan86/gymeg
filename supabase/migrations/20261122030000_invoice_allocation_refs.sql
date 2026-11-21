@@ -19,8 +19,9 @@ CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_refs(
 CREATE INDEX IF NOT EXISTS invoice_allocation_refs_payment ON gymos.invoice_allocation_refs(owner_id,payment_key,invoice_position,invoice_id,ord);
 -- Invoices whose allocations have a shape the refs cannot represent (payload.allocations present but not an array, or any element that is not an object with a string payment). A consumer that must refuse unsupported shapes
 -- (member-credit) checks this table (an owner-prefix probe); the Reports reader needs no refusal because such elements cannot match a string payment id.
-CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_odd(owner_id text NOT NULL, invoice_id text NOT NULL, odd_elements integer NOT NULL, PRIMARY KEY(owner_id,invoice_id));
-CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_refs_state(key text PRIMARY KEY, set_at timestamptz NOT NULL DEFAULT now());
+CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_odd(owner_id text NOT NULL, invoice_id text NOT NULL, odd_elements integer NOT NULL, invoice_branch text, PRIMARY KEY(owner_id,invoice_id));
+-- Per-owner readiness: a row means every invoice of that owner has exact refs/odd rows (set by invoice_allocation_refs_complete after a zero-mismatch check, or by the first-invoice insert of an owner that had none).
+CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_refs_state(owner_id text PRIMARY KEY, set_at timestamptz NOT NULL DEFAULT now());
 
 -- the single definition of "which refs does this invoice have", used by the trigger, the backfill and the verification
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_rows(p_owner text,p_invoice text,p_position integer,p_branch text,p_payload jsonb)
@@ -41,11 +42,18 @@ BEGIN
   IF TG_OP IN ('UPDATE','DELETE') AND OLD.collection='invoices' THEN DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id; END IF;
   IF TG_OP IN ('INSERT','UPDATE') AND NEW.collection='invoices' THEN
     INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(NEW.owner_id,NEW.entity_id,NEW.position,NEW.branch,NEW.payload);
-    INSERT INTO gymos.invoice_allocation_odd SELECT NEW.owner_id,NEW.entity_id,gymos.invoice_allocation_odd_count(NEW.payload) WHERE gymos.invoice_allocation_odd_count(NEW.payload)>0;
+    INSERT INTO gymos.invoice_allocation_odd SELECT NEW.owner_id,NEW.entity_id,gymos.invoice_allocation_odd_count(NEW.payload),NEW.branch WHERE gymos.invoice_allocation_odd_count(NEW.payload)>0;
+  END IF;
+  IF TG_OP='INSERT' AND NOT EXISTS (SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=NEW.owner_id) THEN
+    PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||NEW.owner_id));
+    IF NOT EXISTS (SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=NEW.owner_id)
+       AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities WHERE owner_id=NEW.owner_id AND collection='invoices' AND entity_id<>NEW.entity_id) THEN
+      INSERT INTO gymos.invoice_allocation_refs_state(owner_id) VALUES(NEW.owner_id);
+    END IF;
   END IF;
   RETURN NULL;
 END $$;
-CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_truncate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN TRUNCATE gymos.invoice_allocation_refs,gymos.invoice_allocation_odd; RETURN NULL; END $$;
+CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_truncate() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN TRUNCATE gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state; RETURN NULL; END $$;
 DROP TRIGGER IF EXISTS invoice_allocation_refs_ins ON gymos.gym_entities;
 CREATE TRIGGER invoice_allocation_refs_ins AFTER INSERT ON gymos.gym_entities FOR EACH ROW WHEN (NEW.collection='invoices') EXECUTE FUNCTION gymos.invoice_allocation_refs_sync();
 DROP TRIGGER IF EXISTS invoice_allocation_refs_upd ON gymos.gym_entities;
@@ -63,7 +71,7 @@ BEGIN
   FOR r IN SELECT entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=p_owner AND collection='invoices' AND (p_after IS NULL OR entity_id>p_after) ORDER BY entity_id LIMIT p_limit FOR UPDATE LOOP
     DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=p_owner AND invoice_id=r.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=p_owner AND invoice_id=r.entity_id;
     INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(p_owner,r.entity_id,r.position,r.branch,r.payload);
-    INSERT INTO gymos.invoice_allocation_odd SELECT p_owner,r.entity_id,gymos.invoice_allocation_odd_count(r.payload) WHERE gymos.invoice_allocation_odd_count(r.payload)>0;
+    INSERT INTO gymos.invoice_allocation_odd SELECT p_owner,r.entity_id,gymos.invoice_allocation_odd_count(r.payload),r.branch WHERE gymos.invoice_allocation_odd_count(r.payload)>0;
     last_id:=r.entity_id;n:=n+1;
   END LOOP;
   RETURN CASE WHEN n<p_limit THEN NULL ELSE last_id END; -- NULL = finished
@@ -74,10 +82,18 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_mismatches(p_owner text
     (SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.ord),'[]'::jsonb) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND x.invoice_id=i.entity_id)
     IS DISTINCT FROM
     (SELECT COALESCE(jsonb_agg(to_jsonb(y) ORDER BY y.ord),'[]'::jsonb) FROM gymos.invoice_allocation_ref_rows(p_owner,i.entity_id,i.position,i.branch,i.payload) y))
-  + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload))
+  + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload) OR EXISTS (SELECT 1 FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id AND o.invoice_branch IS DISTINCT FROM i.branch))
   + (SELECT count(DISTINCT x.invoice_id) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=x.invoice_id)) $$;
 
-DO $m$ BEGIN IF NOT EXISTS (SELECT 1 FROM gymos.gym_entities WHERE collection='invoices') THEN INSERT INTO gymos.invoice_allocation_refs_state(key) VALUES('complete') ON CONFLICT DO NOTHING; END IF; END $m$;
+-- Readiness is per owner (no global flag). Marking an owner complete: only after the batched rebuild finished and a zero-mismatch check, both under one advisory lock so the first-invoice claim cannot interleave. Triggers must be installed
+-- BEFORE the backfill: any invoice write committing during the backfill maintains its own refs in its transaction, so only pre-existing rows can be missing and the mismatch check covers exactly those. A restore/replace of gym_entities that
+-- bypasses triggers must TRUNCATE (clears state) or DELETE the owner's state row and repeat rebuild + complete.
+CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text) RETURNS boolean LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||p_owner));
+  IF gymos.invoice_allocation_refs_mismatches(p_owner)<>0 THEN RETURN false; END IF;
+  INSERT INTO gymos.invoice_allocation_refs_state(owner_id) VALUES(p_owner) ON CONFLICT DO NOTHING;RETURN true;
+END $$;
 
 ALTER TABLE gymos.invoice_allocation_refs ENABLE ROW LEVEL SECURITY;ALTER TABLE gymos.invoice_allocation_refs FORCE ROW LEVEL SECURITY;
 ALTER TABLE gymos.invoice_allocation_odd ENABLE ROW LEVEL SECURITY;ALTER TABLE gymos.invoice_allocation_odd FORCE ROW LEVEL SECURITY;
@@ -86,11 +102,11 @@ DO $p$ BEGIN
  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename='invoice_allocation_refs' AND policyname='invoice_allocation_refs_runtime') THEN CREATE POLICY invoice_allocation_refs_runtime ON gymos.invoice_allocation_refs TO gymos_app USING(owner_id=current_setting('app.gym_owner',true)) WITH CHECK(owner_id=current_setting('app.gym_owner',true)); END IF;
  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename='invoice_allocation_odd' AND policyname='invoice_allocation_odd_runtime') THEN CREATE POLICY invoice_allocation_odd_runtime ON gymos.invoice_allocation_odd TO gymos_app USING(owner_id=current_setting('app.gym_owner',true)) WITH CHECK(owner_id=current_setting('app.gym_owner',true)); END IF;
  -- the state row is global (not per owner): readable by the runtime role, writable only by the migration role
- IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename='invoice_allocation_refs_state' AND policyname='invoice_allocation_refs_state_read') THEN CREATE POLICY invoice_allocation_refs_state_read ON gymos.invoice_allocation_refs_state FOR SELECT TO gymos_app USING(true); END IF;
+ IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename='invoice_allocation_refs_state' AND policyname='invoice_allocation_refs_state_read') THEN CREATE POLICY invoice_allocation_refs_state_read ON gymos.invoice_allocation_refs_state TO gymos_app USING(owner_id=current_setting('app.gym_owner',true)) WITH CHECK(owner_id=current_setting('app.gym_owner',true)); END IF;
 END $p$;
 REVOKE ALL ON gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state FROM PUBLIC,anon,authenticated;
 GRANT SELECT,INSERT,UPDATE,DELETE ON gymos.invoice_allocation_refs,gymos.invoice_allocation_odd TO gymos_app;
-GRANT SELECT ON gymos.invoice_allocation_refs_state TO gymos_app;
+GRANT SELECT,INSERT ON gymos.invoice_allocation_refs_state TO gymos_app; -- INSERT is needed by the invoking-role first-invoice claim; drift risk is an OPEN review item like the direct DML on refs; no UPDATE/DELETE
 
 -- Ordinary payment day key (plain columns, so a day range is an Index Cond under RLS instead of a payload-expression Filter). pay_day holds the day only when it is the canonical string; pay_day_odd marks every other payments row
 -- (non-string or non-canonical day) so readers can still refuse them exactly. Held: adding stored generated columns rewrites gym_entities (do it in the cutover window or on the fresh rebuild).
