@@ -30,3 +30,22 @@ test('support tokens use a separate authenticated user scope and are not mixed w
  const response=await POST(request({action:'register',token}));assert.equal(response.status,200);
  const insert=globalThis.__fcmQueries.find(x=>x.text.includes('INSERT INTO gymos.support_fcm_subscriptions'));assert.ok(insert);assert.deepEqual(insert.params.slice(0,1),['support-user']);assert.deepEqual(globalThis.__fcmOwners,['support-user']);
 });
+test('read-only club license blocks registration but never the recipient own opt-out',async()=>{
+ setup();globalThis.__fcmContext={owner:'club-a',user:{userId:'manager-1'},role:'manager',branches:['north'],support:false,license:{status:'suspended'}};
+ globalThis.__fcmLicenseState={writable:false};
+ const blocked=await POST(request({action:'register',branch:'north',token}));
+ assert.equal(blocked.status,403);assert.deepEqual(await blocked.json(),{error:'licenseReadOnly'});
+ assert.equal(globalThis.__fcmQueries.some(x=>x.text.includes('INSERT INTO gymos.fcm_subscriptions')),false);
+ const optOut=await POST(request({action:'unregister',branch:'north',token}));
+ assert.equal(optOut.status,200);
+ assert.equal(globalThis.__fcmQueries.some(x=>x.text.includes('DELETE FROM gymos.fcm_subscriptions')),true);
+});
+test('member opt-out survives a read-only club license while registration stays gated',async()=>{
+ setup();globalThis.__fcmIdentity={owner_id:'club-a',member_id:'member-1',branch:'north',pin_must_change:false};
+ globalThis.__fcmLicenseState={writable:false};globalThis.__fcmLicenseRow={tenant_id:'t',status:'suspended'};
+ const blocked=await POST(request({action:'register',branch:'north',token}));
+ assert.equal(blocked.status,403);assert.deepEqual(await blocked.json(),{error:'licenseReadOnly'});
+ const optOut=await POST(request({action:'unregister',branch:'north',token}));
+ assert.equal(optOut.status,200);
+ assert.equal(globalThis.__fcmQueries.some(x=>x.text.includes('DELETE FROM gymos.fcm_subscriptions')),true);
+});

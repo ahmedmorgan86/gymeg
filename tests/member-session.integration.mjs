@@ -23,3 +23,38 @@ test('A unique phone membership signs in automatically without a club selector',
 test('Duplicate clubs require a valid PIN before revealing choices and authenticate only the selected club',async()=>{const qa=setup(true),wrong=await POST(request({phone,pin:'999999'}));assert.equal(wrong.status,401);assert.equal((await wrong.json()).chooseAccount,undefined);assert.equal(qa.sessions.length,0);const r=await POST(request({phone,pin}));assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);assert.deepEqual((await r.json()).chooseAccount.map(a=>a.name),['club-a','club-b']);assert.equal(qa.sessions.length,0);assert.equal((await POST(request({phone,pin,account:'club-z|member-z'}))).status,401);const selected=await POST(request({phone,pin,account:'club-b|member-b'}));assert.equal(selected.status,200);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);});
 test('Different PINs across clubs: only the PIN-matched club is revealed and selectable',async()=>{const qa=setup(true,true),r=await POST(request({phone,pin:'123456'}));assert.equal(r.status,200);const body=await r.json();assert.equal(body.chooseAccount,undefined,'unmatched memberships must not be disclosed');assert.equal(JSON.stringify(body).includes('club-a'),false);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);const wrongSelection=await POST(request({phone,pin:'123456',account:'club-a|member-a'}));assert.equal(wrongSelection.status,401);assert.equal((await wrongSelection.json()).chooseAccount,undefined);assert.equal(qa.sessions.length,1);});
 test('Legacy public branch directory returns no club data and performs no database query',async()=>{let queried=false;globalThis.__qaPhoneClient={release(){},async query(){queried=true;throw new Error('must not query');}};const r=await branches();assert.equal(r.status,200);assert.deepEqual(await r.json(),{branches:[]});assert.equal(queried,false);});
+
+function setupMulti(accounts){
+ const counters=new Map(),sessions=[];
+ globalThis.__qaPhoneSpaces=Object.fromEntries([...new Set(accounts.map(a=>a.owner_id))].map(owner=>{const state=emptyState();state.settings.name=owner;state.branches=[...new Set(accounts.filter(a=>a.owner_id===owner).map(a=>a.branch))].map(b=>({id:b,name:b==='north'?'North':'South'}));state.members=accounts.filter(a=>a.owner_id===owner).map(a=>({id:a.member_id,phone,branch:a.branch,demo:false,archived:false}));return[owner,{state}];}));
+ globalThis.__qaPhoneClient={release(){},async query(sql,values=[]){
+ if(sql.startsWith('SELECT a.owner_id')){const session=sessions.find(s=>s[0]===values[0]);const a=session&&accounts.find(a=>a.owner_id===session[1]&&a.member_id===session[2]&&a.version===session[3]);return{rows:a?[{...a}]:[]};}
+ if(sql.includes('gymos.member_phone_login('))return{rows:accounts.filter(a=>memberCodeHash(a.phone)===values[0]).map(a=>({owner_id:a.owner_id,member_id:a.member_id,branch:a.branch,version:a.version,pin_must_change:a.pin_must_change,matches:values[1]===a.pin}))};
+ if(sql.includes('RETURNING attempts')){const n=(counters.get(values[0])??0)+1;counters.set(values[0],n);return{rows:[{attempts:n}]};}
+ if(sql.includes('tenant_licenses'))return{rows:licenseRow?[{...licenseRow}]:[]};
+ if(sql.startsWith('INSERT INTO gymos.member_code_sessions'))sessions.push(values);return{rows:[]};}};
+ return{sessions,counters};
+}
+test('Two matched clubs and one unmatched: selector reveals only the PIN-matched clubs',async()=>{
+ const qa=setupMulti([
+  {owner_id:'club-a',member_id:'member-a',branch:'north',version:1,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-b',member_id:'member-b',branch:'north',version:2,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-c',member_id:'member-c',branch:'north',version:1,phone,pin:'999000',pin_must_change:false}]);
+ const r=await POST(request({phone,pin:'004321'}));assert.equal(r.status,200);
+ const body=await r.json();assert.deepEqual(body.chooseAccount.map(a=>a.name),['club-a','club-b']);
+ assert.equal(JSON.stringify(body).includes('club-c'),false,'unmatched club must not be disclosed');
+ assert.equal(qa.sessions.length,0);
+ assert.equal((await POST(request({phone,pin:'004321',account:'club-c|member-c'}))).status,401);
+ const selected=await POST(request({phone,pin:'004321',account:'club-b|member-b'}));assert.equal(selected.status,200);
+ assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);
+});
+test('Two memberships in the same club select by branch-disambiguated names',async()=>{
+ const qa=setupMulti([
+  {owner_id:'club-a',member_id:'member-a',branch:'north',version:1,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-a',member_id:'member-b',branch:'south',version:3,phone,pin:'004321',pin_must_change:false}]);
+ const r=await POST(request({phone,pin:'004321'}));assert.equal(r.status,200);
+ const body=await r.json();assert.deepEqual(body.chooseAccount.map(a=>a.name),['club-a · North','club-a · South']);
+ assert.equal(qa.sessions.length,0);
+ const selected=await POST(request({phone,pin:'004321',account:'club-a|member-b'}));assert.equal(selected.status,200);
+ assert.deepEqual(qa.sessions[0].slice(1),['club-a','member-b',3]);
+});

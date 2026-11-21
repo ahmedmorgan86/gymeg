@@ -28,8 +28,10 @@ export async function POST(request:Request){
    if(identity.pin_must_change)return reply({error:'pinChangeRequired'},403);
    owner=identity.owner_id;recipientType='member';recipientId=identity.member_id;branch=identity.branch;
    const {state}=await readSpace(owner);if(!state.members.some(m=>m.id===recipientId&&m.branch===branch&&!m.demo&&!m.archived))return reply({error:'notLinked'},404);
+   // Registration is a license-gated write; unregistration is the recipient's
+   // own opt-out and must stay available even when the club is read-only.
    const license=useFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
-   if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
+   if(body.action==='register'&&license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
    const ctx=await context();if(!ctx)return reply({error:'auth'},401);
    if(ctx.support){
@@ -39,7 +41,7 @@ export async function POST(request:Request){
     return reply({ok:true,registered:body.action==='register'});
    }
    if(!['owner','manager'].includes(ctx.role))return reply({error:'forbidden'},403);
-   if(ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);
+   if(body.action==='register'&&ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);
    owner=ctx.owner;recipientType='staff';recipientId=ctx.user.userId;branch=body.branch??'';
    if(!branch||(ctx.branches&&!ctx.branches.includes(branch)))return reply({error:'forbidden'},403);
    const {state}=await readSpace(owner);if(!state.branches.some(b=>b.id===branch))return reply({error:'notFound'},404);

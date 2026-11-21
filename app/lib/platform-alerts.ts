@@ -93,7 +93,8 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
   } catch {}
 }
 
-export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean};
+export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean};
+async function readLicenseBlocked(response:Response):Promise<boolean>{if(response.status!==403)return false;try{const body=await response.json() as {error?:unknown};return body.error==='licenseReadOnly';}catch{return false;}}
 export async function requestNotificationPermission(branch?:string):Promise<NotificationPermissionResult>{
  const no=(native=false,prompted=false,configured=true):NotificationPermissionResult=>({granted:false,native,prompted,remote:false,configured});
  if(typeof window==='undefined')return no();
@@ -112,7 +113,7 @@ export async function requestNotificationPermission(branch?:string):Promise<Noti
      const tokenBody=await tokenResponse.json() as {token?:unknown};
      if(typeof tokenBody.token==='string'&&tokenBody.token.length>=80){
       const registered=await fetch('/api/fcm-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'register',...(branch?{branch}:{}),token:tokenBody.token}),signal:AbortSignal.timeout(10000)});
-      return{granted:true,native:true,prompted:result.requested===true,remote:registered.ok,configured:true};
+      return{granted:true,native:true,prompted:result.requested===true,remote:registered.ok,configured:true,...(await readLicenseBlocked(registered)?{licenseBlocked:true}:{})};
      }
     }
     if(attempt<3)await new Promise(resolve=>setTimeout(resolve,400));
@@ -140,7 +141,7 @@ export async function requestNotificationPermission(branch?:string):Promise<Noti
   const key=Uint8Array.from(atob(config.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
   const subscription=await registration.pushManager.getSubscription()??await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
   const response=await fetch('/api/push-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'subscribe',...(branch?{branch}:{}),subscription:subscription.toJSON()}),signal:AbortSignal.timeout(10000)});
-  if(!response.ok){if(response.status===503)return{granted:true,native:false,prompted,remote:false,configured:false};return{granted:true,native:false,prompted,remote:false,configured:true};}
+  if(!response.ok){if(response.status===503)return{granted:true,native:false,prompted,remote:false,configured:false};return{granted:true,native:false,prompted,remote:false,configured:true,...(await readLicenseBlocked(response)?{licenseBlocked:true}:{})};}
   return{granted:true,native:false,prompted,remote:true,configured:true};
  }catch{return{granted:true,native:false,prompted,remote:false,configured:true};}
 }
