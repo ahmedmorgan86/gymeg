@@ -191,3 +191,44 @@ export async function readMemberSlice(be:SliceBackend,owner:string,memberId:stri
   });
   return got?{state:got.value,revision:got.revision,partial:true}:null;
 }
+
+/** Row caps for the hot-operation hydration. Past a cap, completeness is not established and the caller uses the full read. */
+export const HOT_OPEN_CAP=2000,HOT_MEMBER_CAP=5000;
+async function pagedAll(be:SliceBackend,owner:string,q:SliceQuery,cap:number):Promise<Entity[]|null>{
+  const out:Entity[]=[];let after:number|undefined;
+  for(;;){
+    const page=await be.entities(owner,{...q,limit:MAX_SLICE,...(after!==undefined?{after}:{})});
+    out.push(...page);
+    if(out.length>cap)return null;
+    if(page.length<MAX_SLICE)return out;
+    after=page[page.length-1].position;
+  }
+}
+/**
+ * Rows hot-op-plans.ts partialState() keeps, read from storage. Returns null for
+ * legacy layouts, an unresolvable visit, a changing club, or when open visits or
+ * the member's history exceed the caps; callers then use the full read.
+ */
+export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:string;member?:string;visit?:string},normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
+  if(!be.supportsOpen)return null;
+  const got=await consistently(be,owner,async meta=>{
+    let member=plan.member;
+    if(!member){
+      const v=await be.entities(owner,{collections:['visits'],ids:[String(plan.visit)],branches:[plan.branch]});
+      member=v[0]?String(v[0].payload.member):undefined;
+    }
+    const open=await pagedAll(be,owner,{collections:['visits'],open:true},HOT_OPEN_CAP);
+    if(!open)return null;
+    const rows:Entity[]=[...open];
+    if(member){
+      const own=(c:Collection)=>pagedAll(be,owner,{collections:[c],match:{field:'member',values:[member!]}},HOT_MEMBER_CAP);
+      const [visits,payments,invoices,members]=await Promise.all([own('visits'),own('payments'),own('invoices'),be.entities(owner,{collections:['members'],ids:[member],branches:[plan.branch]})]);
+      if(!visits||!payments||!invoices)return null;
+      rows.push(...visits,...payments,...invoices,...members);
+    }
+    rows.push(...await be.entities(owner,{collections:['plans','shifts'],branches:[plan.branch]}));
+    const seen=new Set<string>();
+    return normalizeState(assembleState(meta.metadata,rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;}),{}));
+  });
+  return got&&got.value?{state:got.value,revision:got.revision,partial:true}:null;
+}
