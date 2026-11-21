@@ -9,7 +9,7 @@ All new flags below default OFF. This is an implementation inventory, not deploy
 | Device gateway ingest | GYMOS_DEVICE_EVENT_READS. After original HMAC gate, metadata mapping + revision-consistent existing hot hydration, global counts, byte proof and partial persist. | Full fallback on legacy/unready/caps/races/trim windows. Metadata still carries global engagement device replay list. No real device gateway mutated for testing. |
 | Member financial detail | GYMOS_MEMBER_ACCOUNT_READS. GET /api/member-account-detail pins owner/member/branch to codeMemberIdentity. Query parameters never choose identity. | Unavailable503 for unsupported layout, version change, >5000 own rows or related allocation inputs, timeout. No partial result. No browser wiring in this change. |
 | Member portal projection | Existing readMemberSpace/readMemberSlice already restricts entity inputs. | Loads all selected-member history and all history for open members to preserve latest-visit occupancy. Legacy/disabled/race fallback is full. Not a bounded page API yet. |
-| Member message write | Existing full read / full persist. | Explicit retained full mutation: community validation checks all message-member links and global byte rule; partial write not yet proved. |
+| Member message write | GYMOS_MEMBER_MESSAGE_READS. Complete community metadata plus referenced message members (up to1000 ids), exact validator/rate/replay checks and existing partial persist byte proof. | Full fallback for legacy/missing activity archive/counters, >1000 referenced members, events trim boundary or failed size proof. Community remains global metadata, not a row-paged store. |
 
 ## Member-account API contract
 

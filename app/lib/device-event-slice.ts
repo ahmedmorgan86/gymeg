@@ -9,7 +9,8 @@ import {RECENT_EVENTS} from './activity-archive.ts';
 export async function tryDeviceSlice(be:SliceBackend,q:{owner:string;branch:string;device:string;input:unknown;now:string;newId:()=>string}){
  if(process.env.GYMOS_DEVICE_EVENT_READS!=='1'||!be.supportsOpen)return null;
  const data=deviceEventSchema.parse(q.input);
- const metadata=await readSlice(be,q.owner,null,normalize);if(!metadata)return null;
+ const archive=await be.meta(q.owner);if(archive?.metadata._activityArchive!==1)return null;
+ const metadata=await readSlice(be,q.owner,null,normalize);if(!metadata||metadata.revision!==archive.revision)return null;
  // Reuse the exact duplicate/conflicting-event checks before any mutation.
  if(metadata.state.engagement?.deviceEvents.some(e=>e.id===q.device+':'+data.eventId))return ingestDeviceEvent(metadata.state,q.branch,q.device,data,q.now,q.newId).duplicate;
  const device=metadata.state.engagement?.devices.find(d=>d.id===q.device&&d.branch===q.branch&&d.enabled),mapping=device?.mappings.find(m=>m.person===data.personId);
