@@ -1,5 +1,6 @@
 "use client";
 import MemberAvatar from './member-avatar';
+import {useConsoleIndex} from './use-console-index';
 import {useEffect,useMemo,useRef,useState,type FormEvent} from 'react';
 import {dayAt,days,type GymState,type Member,type Operation} from './lib/domain';
 import {cardHistory,consoleIndex,discountTotal,durationClock,durationTone,fullName,memberPhone,memberSummary,normalizeDigits,normalizeArabic,receptionPolicy} from './lib/member-console';
@@ -36,8 +37,9 @@ export default function MemberConsole(p:ConsoleProps){
  useEffect(()=>{if(!notice)return;const timer=setTimeout(()=>{setNotice('');setNoticeOk(false);},4000);return()=>clearTimeout(timer);},[notice]);
  useEffect(()=>{if(!hud?.open)return;const timer=setTimeout(()=>setHud(null),4000);return()=>clearTimeout(timer);},[hud]);
  useEffect(()=>{const handleKey=(e:KeyboardEvent)=>{if(adding||selected)return;const target=e.target as HTMLElement|null;const isInput=target&&(target.tagName==='INPUT'||target.tagName==='TEXTAREA'||target.tagName==='SELECT');if(!isInput&&e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){scanInputRef.current?.focus();}};window.addEventListener('keydown',handleKey);return()=>window.removeEventListener('keydown',handleKey);},[adding,selected]);
- const indexStamp=Math.max(p.serverNow??0,Math.floor(Date.parse(now)/60000)*60000);const indexed=useMemo(()=>consoleIndex(p.state,p.branch,new Date(indexStamp).toISOString()),[p.state,p.branch,indexStamp]);const isPresent=(x:ReturnType<typeof memberSummary>)=>!!x.current&&Date.parse(x.current.activeAt??x.current.at)+receptionPolicy(p.state).autoExitMinutes*60000>Date.parse(now);
+ const indexStamp=Math.max(p.serverNow??0,Math.floor(Date.parse(now)/60000)*60000);const isPresent=(x:ReturnType<typeof memberSummary>)=>!!x.current&&Date.parse(x.current.activeAt??x.current.at)+receptionPolicy(p.state).autoExitMinutes*60000>Date.parse(now);
  const financial=p.role!=='reception'||(p.state.settings.receptionGrants?.[p.actor]??[]).some(g=>['payment.add','invoice.pay','member.register'].includes(g));
+ const {rows:indexed}=useConsoleIndex(p.state,p.branch,p.owner,p.role+'|'+p.actor,financial,indexStamp);
  const rows=indexed.filter(({m,search,summary:x})=>(tab!=='present'||isPresent(x))&&search.includes(normalizeArabic(query).toLocaleLowerCase().trim())&&filters.every(f=>f==='present'?isPresent(x):f==='debt'?x.debt>0:f==='long'?!!x.current&&Date.parse(now)-Date.parse(x.current.activeAt??x.current.at)>=90*60000:f==='new'?days(m.joined,today)<=7:x.status===f)).sort((a,b)=>{const value=(r:typeof a)=>sort==='expires'?(r.summary.period?.end??r.m.expires):sort==='debt'?r.summary.debt:sort==='status'?subscriptionLabel(r.summary,t):sort==='arrival'?r.summary.current?.activeAt??r.summary.current?.at??'':sort==='duration'?-(Date.parse(r.summary.current?.activeAt??r.summary.current?.at??now)):r.m.name;const av=value(a),bv=value(b);return (typeof av==='number'&&typeof bv==='number'?av-bv:String(av).localeCompare(String(bv),'ar'))*(descending?-1:1);});
  const member=p.state.members.find(m=>m.id===selected&&m.branch===p.branch),present=indexed.filter(x=>isPresent(x.summary));const currentPage=Math.min(page,Math.max(1,Math.ceil(rows.length/30)));
  function chooseFilter(f:string){setFilters(f?[f]:[]);setTab(f==='present'?'present':'all');setPage(1);}

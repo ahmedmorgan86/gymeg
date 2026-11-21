@@ -173,3 +173,23 @@ test('owner change version moves for EVERY writer and never repeats',async()=>{
   const b=await v('V1');await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','V1',true)");await refreshDirtySummaries(c,'V1',500,AS);});assert.equal(await v('V1'),b,'recomputing stored inputs changes no row of the club, so the token stays');
   await db.query('TRUNCATE gymos.gym_entities');assert.equal(await v('V1'),null,'after TRUNCATE there is no token, so no cache entry can match');
 });
+test('console candidate source: ok, unchanged, fallback, permission blanking, forbidden, token race',async()=>{
+  const {readConsoleCandidates}=await import('../app/lib/member-console-source.ts');
+  await seed('S1',fixture());
+  const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
+  const q=(x={})=>readConsoleCandidates(scope,{owner:'S1',branch:'a',branches:null,financial:true,now:AS,...x});
+  await db.query("DELETE FROM gymos.gym_member_summary_ready WHERE owner_id='S1'");
+  assert.equal((await q()).status,'fallback','unready owner is a fallback, not empty and not an error');
+  await db.query("SELECT gymos.backfill_member_summaries('S1')");
+  const ok=await q();assert.equal(ok.status,'ok');assert.ok(ok.candidates.length>0);assert.ok(ok.candidates.every(x=>x.member.branch==='a'));
+  assert.deepEqual(await q({since:ok.version}),{status:'unchanged',version:ok.version},'same version: nothing is resent');
+  const blank=await q({financial:false});assert.ok(blank.candidates.every(x=>x.stored.debt===0&&x.stored.paid===0),'reception without finance gets no debt/paid');
+  assert.ok(ok.candidates.some(x=>x.stored.paid>0||x.stored.debt>0),'fixture has finance to blank');
+  assert.equal((await q({branches:['b']})).status,'forbidden','branch outside the caller scope');
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{note}','\"x\"') WHERE owner_id='S1' AND collection='members' AND entity_id=(SELECT entity_id FROM gymos.gym_entities WHERE owner_id='S1' AND collection='members' LIMIT 1)");
+  const again=await q({since:ok.version});assert.equal(again.status,'ok');assert.notEqual(again.version,ok.version,'a writer moves the version, so the client refetches');
+  // a writer landing between the token read and the row read: simulated by bumping inside the scope after the first token read
+  let n=0;const racing=(o,work)=>scope(o,c=>work({query:async(s,v)=>{const r=await c.query(s,v);if(/gym_owner_version/.test(s)&&++n===2)await c.query("UPDATE gymos.gym_states SET payload=payload WHERE user_id='S1'");return r;}}));
+  const r=await readConsoleCandidates(racing,{owner:'S1',branch:'a',branches:null,financial:true,now:AS});
+  assert.deepEqual(r,{status:'fallback',reason:'changed-during-read'});
+});
