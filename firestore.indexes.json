@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "gym_workspace_deltas",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "owner_id", "order": "ASCENDING" },
+        { "fieldPath": "revision", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "fcm_subscriptions",
       "queryScope": "COLLECTION",
       "fields": [
