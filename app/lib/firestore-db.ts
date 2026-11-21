@@ -41,6 +41,11 @@ function cachedSpace(owner: string, revision: number): GymState | null {
   return structuredClone(hit.state);
 }
 
+/** Test hook: drops the in-instance workspace cache so tests can measure cold reads. */
+export function __clearSpaceCacheForTests(): void {
+  spaceCache.clear();
+}
+
 /** Reads only the state document: the cheapest way to learn an owner's revision. */
 export async function firestoreReadRevision(owner: string): Promise<number> {
   const db = getFirestoreDb();
