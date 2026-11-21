@@ -31,3 +31,9 @@ Write overhead remains a real rollout consideration: three warm samples insertin
 ALTER TABLE rewrites/backfills under a lock. A target rollout needs its own reviewed maintenance and concurrent-index plan, hosted PostgreSQL 16 actual-role plans/load and write-cost approval. Rollback starts by disabling all dependent readers, then drops only the new indexes and derived columns. Do not remove the older canonical function while its prior index still depends on it.
 
 Remaining gates include member-credit/reference indexing, actual HTTP fallback semantics, remote connection/pool lifetime, larger/skewed fixtures and independent review. Successful local plans do not authorize activation.
+
+## Native local HTTP check
+
+A local production Next server built from602d49e used genuine member-code session cookies and current_user=gymos_app (session login postgres, NOBYPASSRLS), without DB/auth mocks. Eighteen checks passed: OFF404, anonymous401, browser identity ignored, own rows only, portal OFF/ON response parity excluding per-request occupancyAsOf, mandatory PIN-change403, suspended-license403, revoked/expired401, archived404, foreign club404, odd-clock exact portal fallback, missing-key account503/portal fallback200, blocked statement503 after about2.01seconds and usable pool afterwards. All session/license/schema changes were confined to the separate disposable local database. No hosted endpoint was enabled or modified.
+
+The synthetic cross-member allocation fixture also confirms preexisting projection debt: the portal (both OFF and ON) computes credit from its historical selected-member slice, while the new account endpoint computes full-owner allocation semantics. The example returns9890 versus9000 respectively. The occupancy repair preserves its old behavior; a shared reviewed allocation-reference reader is still needed before presenting these as interchangeable financial sources.

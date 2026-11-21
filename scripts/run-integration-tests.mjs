@@ -37,6 +37,7 @@ const testSuites = [
   { name: 'POST /api/workspace hot path vs full path over a real entity-layout club (PGlite)', file: 'tests/workspace-post.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Barcode API over a real entity-layout club (slice backend, no state alias)', file: 'tests/barcode-entity.integration.mjs', loader: './tests/barcode-entity-loader.mjs' },
   { name: 'Report API timezone and scope contract', file: 'tests/report-api.integration.mjs', loader: './tests/report-api-loader.mjs' },
+  { name: 'Demand consumer route flag, role, branch and fallback matrix (PGlite)', file: 'tests/consumer-routes.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
 ];
 
 // Previously orphaned suites. They are registered explicitly, but a skipped
