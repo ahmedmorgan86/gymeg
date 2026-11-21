@@ -95,7 +95,7 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
 
 export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean};
 async function readLicenseBlocked(response:Response):Promise<boolean>{if(response.status!==403)return false;try{const body=await response.json() as {error?:unknown};return body.error==='licenseReadOnly';}catch{return false;}}
-export async function requestNotificationPermission(branch?:string):Promise<NotificationPermissionResult>{
+export async function requestNotificationPermission(branch?:string,audience?:'support'):Promise<NotificationPermissionResult>{
  const no=(native=false,prompted=false,configured=true):NotificationPermissionResult=>({granted:false,native,prompted,remote:false,configured});
  if(typeof window==='undefined')return no();
  const androidApp=/GymEG(?:Members|Manager|Support)Android/i.test(navigator.userAgent);
@@ -112,7 +112,7 @@ export async function requestNotificationPermission(branch?:string):Promise<Noti
     if(tokenResponse.ok){
      const tokenBody=await tokenResponse.json() as {token?:unknown};
      if(typeof tokenBody.token==='string'&&tokenBody.token.length>=80){
-      const registered=await fetch('/api/fcm-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'register',...(branch?{branch}:{}),token:tokenBody.token}),signal:AbortSignal.timeout(10000)});
+      const registered=await fetch('/api/fcm-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'register',...(branch?{branch}:{}),...(audience?{audience}:{}),token:tokenBody.token}),signal:AbortSignal.timeout(10000)});
       return{granted:true,native:true,prompted:result.requested===true,remote:registered.ok,configured:true,...(await readLicenseBlocked(registered)?{licenseBlocked:true}:{})};
      }
     }
@@ -122,6 +122,7 @@ export async function requestNotificationPermission(branch?:string):Promise<Noti
   }
   catch{return no(true);}
  }
+ if(audience==='support')return no(false,false,false);
  if(!('Notification'in window)||!('serviceWorker'in navigator)||!('PushManager'in window))return no();
  let prompted=false,granted=Notification.permission==='granted';
  if(!granted&&Notification.permission!=='denied'){
@@ -145,12 +146,13 @@ export async function requestNotificationPermission(branch?:string):Promise<Noti
   return{granted:true,native:false,prompted,remote:true,configured:true};
  }catch{return{granted:true,native:false,prompted,remote:false,configured:true};}
 }
-export async function disablePushNotifications(branch?:string):Promise<boolean>{
+export async function disablePushNotifications(branch?:string,audience?:'support'):Promise<boolean>{
  if(typeof window==='undefined')return false;
  const androidApp=/GymEG(?:Members|Manager|Support)Android/i.test(navigator.userAgent);
  if(androidApp){
-  try{const response=await fetch('/__native_fcm_token__',{cache:'no-store'});if(response.status===404)return true;if(!response.ok)return false;const body=await response.json() as {token?:unknown};if(typeof body.token!=='string')return true;const result=await fetch('/api/fcm-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'unregister',...(branch?{branch}:{}),token:body.token}),signal:AbortSignal.timeout(10000)});return result.ok;}catch{return false;}
+  try{const response=await fetch('/__native_fcm_token__',{cache:'no-store'});if(response.status===404)return true;if(!response.ok)return false;const body=await response.json() as {token?:unknown};if(typeof body.token!=='string')return true;const result=await fetch('/api/fcm-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'unregister',...(branch?{branch}:{}),...(audience?{audience}:{}),token:body.token}),signal:AbortSignal.timeout(10000)});return result.ok;}catch{return false;}
  }
+ if(audience==='support')return false;
  if(!('serviceWorker'in navigator))return false;
  try{
   const isMember=location.pathname==='/member'||location.pathname.startsWith('/member/');

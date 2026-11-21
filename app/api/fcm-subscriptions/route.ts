@@ -1,4 +1,6 @@
 import {z} from 'zod';
+import {getChatGPTUser} from '../../chatgpt-auth';
+import {platformAuthority} from '../../lib/platform-authority';
 import {codeMemberIdentity} from '../../lib/member-code-session';
 import {context,readSpace,reply,sameOrigin} from '../../lib/server-workspace';
 import {withScope} from '../../lib/database';
@@ -13,7 +15,7 @@ import {setFcmSubscription} from '../../lib/firestore-fcm';
 export const dynamic='force-dynamic';
 export const runtime='nodejs';
 const tokenSchema=z.string().min(80).max(4096).regex(/^[A-Za-z0-9:_-]+$/);
-const bodySchema=z.object({action:z.enum(['register','unregister']),branch:z.string().min(1).max(250).optional(),token:tokenSchema}).strict();
+const bodySchema=z.object({action:z.enum(['register','unregister']),branch:z.string().min(1).max(250).optional(),audience:z.literal('support').optional(),token:tokenSchema}).strict();
 
 export async function GET(){return reply({configured:pushEncryptionConfigured(),sendingConfigured:firebaseMessagingConfigured()});}
 export async function POST(request:Request){
@@ -22,6 +24,16 @@ export async function POST(request:Request){
  try{
   const raw=await request.text();if(raw.length>6000)return reply({error:'limit'},413);
   const body=bodySchema.parse(JSON.parse(raw));if(body.action==='register'&&!pushEncryptionConfigured())return reply({error:'pushNotConfigured'},503);
+  // Explicit platform-device enrollment is independent of any selected club or
+  // temporary support cookie. Authenticate and check live platform authority,
+  // then scope the token to this user only. Never take a user id from the body.
+  if(body.audience==='support'){
+   const user=await getChatGPTUser();if(!user)return reply({error:'auth'},401);
+   if(useFirestorePersistence()||(body.action==='register'&&!(await platformAuthority(user))))return reply({error:'forbidden'},403);
+   const tokenHash=fcmTokenDigest(body.token);
+   await withScope(user.userId,async client=>{if(body.action==='register')await client.query(`INSERT INTO gymos.support_fcm_subscriptions(user_id,token_hash,token_ciphertext) VALUES($1,$2,$3) ON CONFLICT(user_id,token_hash) DO UPDATE SET token_ciphertext=excluded.token_ciphertext,updated_at=now()`,[user.userId,tokenHash,encryptFcmToken(body.token)]);else await client.query('DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2',[user.userId,tokenHash]);});
+   return reply({ok:true,registered:body.action==='register'});
+  }
   const identity=await codeMemberIdentity(request);
   let owner:string,recipientType:'staff'|'member',recipientId:string,branch:string;
   if(identity){
