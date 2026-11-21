@@ -145,3 +145,16 @@ test('stale owner is read-only without refresh:true (no writes), and refresh wai
   const rc=await via('R2',async(c,s,v,phase)=>{if(phase==='after'&&/FROM gymos.gym_entity_counters/.test(s)){await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('R2','visits','vgrow',50,'a','{\"id\":\"vgrow\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\"}')");}return null;});
   assert.equal(rc.status,'raced');
 });
+test('the stored horizon is taken from the database clock: a caller-supplied FUTURE clock is ignored (a future-dated visit is never folded early)',async()=>{
+  await seed('H1',fixture());
+  await db.query("SELECT gymos.backfill_member_summaries('H1')");
+  const dbDay=(await db.query("SELECT (now() AT TIME ZONE 'UTC')::date::text d")).rows[0].d;
+  await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','H1',true)");return refreshDirtySummaries(c,'H1',500,'2099-01-01T00:00:00.000Z');});
+  const rows=(await db.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id='H1'")).rows;
+  assert.ok(rows.length>=10);
+  for(const r of rows)assert.ok(r.stored.horizon<dbDay,`horizon ${r.stored.horizon} must be before the DB day ${dbDay}`);
+  // a past clock is honored (more rows stay in the tail)
+  await db.query("SELECT gymos.backfill_member_summaries('H1')");
+  await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','H1',true)");return refreshDirtySummaries(c,'H1',500,'2026-03-10T00:00:00.000Z');});
+  assert.ok((await db.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id='H1'")).rows.every(r=>r.stored.horizon==='2026-03-09'));
+});

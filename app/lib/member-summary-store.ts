@@ -37,6 +37,10 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
   try{
     await c.query("SELECT set_config('lock_timeout',$1,true)",[String(LOCK_WAIT_MS)]);
     if(!(await c.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS ok',[`msum:${owner}`])).rows.some(r=>(r as {ok:boolean}).ok)){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}
+    // The persisted horizon comes from the DATABASE clock. A caller-supplied asOf can only move it EARLIER (safe: more visits stay verbatim in the tail); a later
+    // one is ignored, so a wrong or hostile clock can never fold a future-dated visit into the totals early.
+    const dbNow=new Date(String((await c.query('SELECT now() AS t')).rows[0]?.['t' as never])).toISOString();
+    const effective=asOf!==undefined&&Number.isFinite(Date.parse(asOf))&&Date.parse(asOf)<Date.parse(dbNow)?asOf:dbNow;
     const lim=(coll:string)=>(k.counts[coll]??0)+1;
     const gens=new Map<string,string>(),members=new Map<string,Member>(),have=new Map<string,StoredSummary>();
     for(let i=0;i<need.length;i+=1000){
@@ -65,7 +69,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     for(const id of todo){
       const m=members.get(id)!;
       const local={members:[m],visits:V.get(id)??[],payments:P.get(id)??[],invoices:I.get(id)??[]} as unknown as GymState;
-      const s=computeStoredSummary(local,m,asOf);
+      const s=computeStoredSummary(local,m,effective);
       await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify(s)]);
       // Rows read above are at least as new as the marks read under the lock; a later writer leaves a newer gen and the member stays dirty.
       if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
