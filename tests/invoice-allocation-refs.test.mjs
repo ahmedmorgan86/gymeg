@@ -54,3 +54,46 @@ test('payment day key columns: canonical day in pay_day, every other payments ro
   const r=(await db.query("SELECT entity_id,pay_day,pay_day_odd FROM gymos.gym_entities ORDER BY entity_id")).rows;
   assert.deepEqual(r,[{entity_id:'bad',pay_day:null,pay_day_odd:true},{entity_id:'n',pay_day:null,pay_day_odd:true},{entity_id:'none',pay_day:null,pay_day_odd:true},{entity_id:'ok',pay_day:'2026-03-05',pay_day_odd:false}]);
 });
+test('runtime role cannot write derived tables, claim readiness or call maintenance; trigger-only maintenance still works as runtime; epoch change clears readiness',async()=>{
+  const q=s=>db.query(s);
+  await q("DELETE FROM gymos.gym_entities");await q("DELETE FROM gymos.gym_states");
+  const role=(await q("SELECT rolsuper,rolbypassrls,rolcanlogin FROM pg_roles WHERE rolname='gymos_refs_maint'")).rows[0];assert.deepEqual(role,{rolsuper:false,rolbypassrls:false,rolcanlogin:false});
+  await q("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('RT','{}',1,'x')");
+  await q("SET ROLE gymos_app");await q("SELECT set_config('app.gym_owner','RT',false)");
+  try{
+    await q("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('RT','invoices','i1',1,'a','{\"allocations\":[{\"payment\":\"p\",\"minor\":1}]}')");
+    const cnt=async t=>Number((await q("SELECT count(*) n FROM gymos."+t)).rows[0].n);
+    assert.equal(await cnt('invoice_allocation_refs'),1);assert.equal(await cnt('invoice_allocation_refs_state'),1);
+    const denied=async(sql)=>{await q("BEGIN");let ok=false;try{await q(sql);ok=true;}catch(e){assert.match(String(e.message),/permission denied|row-level security|must be owner|not allowed/i,sql);}await q("ROLLBACK");assert.ok(!ok,'runtime must be denied: '+sql);};
+    await denied("INSERT INTO gymos.invoice_allocation_refs VALUES('RT','i1',9,'p',md5('p'),true,'1',1,'a')");
+    await denied("DELETE FROM gymos.invoice_allocation_refs");
+    await denied("UPDATE gymos.invoice_allocation_refs SET invoice_position=9");
+    await denied("TRUNCATE gymos.invoice_allocation_refs");
+    await denied("INSERT INTO gymos.invoice_allocation_odd VALUES('RT','i1',1,'a')");
+    await denied("DELETE FROM gymos.invoice_allocation_refs_state");
+    await denied("INSERT INTO gymos.invoice_allocation_refs_state(owner_id) VALUES('RT2')");
+    await denied("SELECT gymos.invoice_allocation_refs_sync()");
+    await denied("SELECT gymos.invoice_allocation_refs_complete('RT')");
+    await denied("SELECT gymos.invoice_allocation_refs_rebuild('RT',NULL,10)");
+    await denied("SELECT gymos.invoice_allocation_refs_mismatches('RT')");
+    await denied("ALTER TABLE gymos.invoice_allocation_refs DISABLE ROW LEVEL SECURITY");
+    await denied("ALTER TABLE gymos.gym_entities DISABLE TRIGGER invoice_allocation_refs_upd");
+    // owner isolation for reads
+    await q("SELECT set_config('app.gym_owner','OTHER',false)");assert.equal(await cnt('invoice_allocation_refs'),0);await q("SELECT set_config('app.gym_owner','RT',false)");
+    // legitimate runtime update/delete keeps refs exact through the maintenance trigger
+    await q("UPDATE gymos.gym_entities SET payload='{\"allocations\":[{\"payment\":\"p\"},{\"payment\":\"q\"}]}' WHERE owner_id='RT' AND entity_id='i1'");assert.equal(await cnt('invoice_allocation_refs'),2);
+    await q("DELETE FROM gymos.gym_entities WHERE owner_id='RT'");assert.equal(await cnt('invoice_allocation_refs'),0);
+  }finally{await q("RESET ROLE");}
+  // epoch change (no invoice diff) removes readiness; unrelated metadata change does not
+  assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),1);
+  await q("UPDATE gymos.gym_states SET payload='{\"other\":1}',revision=2 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),1);
+  await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"e1\"}',revision=3 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),0);
+  assert.equal((await q("SELECT gymos.invoice_allocation_refs_complete('RT') x")).rows[0].x,true);
+  // same generation again keeps readiness; invalid metadata text and a type change fail closed
+  const rdy=async()=>Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n);
+  await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"e1\",\"x\":2}',revision=4 WHERE user_id='RT'");assert.equal(await rdy(),1);
+  await q("UPDATE gymos.gym_states SET payload='{\"generation\":5}',revision=5 WHERE user_id='RT'");assert.equal(await rdy(),0);
+  await q("SELECT gymos.invoice_allocation_refs_complete('RT')");await q("UPDATE gymos.gym_states SET payload='not json',revision=6 WHERE user_id='RT'");assert.equal(await rdy(),0);
+  await q("SELECT gymos.invoice_allocation_refs_complete('RT')");assert.equal(await rdy(),1);
+  await q("DELETE FROM gymos.gym_states WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state")).rows[0].n),0);
+});
