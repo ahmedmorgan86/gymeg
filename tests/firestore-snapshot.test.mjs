@@ -104,9 +104,10 @@ test('multi-chunk snapshot round-trips a large state with photos intact', async 
   for (const [id, photo] of photos) {
     assert.equal(cold.state.members.find(m => m.id === id)?.photo, photo);
   }
-  // 1 state doc + 1 read per chunk + 1 read per photo, still no entity scan.
+  // 1 state doc + 1 read per chunk + 1 read per photo + 1 revision re-check
+  // (photo path only), still no entity scan.
   assert.equal(__counters.queries, 0);
-  assert.equal(__counters.reads, 1 + chunkCount + 60);
+  assert.equal(__counters.reads, 1 + chunkCount + 60 + 1);
 
   // GC: shrinking back below the chunk count deletes the extra chunks.
   const shrunk = structuredClone(cold.state);

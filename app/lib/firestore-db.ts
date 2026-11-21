@@ -69,7 +69,12 @@ const snapshotRef = (db: Firestore, owner: string, chunk: number) =>
 // burning the daily quota; a snapshot backfill (below) is what makes scans
 // one-time per club. Read at call time so tests and operators can adjust it.
 function maxScanDocs(): number {
-  return Math.max(100, Number(process.env.GYMEG_MAX_SCAN_DOCS) || 25_000);
+  // Default 2,000 docs per operation (~4% of the Spark daily read quota), so
+  // one cold read can never take a meaningful bite out of the day. Existing
+  // clubs above this are bootstrapped by the explicit operator script
+  // (scripts/backfill-snapshots.mjs), never by a hidden scan on a user's
+  // first visit; that script sets GYMEG_MAX_SCAN_DOCS deliberately.
+  return Math.max(100, Number(process.env.GYMEG_MAX_SCAN_DOCS) || 2_000);
 }
 export class ScanBudgetError extends Error {
   readonly scanned: number;
@@ -108,19 +113,23 @@ function buildSnapshotChunks(state: GymState): { chunks: Buffer[]; photoIds: str
 
 // Best-effort snapshot backfill after a legacy entity-scan read: later cold
 // reads of this revision cost 1 + chunks document reads instead of another
-// full scan. Not transactional by design: chunk payloads carry their revision
-// and readers verify it against the state document, so a stale backfill can
-// never be served; a racing persist overwrites the chunks atomically.
+// full scan. Race-safe: the chunks and the state document's chunk count are
+// written in one transaction that first re-verifies the revision, so a backfill
+// can never overwrite a newer revision's snapshot or clobber its chunk count;
+// a racing persist simply wins and its own in-transaction snapshot stands.
 async function backfillSnapshot(db: Firestore, owner: string, revision: number, state: GymState): Promise<void> {
   try {
     const built = buildSnapshotChunks(state);
     if (!built) return;
-    const batch = db.batch();
-    built.chunks.forEach((chunk, index) => {
-      batch.set(snapshotRef(db, owner, index), { revision, chunks: built.chunks.length, data: chunk });
+    const stateDocRef = db.collection('gym_states').doc(owner);
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(stateDocRef);
+      if (!snap.exists || (snap.data() as { revision?: number }).revision !== revision) return; // lost the race
+      built.chunks.forEach((chunk, index) => {
+        tx.set(snapshotRef(db, owner, index), { revision, chunks: built.chunks.length, data: chunk });
+      });
+      tx.update(stateDocRef, { _snapshotChunks: built.chunks.length });
     });
-    await batch.commit();
-    await db.collection('gym_states').doc(owner).update({ _snapshotChunks: built.chunks.length });
   } catch (error) {
     console.warn('snapshot_backfill_failed', error);
   }
@@ -172,6 +181,16 @@ async function readSnapshot(db: Firestore, owner: string, revision: number): Pro
       if (typeof content === 'string') photos[photoIds[index]] = content;
     });
     packed.s.members = packed.s.members.map(member => (photos[member.id] ? { ...member, photo: photos[member.id] } : member));
+    // The photo reads above are not in the snapshot's transaction: a persist
+    // that advanced the revision while they ran would leave new photos on the
+    // old state. Re-verify the revision (one extra read, only on the photo
+    // path) and let a mismatch fall back to the bounded scan.
+    const recheck = await db.collection('gym_states').doc(owner).get();
+    const latest = recheck.exists ? (recheck.data() as { revision?: number }).revision : undefined;
+    if (latest !== revision) {
+      console.warn('snapshot_raced_during_photo_reattach');
+      return null;
+    }
   }
   return packed.s;
 }

@@ -73,10 +73,25 @@ test('REVIEW B: demo-scale 800 members + 12.6 docs/member - does snapshot fit an
   console.log(`B: state JSON=${(jsonBytes/1e6).toFixed(2)}MB entities=${entityDocs} snapshotChunks=${chunkMeta ? chunkMeta.chunks : 'NONE'}`);
   const cold = await coldRead();
   console.log(`B: cold read docs read=${__counters.reads} queryDocsReturned=${__counters.docsReturned} queries=${__counters.queries}`);
-  // now without snapshot (pre-snapshot revision)
+  // now without snapshot (pre-snapshot revision): a 10.1k-doc club exceeds
+  // the default 2,000-doc scan guard and fails closed instead of burning
+  // half the daily quota. The explicit operator bootstrap script is what
+  // snapshots clubs this size, not a hidden first-visit scan.
   __store.get('gym_state_snapshots').clear();
-  const cold2 = await coldRead();
-  console.log(`B: cold read WITHOUT snapshot docs=${__counters.reads} queryDocsReturned=${__counters.docsReturned}`);
+  await assert.rejects(() => coldRead(), /scanBudget/);
+  console.log(`B: cold read WITHOUT snapshot failed closed (club over default scan guard)`);
+  // With a deliberate operator-sized budget the one-time scan+backfill works.
+  const prev = process.env.GYMEG_MAX_SCAN_DOCS;
+  process.env.GYMEG_MAX_SCAN_DOCS = '25000';
+  try {
+    const cold2 = await coldRead();
+    console.log(`B: bootstrap scan docs=${__counters.reads} queryDocsReturned=${__counters.docsReturned}`);
+    assert.equal(cold2.revision, 1);
+    const cold3 = await coldRead();
+    assert.equal(__counters.queries, 0, 'after bootstrap, cold reads are query-free');
+  } finally {
+    if (prev === undefined) delete process.env.GYMEG_MAX_SCAN_DOCS; else process.env.GYMEG_MAX_SCAN_DOCS = prev;
+  }
   assert.equal(cold.revision, 1);
 });
 
