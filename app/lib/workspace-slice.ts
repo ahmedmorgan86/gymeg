@@ -1,3 +1,4 @@
+import {RECENT_EVENTS} from './activity-archive.ts';
 // Bounded workspace reads. readSpace() loads every collection of a club; most
 // callers need the revision, the settings, one member, or one collection page.
 // A SliceBackend reads exactly that and nothing more, on Postgres and Firestore.
@@ -235,6 +236,8 @@ export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:str
     rows.push(...await be.entities(owner,{collections:['plans','shifts'],branches:[plan.branch]}));
     const seen=new Set<string>(),unique=rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
     const counts={members:await be.count(owner,'members'),visits:await be.count(owner,'visits'),invoices:await be.count(owner,'invoices'),plans:await be.count(owner,'plans'),followUps:await be.count(owner,'followUps')};
+    // At the trim windows the full path's own positions tie (array index vs retained rows): fail closed until a shared ordering fix is reviewed.
+    if(await be.count(owner,'events')>=RECENT_EVENTS||await be.count(owner,'receipts')>=1000)return null;
     return{counts,state:normalizeState(assembleState(meta.metadata,unique,{})),positions:Object.fromEntries(unique.map(e=>[e.collection+':'+e.entity_id,Number(e.position)]))};
   });
   return got&&got.value?{state:got.value.state,positions:got.value.positions,counts:got.value.counts,revision:got.revision,partial:true}:null;

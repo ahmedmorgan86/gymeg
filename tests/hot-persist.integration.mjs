@@ -83,9 +83,10 @@ n++;if(r===true)ok++;}}
 test('events window and receipts cap: oldest rows are trimmed exactly as the full path trims them',async()=>{
   const s0=prep(2,{events:RECENT_EVENTS,receipts:1000});
   const op=opsFor(s0).find(o=>o.type==='payment.add');
-  let r=await compare('boundary',s0,op,7);assert.equal(r,true);
-  const cnt=(await db.query("SELECT collection,count(*)::int n FROM gymos.gym_entities WHERE owner_id='S' AND collection IN ('events','receipts') GROUP BY collection ORDER BY collection")).rows;
-  assert.deepEqual(cnt.map(x=>[x.collection,x.n]),[['events',RECENT_EVENTS],['receipts',1000]]);
+  // At the windows the full path's own positions tie, so the slice path refuses (full read decides) until a shared ordering fix is reviewed.
+  await db.exec("DELETE FROM gymos.gym_entities WHERE owner_id='S'");await db.exec("DELETE FROM gymos.gym_states WHERE user_id='S'");await seed('S',s0);
+  assert.equal(await sliceRun('S',op,7),'fallback','events/receipts at the window: slice refuses');
+  let r;
   const s1=prep(2,{events:RECENT_EVENTS-1,receipts:999});r=await compare('under',s1,op,8,true);assert.equal(r,true);
   const cnt2=(await db.query("SELECT collection,count(*)::int n FROM gymos.gym_entities WHERE owner_id='S' AND collection IN ('events','receipts') GROUP BY collection ORDER BY collection")).rows;
   assert.deepEqual(cnt2.map(x=>[x.collection,x.n]),[['events',RECENT_EVENTS],['receipts',1000]]);
