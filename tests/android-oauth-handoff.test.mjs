@@ -34,7 +34,7 @@ for (const role of ['members','management']) {
     // device, not claimed from source.
     assert.ok(main.includes('private String inflightVerifier,installingVerifier;'), 'attempt phase fields');
     assert.ok(main.includes('if(inflightVerifier!=null||installingVerifier!=null)return;'), 'new flow serialized against active phases');
-    assert.ok(main.includes('if(inflightVerifier!=null)return true;inflightVerifier=verifier;exchange(code,verifier)'), 'single exchange per pending attempt');
+    assert.ok(main.includes('if(inflightVerifier!=null||installingVerifier!=null)return true;inflightVerifier=verifier;exchange(code,verifier)'), 'single exchange per pending attempt; duplicate intent swallowed in both active phases');
     assert.ok((main.match(/if\(!verifier\.equals\(inflightVerifier\)\)return;inflightVerifier=null;/g) || []).length === 3, 'stale exchange responses ignored in all three outcomes');
     assert.ok(main.includes('installingVerifier=verifier;CookieManager.getInstance().setCookie("https://"+HOST,cookie'), 'cookie install owns the installing phase');
     assert.ok(main.includes('if(!verifier.equals(installingVerifier))return;installingVerifier=null;'), 'stale cookie completion ignored');
