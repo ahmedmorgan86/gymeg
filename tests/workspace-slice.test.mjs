@@ -7,6 +7,7 @@ const {splitState,assembleState}=await import('../app/lib/entity-state.ts');
 const {memberView}=await import('../app/lib/member-view.ts');
 const {normalize}=await import('../app/lib/extensions.ts');
 const {readMemberSlice}=await import('../app/lib/workspace-slice.ts');
+const {packet,packetQueries}=await import('../app/lib/workspace-packet.ts');
 const {emptyState}=await import('../app/lib/domain.ts');
 
 function club(owner){
@@ -143,5 +144,43 @@ test('Member portal view from a slice equals the view from the full state, with 
     assert.equal(view(wrongBranch.state,'m0'),'ERR:notFound','a member is invisible through another branch');
     const other=await readMemberSlice(backend,'club2','m0','a',normalize);
     assert.equal(other,null,'other club has no state, nothing leaks across owners');
+  }finally{await db.close();}
+});
+
+test('Packet built from role-scoped slices equals the packet from the full state, for every role',async()=>{
+  const db=await bootstrapDb();
+  try{
+    const full=richClub();
+    full.events=Array.from({length:300},(_,i)=>({id:`e${i}`,at:`2026-02-01T00:${String(i%60).padStart(2,'0')}:00.000Z`,kind:'x',subject:'s',actor:'u',branch:i%2?'b':'a'}));
+    full.receipts=Array.from({length:200},(_,i)=>({id:`r${i}`,digest:'d'}));
+    full.products=[{id:'pd0',name:'P',branch:'a',photo:'data:image/jpeg;base64,QQ=='}];
+    full.followUps=[{id:'f0',member:'m0',branch:'a'}];
+    full.members[0].photo='data:image/jpeg;base64,/9j/AAAA';full.members[3].photo='data:image/jpeg;base64,/9j/BBBB';
+    full.settings.receptionGrants={rec2:['payment.add']};
+    await seedPg(db,'club1',full);
+    const {stat,backend}=counted(db);
+    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching','events','receipts','products','followUps']});
+    const meta=await backend.meta('club1');const photos=Object.fromEntries([['m0',full.members[0].photo],['m3',full.members[3].photo]]);
+    const baseline=()=>normalize(assembleState(structuredClone(meta.metadata),structuredClone(everything),structuredClone(photos)));
+    const versions=await backend.photoVersions('club1');
+    const base={tenantId:'club1',owner:'club1',license:null,support:undefined};
+    const ctxs={
+      owner:{...base,role:'owner',branches:null,user:{userId:'u1',displayName:'U'}},
+      manager:{...base,role:'manager',branches:['a'],user:{userId:'u2',displayName:'U'}},
+      noBranches:{...base,role:'manager',branches:[],user:{userId:'u2',displayName:'U'}},
+      receptionBare:{...base,role:'reception',branches:['b'],user:{userId:'rec1',displayName:'R'}},
+      receptionGrant:{...base,role:'reception',branches:['a','b'],user:{userId:'rec2',displayName:'R'}},
+    };
+    for(const [name,ctx] of Object.entries(ctxs)){
+      const expected=packet({state:baseline(),revision:7},ctx);
+      stat.rows=0;
+      const sliced=await readSlice(backend,'club1',m=>packetQueries(ctx,m.settings),normalize);
+      const rows=stat.rows;
+      const got=packet({state:sliced.state,revision:sliced.revision},ctx,versions);
+      expected.serverNow=got.serverNow=0;
+      assert.deepEqual(JSON.parse(JSON.stringify(got)),JSON.parse(JSON.stringify(expected)),`packet differs for ${name}`);
+      console.log('MEASURE packet',name,'rows',rows,'of',everything.length+1);
+    }
+    assert.match(JSON.stringify(packet({state:(await readSlice(backend,'club1',m=>packetQueries(ctxs.owner,m.settings),normalize)).state,revision:7},ctxs.owner,versions).state.members[0].photo),/member-photo.*v=/);
   }finally{await db.close();}
 });

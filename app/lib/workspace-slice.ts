@@ -1,6 +1,7 @@
 // Bounded workspace reads. readSpace() loads every collection of a club; most
 // callers need the revision, the settings, one member, or one collection page.
 // A SliceBackend reads exactly that and nothing more, on Postgres and Firestore.
+import {createHash} from 'node:crypto';
 import type {GymState} from './domain.ts';
 import {assembleState,collections,type Entity} from './entity-state.ts';
 
@@ -26,6 +27,8 @@ export interface SliceBackend{
   meta(owner:string):Promise<Meta|null>;
   entities(owner:string,query:SliceQuery):Promise<Entity[]>;
   photo(owner:string,memberId:string):Promise<string|null>;
+  /** member id -> first 16 hex chars of sha256(photo content), the cache-busting version the packet puts in photo URLs. */
+  photoVersions(owner:string):Promise<Record<string,string>>;
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
 }
 export const MAX_SLICE=500;
@@ -37,7 +40,7 @@ export function checkQuery(q:SliceQuery){
   if(q.branches&&q.branches.length===0)return false; // no branch allowed: nothing to read
   return true;
 }
-export const COMPLETE_MAX=20000;
+export const COMPLETE_MAX=250000;
 /** Explicit page sizes are capped; a read with no limit means "all matching rows" and must fail loudly rather than truncate silently. */
 const clampLimit=(n?:number)=>n===undefined?COMPLETE_MAX+1:Math.max(1,Math.min(MAX_SLICE,Math.floor(n)));
 const complete=<T>(q:SliceQuery,rows:T[],per=1)=>{if(q.limit===undefined&&rows.length>COMPLETE_MAX*per)throw new Error('slice too large: page it');return rows;};
@@ -61,6 +64,7 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
       return complete(q,await scope(owner,async c=>(await c.query(sql,values)).rows as Entity[]));
     },
     async photo(owner,memberId){return scope(owner,async c=>{const r=(await c.query('SELECT content FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,memberId])).rows[0] as {content:string}|undefined;return r?.content??null;});},
+    async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
     async count(owner,collection,branches){return scope(owner,async c=>{const r=(await c.query(branches?'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND branch=ANY($3::text[])':'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2',branches?[owner,collection,branches]:[owner,collection])).rows[0] as {n:number};return Number(r.n);});},
   };
 }
@@ -98,6 +102,7 @@ export function firestoreBackend(getDb:()=>FsDb):SliceBackend{
       return complete(q,sorted.slice(0,clampLimit(q.limit)*q.collections.length),q.collections.length);
     },
     async photo(owner,memberId){const s=await getDb().collection('gym_photos').doc(`${owner}_${memberId}`).get();return s.exists?String((s.data() as {content:string}).content):null;},
+    async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
     async count(owner,collection,branches){
       const db=getDb();let total=0;
       const groups=branches?Array.from({length:Math.ceil(branches.length/30)},(_,i)=>branches.slice(i*30,i*30+30)):[null];
@@ -115,10 +120,10 @@ export const readRevisionOnly=(be:SliceBackend,owner:string)=>be.revision(owner)
  * legacy single-payload layout (no entity rows to slice): callers then fall
  * back to the full read. Every other collection is an empty array.
  */
-export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|SliceQuery[]|null,normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
+export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|SliceQuery[]|null|((metadata:Record<string,unknown>)=>SliceQuery[]),normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
   const meta=await be.meta(owner);
   if(!meta||meta.metadata._entityStorage!==1)return null;
-  const queries=query===null?[]:Array.isArray(query)?query:[query];
+  const queries=query===null?[]:typeof query==='function'?query(meta.metadata):Array.isArray(query)?query:[query];
   const rows=(await Promise.all(queries.map(q=>be.entities(owner,q)))).flat();
   const state=normalizeState(assembleState(meta.metadata,rows,{}));
   return{state,revision:meta.revision,partial:true};
