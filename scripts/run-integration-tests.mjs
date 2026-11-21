@@ -23,6 +23,7 @@ const testSuites = [
   { name: 'Product photo privacy', file: 'tests/product-photo.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Simplified onboarding and task panels', file: 'tests/usability.integration.mjs', loader: './tests/usability-loader.mjs' },
   { name: 'Workspace trial gate and opt-out boundary', file: 'tests/workspace-trial-gate.integration.mjs', loader: './tests/workspace-trial-gate-loader.mjs' },
+  { name: 'Notification permission notice rendering', file: 'tests/notification-notice-ui.integration.mjs', loader: './tests/notification-notice-ui-loader.mjs' },
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
