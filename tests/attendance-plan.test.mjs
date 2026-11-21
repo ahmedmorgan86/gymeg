@@ -21,3 +21,17 @@ test('normal readAttendance rows statement carries the canonical predicate so th
   const rows=seen.find(q=>/ORDER BY \(payload->>'day'\) COLLATE "C" DESC/.test(q));assert.ok(rows);
   assert.match(rows,/payload->>'day' ~ '\^\\d\{4\}-\\d\\d-\\d\\d\$'/);assert.match(rows,/payload->>'at' ~ /);
 });
+
+test('a writer making a row irregular between the probe and the rows read yields stale, never an omitting ok',async()=>{
+  const owner='ATTW';const s=fixture();s.visits=s.visits.filter(v=>v.leftAt);
+  const {metadata,entities}=splitState(s);
+  await db.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),'x']);
+  for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
+  const v=s.visits[0];let fired=false;
+  const rec=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work({query:async(q,vals)=>{const r=await c.query(q,vals);
+    if(!fired&&/SELECT EXISTS/.test(q)){fired=true;await c.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{at}','\"not a time\"') WHERE owner_id=$1 AND collection='visits' AND entity_id=$2",[owner,v.id]);}
+    return r;}});});
+  const d=await readAttendance(rec,{owner,branch:v.branch,day:'2026-03-15'});
+  assert.notEqual(d.status,'ok','must not return ok that omits the newly irregular row');
+  assert.ok(fired);
+});
