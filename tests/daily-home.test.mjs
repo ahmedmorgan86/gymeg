@@ -6,7 +6,7 @@ import ts from 'typescript';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 const component=new URL('../app/daily-home.tsx',import.meta.url).href;
-const hook=registerHooks({resolve(spec,ctx,next){if(ctx.parentURL===component&&spec==='./lib/domain')return next(spec+'.ts',ctx);return next(spec,ctx);},load(url,ctx,next){if(url===component)return{format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}}).outputText};return next(url,ctx);}});
+const hook=registerHooks({resolve(spec,ctx,next){try{return next(spec,ctx);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&spec.startsWith('.')&&!/\.[a-z]+$/i.test(spec))return next(spec+'.ts',ctx);throw e;}},load(url,ctx,next){if(url===component)return{format:'module',shortCircuit:true,source:ts.transpileModule(readFileSync(new URL(url),'utf8'),{compilerOptions:{jsx:ts.JsxEmit.ReactJSX,module:ts.ModuleKind.ESNext}}).outputText};return next(url,ctx);}});
 const {default:DailyHome}=await import(component);
 hook.deregister();
 const {emptyState}=await import('../app/lib/domain.ts');
