@@ -27,3 +27,15 @@ test('The platform-owner creation screen explains free use and hides the trial c
 test('Verified platform owner opens an unrelated club; ordinary users and other admins cannot',async()=>{for(const [userId,platform,allowed]of [[PLATFORM_OWNER_ACCOUNT_ID,true,true],[PLATFORM_OWNER_ACCOUNT_ID,false,false],['other-admin',true,false],['ordinary-user',false,false]]){const db=database({platform});db.data.clubs.push({id,storage_key:'tenant:'+id,name:'Existing unrelated club'});const request=commercialAction({...actor,userId},{action:'select',tenant:id,platformOwnerAccess:true});if(allowed){assert.deepEqual(await request,{id});assert.equal(db.data.memberships.length,0);assert.ok(db.calls.some(q=>q.includes('commercial_audit')));}else await assert.rejects(()=>request,e=>e.code==='forbidden');}});
 
 test('Verified owner authority reaches the workspace packet while the actual expired license stays read only',async()=>{const db=database({platform:true});db.data.clubs.push({id,storage_key:'tenant:'+id,name:'Expired trial'});const license={id,tenant_id:id,plan_id:'trial',mode:'trial',status:'active',starts_at:'2000-01-01',ends_at:'2000-02-01',maintenance_until:null,limits:{branches:1,members:10,staff:1},revision:0};db.data.licenses.push(license);const user={...actor,userId:PLATFORM_OWNER_ACCOUNT_ID},club=await commercialContext(user,id);assert.equal(club.platformOwnerAccess,true);const {packet}=await import('../app/lib/workspace-packet.ts');const view=packet({state:emptyState(),revision:0},{user,tenantId:id,owner:club.storage_key,role:club.role,branches:club.branches,license:club.license,support:undefined,platformOwnerAccess:club.platformOwnerAccess});assert.equal(view.platformOwnerAccess,true);assert.equal(view.license.writable,false);assert.equal(db.data.memberships.length,0);});
+test('Platform-owner binding honors a valid server env override and rejects malformed ones',async()=>{
+ const other='1b7b6ae8-0bd2-438a-b9a3-4ea7f8a4655c';
+ const previous=process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID;
+ try{
+  assert.equal(ownerComplimentary(true,other),false);
+  process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=other;
+  assert.equal(ownerComplimentary(true,other),true);
+  assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),false);
+  process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID='ahmed@example.com';
+  assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),true,'malformed override must fall back to the default, never bind an email string');
+ }finally{if(previous===undefined)delete process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID;else process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=previous;}
+});
