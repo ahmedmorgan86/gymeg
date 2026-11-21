@@ -19,6 +19,7 @@ registerHooks({
       export const sameOrigin=request=>request.headers.get('origin')===new URL(request.url).origin;
       export const context=async()=>globalThis.__hardeningContext;
       export const readSpace=async()=>({state:{members:[{id:'m1',branch:'main',archived:false,demo:false}],branches:[]},revision:0});
+      export const readSpaceSlice=readSpace;export const readSpaceMeta=readSpace;export const readMemberSpace=readSpace;export const readRevision=async()=>0;
     ` };
     if (url.endsWith('/app/lib/licensing.ts')) return { format: 'module', shortCircuit: true, source: `
       export class CommercialError extends Error {constructor(code,status=409){super(code);this.code=code;this.status=status;}}

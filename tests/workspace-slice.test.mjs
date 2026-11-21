@@ -3,7 +3,10 @@ import {registerHooks} from 'node:module';
 import {bootstrapDb,readFile,stripUnavailableExtensions} from './db-bootstrap-helpers.mjs';
 registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}}});
 const {postgresBackend,firestoreBackend,readSlice,readRevisionOnly,MAX_SLICE}=await import('../app/lib/workspace-slice.ts');
-const {splitState}=await import('../app/lib/entity-state.ts');
+const {splitState,assembleState}=await import('../app/lib/entity-state.ts');
+const {memberView}=await import('../app/lib/member-view.ts');
+const {normalize}=await import('../app/lib/extensions.ts');
+const {readMemberSlice}=await import('../app/lib/workspace-slice.ts');
 const {emptyState}=await import('../app/lib/domain.ts');
 
 function club(owner){
@@ -99,4 +102,46 @@ test('Firestore slices read documents by id, branch and page, never the whole cl
   const next=await be.entities('club1',{collections:['visits'],branches:['b'],desc:true,limit:25,before:Math.min(...(await be.entities('club1',{collections:['visits'],branches:['b'],desc:true,limit:25})).map(e=>e.position))});
   assert.equal(next.length,25);
   assert.equal(await be.photo('club1','m0'),'data:image/png;base64,AAAA');
+});
+
+function richClub(){
+  const s=normalize(emptyState());s.branches=[{id:'a',name:'A'},{id:'b',name:'B'}];
+  const day=i=>`2026-02-${String(1+i%27).padStart(2,'0')}`;
+  s.members=Array.from({length:12},(_,i)=>({id:`m${i}`,name:`Member ${i}`,branch:i%2?'b':'a',phone:`+2010000000${i}`,periods:[{id:`per${i}`,plan:'pl-'+(i%2?'b':'a'),start:'2026-01-01',end:'2026-12-31',minor:1000,days:365}],shift:i%2?'sh-b':'sh-a'}));
+  s.plans=[{id:'pl-a',name:'Gold A',days:30,visits:null,minor:1000,branch:'a',archived:false},{id:'pl-b',name:'Gold B',days:30,visits:null,minor:900,branch:'b',archived:false}];
+  s.shifts=[{id:'sh-a',name:'Morning A',branch:'a'},{id:'sh-b',name:'Morning B',branch:'b'}];
+  s.visits=Array.from({length:240},(_,i)=>({id:`v${i}`,member:`m${i%12}`,branch:(i%12)%2?'b':'a',day:day(i),at:`${day(i)}T0${i%9}:00:00.000Z`,leftAt:`${day(i)}T1${i%9}:00:00.000Z`}));
+  s.payments=Array.from({length:60},(_,i)=>({id:`p${i}`,member:`m${i%12}`,branch:(i%12)%2?'b':'a',minor:500+i,day:day(i),method:'cash',voided:i%17===0,creditable:i%3===0}));
+  s.invoices=Array.from({length:24},(_,i)=>({id:`i${i}`,member:`m${i%12}`,branch:(i%12)%2?'b':'a',title:'T',total:700,due:day(i),voided:i%11===0,allocations:i%2?[{payment:`p${i}`,minor:100}]:[]}));
+  s.classes=Array.from({length:40},(_,i)=>({id:`c${i}`,title:`Class ${i}`,branch:i%2?'b':'a',at:`2026-03-${String(1+i%27).padStart(2,'0')}T10:00:00.000Z`,members:[`m${i%12}`,`m${(i+2)%12}`],waitlist:[`m${(i+4)%12}`],cancelled:false,price:5,minutes:60}));
+  s.programs=[{id:'pr-a',branch:'a',name:'Prog A',days:[]},{id:'pr-b',branch:'b',name:'Prog B',days:[]}];
+  s.trainingAssignments=[{id:'ta0',member:'m0',program:'pr-a',start:'2026-01-01',end:null,notes:'',active:true,branch:'a'},{id:'ta1',member:'m1',program:'pr-b',start:'2026-01-01',end:null,notes:'',active:true,branch:'b'}];
+  s.trainingSessions=Array.from({length:20},(_,i)=>({id:`ts${i}`,assignment:i%2?'ta1':'ta0',day:i%7,date:day(i),note:'',branch:i%2?'b':'a'}));
+  s.coaching=[{id:'co0',member:'m0',branch:'a',title:'PT'}];
+  s.community={posts:[{id:'po0',branch:'a',enabled:true,title:'Hi',body:'B',publishAt:'2026-01-01T00:00:00.000Z'}],messages:[{id:'ms0',branch:'a',member:'m0',text:'x',side:'member',at:'2026-01-02T00:00:00.000Z'}]};
+  return s;
+}
+const view=(state,id)=>{const m=state.members.find(x=>x.id===id);try{return JSON.stringify(memberView(state,id,m?m.branch:'a','2026-03-15T12:00:00.000Z'));}catch(e){return 'ERR:'+e.message;}};
+
+test('Member portal view from a slice equals the view from the full state, with far fewer rows (Postgres)',async()=>{
+  const db=await bootstrapDb();
+  try{
+    const full=richClub();await seedPg(db,'club1',full);
+    const {stat,backend}=counted(db);
+    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching']});
+    const meta=await backend.meta('club1');
+    const baseline=normalize(assembleState(meta.metadata,everything,{}));
+    let sliceRows=0;
+    for(let i=0;i<12;i++){
+      stat.rows=0;const sliced=await readMemberSlice(backend,'club1',`m${i}`,i%2?'b':'a',normalize);sliceRows=stat.rows;
+      assert.equal(view(sliced.state,`m${i}`),view(baseline,`m${i}`),`member m${i} view differs`);
+      assert.notEqual(view(baseline,`m${i}`).startsWith('ERR'),true);
+    }
+    console.log("MEASURE member-view rows",sliceRows,"of",everything.length);
+    assert.ok(sliceRows<everything.length/2,`slice read ${sliceRows} rows vs ${everything.length}`);
+    const wrongBranch=await readMemberSlice(backend,'club1','m0','b',normalize);
+    assert.equal(view(wrongBranch.state,'m0'),'ERR:notFound','a member is invisible through another branch');
+    const other=await readMemberSlice(backend,'club2','m0','a',normalize);
+    assert.equal(other,null,'other club has no state, nothing leaks across owners');
+  }finally{await db.close();}
 });
