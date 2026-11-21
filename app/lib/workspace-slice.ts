@@ -140,7 +140,7 @@ export async function consistently<T>(be:SliceBackend,owner:string,work:(meta:Me
   return null;
 }
 
-export type Sliced={state:GymState;revision:number;partial:true};
+export type Sliced={state:GymState;revision:number;partial:true;/** Stored position of every loaded row, key `collection:entity_id`. Only readHotSlice fills it. */positions?:Record<string,number>};
 /** Revision only: one row / one document. null when the club has no state yet. */
 export const readRevisionOnly=(be:SliceBackend,owner:string)=>be.revision(owner);
 /**
@@ -228,8 +228,8 @@ export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:str
       rows.push(...visits,...payments,...invoices,...members);
     }
     rows.push(...await be.entities(owner,{collections:['plans','shifts'],branches:[plan.branch]}));
-    const seen=new Set<string>();
-    return normalizeState(assembleState(meta.metadata,rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;}),{}));
+    const seen=new Set<string>(),unique=rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
+    return{state:normalizeState(assembleState(meta.metadata,unique,{})),positions:Object.fromEntries(unique.map(e=>[e.collection+':'+e.entity_id,Number(e.position)]))};
   });
-  return got&&got.value?{state:got.value,revision:got.revision,partial:true}:null;
+  return got&&got.value?{state:got.value.state,positions:got.value.positions,revision:got.revision,partial:true}:null;
 }

@@ -25,6 +25,7 @@ const testSuites = [
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
+  { name: 'Hot-operation slice persist parity against the full persist path (PGlite)', file: 'tests/hot-persist.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'Barcode API over a real entity-layout club (slice backend, no state alias)', file: 'tests/barcode-entity.integration.mjs', loader: './tests/barcode-entity-loader.mjs' },
   { name: 'Report API timezone and scope contract', file: 'tests/report-api.integration.mjs', loader: './tests/report-api-loader.mjs' },
 ];
