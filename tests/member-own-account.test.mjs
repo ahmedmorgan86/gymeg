@@ -1,6 +1,7 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import {registerHooks} from 'node:module';import {bootstrapDb} from './db-bootstrap-helpers.mjs';
 const db=globalThis.__ownDb=await bootstrapDb();
 registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}},load(url,c,n){
+ if(url.endsWith('/app/lib/read-transaction.ts'))return{format:'module',shortCircuit:true,source:`export const readDeadlineScope=deadline=>(o,work)=>globalThis.__ownDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});`};
  if(url.endsWith('/app/lib/member-code-session.ts'))return{format:'module',shortCircuit:true,source:'export const codeMemberIdentity=async()=>globalThis.__ownIdentity;'};
  if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>{throw Error("unscoped DB")};export const withScope=(o,work)=>globalThis.__ownDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});`};
  if(url.endsWith('/app/lib/server-workspace.ts'))return{format:'module',shortCircuit:true,source:'export const reply=(data,status=200)=>Response.json(data,{status});'};
