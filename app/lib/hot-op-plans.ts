@@ -34,3 +34,23 @@ export function partialState(full:GymState,plan:HotPlan):GymState{
   for(const c of ['classes','pulse','events','receipts','announcements','products','stockLots','shopSales','followUps','programs','trainingAssignments','trainingSessions','coaching','coaches','coachOffers','coachPayouts','cashClosures','suppliers'] as const)(s as Record<string,unknown>)[c]=[];
   return s;
 }
+
+import {applyOperation,RuleError} from './domain.ts';
+/** Global row counts the full-state limit check uses. Fetched with be.count, never inferred from the partial state. */
+export type GlobalCounts={members:number;visits:number;invoices:number;plans:number;followUps:number};
+export const LIMITS={members:10000,visits:100000,invoices:10000,plans:1000,followUps:10000} as const;
+/**
+ * applyOperation on a partial state plus the limit check the full path does, using
+ * global counts adjusted by what the operation added or removed. Boundary: the full
+ * path also rejects a club that ALREADY violates a limit through another member's
+ * freezes (>1000 on one member); the partial state cannot see other members, so that
+ * pre-existing-violation case is not reproduced. When both a limit and a later
+ * validator would fail, the limit error is raised after the validator error here.
+ */
+export function applyHot(partial:GlobalState,counts:GlobalCounts,op:Operation,now:string,actor:string,newId:()=>string):GlobalState{
+  const len=(s:GlobalState)=>({members:s.members.length,visits:s.visits.length,invoices:s.invoices?.length??0,plans:s.plans?.length??0,followUps:s.followUps?.length??0});
+  const before=len(partial),next=applyOperation(partial,op,now,actor,newId),after=len(next);
+  for(const k of Object.keys(LIMITS) as (keyof GlobalCounts)[])if(counts[k]+after[k]-before[k]>LIMITS[k])throw new RuleError('limit');
+  return next;
+}
+type GlobalState=GymState;

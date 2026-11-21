@@ -206,8 +206,9 @@ async function pagedAll(be:SliceBackend,owner:string,q:SliceQuery,cap:number):Pr
 }
 /**
  * Rows hot-op-plans.ts partialState() keeps, read from storage. Returns null for
- * legacy layouts, an unresolvable visit, a changing club, or when open visits or
- * the member's history exceed the caps; callers then use the full read.
+ * legacy layouts, a changing club, or when open visits or
+ * the member's history exceed the caps; callers then use the full read. A visit id that does
+ * not resolve gives a member-less state, the same as partialState(), so the operation fails notFound exactly as on the full state.
  */
 export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:string;member?:string;visit?:string},normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
   if(!be.supportsOpen)return null;

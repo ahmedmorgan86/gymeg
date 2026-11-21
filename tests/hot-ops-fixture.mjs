@@ -19,5 +19,16 @@ export function club(seed){
   let pn=0,inv=0;s.payments=[];s.invoices=[];
   for(const m of s.members)for(let k=0;k<Math.floor(r()*3);k++){const pid='pay'+pn++;s.payments.push({id:pid,member:m.id,branch:m.branch,minor:100+Math.floor(r()*500),day:DAY,method:'cash',voided:r()<.1});
     s.invoices.push({id:'inv'+inv++,member:m.id,branch:m.branch,title:'T',total:pick([300,700]),due:DAY,voided:r()<.1,allocations:r()<.5?[{payment:pid,minor:100}]:[]});}
+  // Distinctive rows in collections and metadata the hot operations should NOT need. If a plan ever depended on
+  // one of them, full and partial runs would diverge (an all-empty fixture cannot show that).
+  s.members.push({id:'demo1',name:'Demo',phone:'01099999999',branch:'a',joined:'2026-01-01',expires:'2026-12-31',archived:false,demo:true});
+  s.payments.push({id:'demo-pay',member:'demo1',branch:'a',minor:999,day:DAY,method:'cash',voided:false});
+  s.shopSales=[{id:'sale1',branch:'a',method:'cash',total:500,lines:[{price:250,quantity:2}],returns:[],voided:false,at:NOW}];
+  s.coachPayouts=[{id:'cp1',branch:'a',method:'cash',minor:300}];
+  s.classes=[{id:'c1',title:'C',at:'2026-03-16T10:00:00.000Z',capacity:5,members:s.members.slice(0,2).map(m=>m.id),waitlist:[],branch:'a',cancelled:false,price:50}];
+  s.followUps=[{id:'f1',member:s.members[0].id,branch:'a'}];
+  s.receipts=Array.from({length:50},(_,i)=>({id:'u:r'+i,digest:'d'+i}));
+  s.events=Array.from({length:1990},(_,i)=>({id:'ev'+i,at:'2026-03-01T00:00:00.000Z',kind:'x',subject:'s',actor:'u',branch:i%2?'a':'b'}));
+  s.financeBook={expenses:[],purchases:[],supplierPayments:[],shifts:[{id:'shift-a',branch:'a',openedAt:'2026-03-15T06:00:00.000Z',opening:1000,actor:'u',note:''},{id:'shift-b',branch:'b',openedAt:'2026-03-15T06:00:00.000Z',opening:500,actor:'u',note:''}],movements:[{id:'mv0',branch:'a',shift:'shift-a',source:'receipt:old',minor:100,kind:'payment.add',at:'2026-03-15T07:00:00.000Z',actor:'u'}]};
   return s;
 }
