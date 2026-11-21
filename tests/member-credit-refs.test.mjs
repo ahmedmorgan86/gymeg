@@ -129,3 +129,19 @@ test('refs path applies the same admission as the fold before the repeated fold 
   const few=payments.slice(0,3);delete process.env.GYMOS_CREDIT_REFS;const a=await exactPrivateCredit(db,owner,few,'m','a');process.env.GYMOS_CREDIT_REFS='1';const b=await exactPrivateCredit(db,owner,few,'m','a');delete process.env.GYMOS_CREDIT_REFS;
   assert.equal(a.status,'ok');assert.deepEqual(b,a);
 });
+test('refs transfer is bounded in SQL before the matching elements are fetched or decoded',async()=>{
+  const owner='XQ8';
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[owner]);
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,payload) SELECT $1,'invoices','i'||g,g,jsonb_build_object('allocations',(SELECT jsonb_agg(jsonb_build_object('payment','p0','minor',0)) FROM generate_series(1,2000)),'voided',false) FROM generate_series(1,40) g",[owner]);
+  await db.query("SELECT gymos.invoice_allocation_refs_complete($1,NULL)",[owner]);
+  const seen=[];const spy={query:(q,v)=>{seen.push(q);return db.query(q,v);}};
+  const big=await allocatingInvoicesFromRefs(spy,owner,['p0'],{maxBytes:1024*1024});
+  assert.deepEqual(big,{status:'unavailable',reason:'transfer-byte-cap'});
+  assert.ok(!seen.some(q=>/ORDER BY invoice_position/.test(q)),'matching elements must not be fetched after a refused bound');
+  const ok=await allocatingInvoicesFromRefs(spy,owner,['p0'],{maxBytes:64*1024*1024});
+  assert.equal(ok.status,'ok');assert.equal(ok.invoices.length,40);
+  // allocBytes equals the fold's jsonb text size of the returned allocations (+0 for voided here)
+  const want=ok.invoices.reduce((n,i)=>n+Buffer.byteLength((await_text(i.allocations))),0);assert.equal(ok.allocBytes,want);{const r=await db.query("SELECT sum(octet_length((payload->'allocations')::text))::int AS b FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'",[owner]);assert.equal(ok.allocBytes,Number(r.rows[0].b),'refs bytes == fold SQL bytes');}
+  async function _(){}
+});
+function await_text(a){return '['+a.map(x=>'{"payment": '+JSON.stringify(x.payment)+', "minor": '+JSON.stringify(x.minor)+'}').join(', ')+']';}

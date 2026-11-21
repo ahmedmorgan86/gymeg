@@ -13,10 +13,10 @@ export async function exactPrivateCredit(c:Q,owner:string,payments:GymState['pay
  const selected=payments.filter(p=>p.member===member&&p.branch===branch&&p.creditable&&!p.voided);
  if(!selected.length)return{status:'ok',credit:0} as const;
  if(process.env.GYMOS_CREDIT_REFS==='1'){
-  const r=await allocatingInvoicesFromRefs(c,owner,selected.map(p=>p.id));
+  const r=await allocatingInvoicesFromRefs(c,owner,selected.map(p=>p.id),{maxBytes:PRIVATE_CREDIT_BYTES});
   if(r.status==='ok'){
-   // Same accepted admission as the fold below, applied BEFORE the unchanged repeated fold: bytes of the returned allocation slices, and fold units x creditable payments. SQL timeouts do not bound JS CPU.
-   let units=r.invoices.length,bytes=0;for(const i of r.invoices){bytes+=Buffer.byteLength(JSON.stringify(i.allocations??null))+Buffer.byteLength(JSON.stringify(i.voided??null))+64;if(!i.voided&&Array.isArray(i.allocations))units+=i.allocations.length;}
+   // Same accepted admission as the fold below, applied BEFORE the unchanged repeated fold. Transfer is bounded in SQL first (maxBytes); then allocation bytes (jsonb text), and fold units x creditable payments. SQL timeouts do not bound JS CPU.
+   let units=r.invoices.length;for(const i of r.invoices)if(!i.voided&&Array.isArray(i.allocations))units+=i.allocations.length;const bytes=r.allocBytes; // allocation text bytes as jsonb renders them, measured in SQL before transfer
    if(bytes>PRIVATE_CREDIT_BYTES)return{status:'unavailable',reason:'credit-byte-cap'} as const;
    if(bytes*selected.length>PRIVATE_CREDIT_FOLD_BYTES)return{status:'unavailable',reason:'credit-fold-byte-cap'} as const;
    if(units*selected.length>PRIVATE_CREDIT_FOLD_UNITS)return{status:'unavailable',reason:'credit-fold-cap'} as const;
