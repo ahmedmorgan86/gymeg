@@ -77,6 +77,7 @@ CREATE TRIGGER invoice_allocation_refs_trunc AFTER TRUNCATE ON gymos.gym_entitie
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_rebuild(p_owner text,p_after text,p_limit integer) RETURNS text LANGUAGE plpgsql AS $$
 DECLARE last_id text; r record; n integer:=0;
 BEGIN
+  PERFORM 1 FROM gymos.gym_states WHERE user_id=p_owner FOR SHARE; -- same order as restore (owner gym_states row first, then invoice rows); never the reverse
   FOR r IN SELECT entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=p_owner AND collection='invoices' AND (p_after IS NULL OR entity_id>p_after) ORDER BY entity_id LIMIT p_limit FOR UPDATE LOOP
     DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=p_owner AND invoice_id=r.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=p_owner AND invoice_id=r.entity_id;
     INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(p_owner,r.entity_id,r.position,r.branch,r.payload);
@@ -99,6 +100,11 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_mismatches(p_owner text
 -- bypasses triggers must set the owner's state to ready=false (or rely on the generation tombstone) and repeat rebuild + complete.
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text) RETURNS boolean LANGUAGE plpgsql AS $$
 BEGIN
+  -- Lock order (shared with persistSpace restore, which locks the owner's gym_states row FIRST, then writes entities, then the metadata UPDATE): take the owner's gym_states row FOR SHARE before reading anything.
+  -- A restore then either committed before this lock (its changes and tombstone are visible to the mismatch check below, which runs as a fresh READ COMMITTED statement) or blocks on its own gym_states lock until this
+  -- transaction commits and then writes its tombstone AFTER our ready=true, so a committed tombstone can never be overwritten by a stale completion. The check is refused under a snapshot-fixed isolation level.
+  IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'invoice_allocation_refs_complete requires READ COMMITTED'; END IF;
+  PERFORM 1 FROM gymos.gym_states WHERE user_id=p_owner FOR SHARE;
   PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||p_owner));
   IF gymos.invoice_allocation_refs_mismatches(p_owner)<>0 THEN RETURN false; END IF;
   INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES(p_owner,true) ON CONFLICT (owner_id) DO UPDATE SET ready=true,set_at=now();RETURN true;
