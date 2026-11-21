@@ -2,6 +2,7 @@
 // args: members visitsPerOrdinary heavyVisits   (cap scale: 10000 8 20000 -> about 100,000 visits)
 import {registerHooks} from 'node:module';
 import {bootstrapDb} from './db-bootstrap-helpers.mjs';
+const SHUF=process.env.SHUFFLE==='1',RND=SHUF?' ORDER BY random()':'';if(SHUF)console.log('SHUFFLED heap: history rows inserted in random order');
 let db;if(process.env.REHEARSAL_DATABASE_URL){const {rehearsalDb}=await import('./pg-rehearsal-db.mjs');db=await rehearsalDb(process.env.REHEARSAL_DATABASE_URL);await db.reset();console.log('BACKEND: real PostgreSQL (rehearsal_ database)');}else{db=await bootstrapDb();console.log('BACKEND: PGlite');}
 globalThis.__hotDb=db;
 registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}},load(u,x,n){return n(u,x);}});
@@ -9,9 +10,9 @@ const {readMemberCandidates,refreshDirtySummaries,CHUNK}=await import('../app/li
 const M=Number(process.argv[2]??10000),PER=Number(process.argv[3]??8),HEAVY=Number(process.argv[4]??20000);
 await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('E','{\"_entityStorage\":1}',1,'x')");
 await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','members','m'||g,g,'a',jsonb_build_object('id','m'||g,'branch','a','joined','2025-01-01','expires','2026-12-31','membershipPeriods',jsonb_build_array(jsonb_build_object('id','p'||g,'plan','pl','start','2025-01-01','end','2026-12-31','visits',null))) FROM generate_series(1,$1) g",[M]);
-await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','v'||g||'_'||d,g*1000+d,'a',jsonb_build_object('id','v'||g||'_'||d,'member','m'||g,'branch','a','day','2026-03-0'||d,'at','2026-03-01T10:00:00.000Z','leftAt','2026-03-01T11:00:00.000Z') FROM generate_series(2,$1) g, generate_series(1,$2) d",[M,PER]);
+await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','v'||g||'_'||d,g*1000+d,'a',jsonb_build_object('id','v'||g||'_'||d,'member','m'||g,'branch','a','day','2026-03-0'||d,'at','2026-03-01T10:00:00.000Z','leftAt','2026-03-01T11:00:00.000Z') FROM generate_series(2,$1) g, generate_series(1,$2) d"+RND,[M,PER]);
 await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','h'||g,50000000+g,'a',jsonb_build_object('id','h'||g,'member','m1','branch','a','day','2025-06-01','at','2025-01-01T10:00:00.000Z','leftAt','2025-01-01T11:00:00.000Z') FROM generate_series(1,$1) g",[HEAVY]);
-for(const c of ['payments','invoices'])await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E',$2,$2||g||'_'||d,g*10+d,'a',jsonb_build_object('id',$2||g||'_'||d,'member','m'||g,'branch','a','minor',1,'total',1,'voided',false,'allocations','[]'::jsonb) FROM generate_series(1,$1) g, generate_series(1,2) d",[M,c]);
+for(const c of ['payments','invoices'])await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E',$2,$2||g||'_'||d,g*10+d,'a',jsonb_build_object('id',$2||g||'_'||d,'member','m'||g,'branch','a','minor',1,'total',1,'voided',false,'allocations','[]'::jsonb) FROM generate_series(1,$1) g, generate_series(1,2) d"+RND,[M,c]);
 await db.query("ANALYZE gymos.gym_entities");
 const bufs=t=>[...t.matchAll(/(?:hit|read)=(\d+)/g)].map(m=>+m[1]).reduce((a,b)=>a+b,0);
 const explain=async(sql,v)=>{const t=(await db.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v)).rows.map(x=>x['QUERY PLAN']).join('\n');return{buffers:bufs(t),plan:t.split('\n').filter(l=>/Index Scan|Seq Scan|Bitmap Heap/.test(l)).map(l=>l.trim().slice(0,60)).join('|')};};
@@ -20,9 +21,6 @@ const scope=w=>db.transaction(async c=>{await c.query("SELECT set_config('app.gy
 const drain=async(mode,max)=>{await db.query("SELECT gymos.backfill_member_summaries('E')");let w=0;const t0=performance.now();for(;;){const x=await scope(c=>refreshDirtySummaries(c,'E',max,mode));w++;if(x.status!=='ok'){console.log('stopped:',x.status);break;}if(x.remaining===0)break;}return{waves:w,ms:Math.round(performance.now()-t0)};};
 let t0;
 console.log('mass refresh, per-member lookups, 500 per wave:',await drain('lookup',500));
-console.log('mass refresh, grouped pass, all members in one call:',await drain('grouped',10000));
-console.log('mass refresh, auto rule (500/wave):',await drain('auto',500));
-console.log('grouped statement, visits (one unordered statement):',await explain("SELECT position,entity_id,payload FROM gymos.gym_entities WHERE owner_id='E' AND collection='visits' LIMIT 100000",[]));
 const ord=Array.from({length:CHUNK},(_,i)=>'m'+(i*37+5)),heavy=['m1'];
 console.log('visits, one chunk of',CHUNK,'ordinary members:',await explain(lat,['E','visits',ord]));
 console.log('visits, the skewed member (',HEAVY+PER,'rows):',await explain(lat,['E','visits',heavy]));

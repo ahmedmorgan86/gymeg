@@ -7,7 +7,7 @@ registerHooks({
   load(url,ctx,next){if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__hotDb.query(sql,v),release(){}})});export const isFirebaseConfigured=()=>false;`};return next(url,ctx);}
 });
 const {persistSpace}=await import('../app/lib/entity-store.ts');
-const {groupedInFlightNow,GROUPED_CONCURRENCY,useGrouped,refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
+const {refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
 const {deriveSummary}=await import('../app/lib/member-summary-model.ts');
 const {memberSummary}=await import('../app/lib/member-console.ts');
 const {splitState}=await import('../app/lib/entity-state.ts');
@@ -68,24 +68,23 @@ test('persistSpace full path (a real write) keeps summaries exact',async()=>{
   await persistSpace('O1',space,next);
   await same('O1','after persistSpace');
 });
-test('grouped bulk path and per-member lookups store identical summaries; the snapshot scope works',async()=>{
+test('bounded waves store the same summaries whatever the wave size; the snapshot scope works',async()=>{
   const {withSnapshotScope}=await import('../app/lib/member-summary-scope.ts');
   await seed('G1',fixture());
-  const drain=async mode=>{await db.query("SELECT gymos.backfill_member_summaries('G1')");let x;for(let i=0;i<10;i++){x=await withSnapshotScope('G1',c=>refreshDirtySummaries(c,'G1',500,mode));assert.equal(x.status,'ok');if(x.remaining===0)break;}
-    return (await db.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id='G1' ORDER BY 1")).rows;};
-  const a=await drain('lookup'),b=await drain('grouped'),c=await drain('auto');
-  assert.ok(a.length>=10);assert.deepEqual(strip(b),strip(a),'grouped == lookup');assert.deepEqual(strip(c),strip(a),'auto == lookup');
-  assert.equal(groupedInFlightNow(),0,'grouped admission counter released after success');assert.equal(GROUPED_CONCURRENCY,1);
-  // grouped path stays exact for every member against the oracle too
-  await db.query("SELECT gymos.backfill_member_summaries('G1')");
-  const r=await withSnapshotScope('G1',c=>readMemberCandidates(c,'G1',null,{refresh:true,mode:'grouped'}));assert.equal(r.status,'ok');
+  const drain=async max=>{await db.query("SELECT gymos.backfill_member_summaries('G1')");let x,waves=0;for(let i=0;i<50;i++){x=await withSnapshotScope('G1',c=>refreshDirtySummaries(c,'G1',max));assert.equal(x.status,'ok');assert.ok(x.refreshed<=max,'wave bounded by max');waves++;if(x.remaining===0)break;}
+    return{waves,rows:(await db.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id='G1' ORDER BY 1")).rows};};
+  const a=await drain(500),b=await drain(3);
+  assert.ok(a.rows.length>=10);assert.ok(b.waves>a.waves,'small waves take more calls');assert.deepEqual(strip(b.rows),strip(a.rows),'wave size does not change stored summaries');
   // snapshot scope maps a serialization failure to busy, not an exception
   await db.query("SELECT gymos.backfill_member_summaries('G1')");
   const bz=await withSnapshotScope('G1',c=>readMemberCandidates({query:async(s,v)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}return c.query(s,v);}},'G1',null,{refresh:true}));assert.equal(bz.status,'busy');
+  // the 40001 rolled back to the savepoint: the transaction is usable and the marks are still there
+  assert.ok(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='G1'")).rows[0].n)>0);
 });
-test('cost rule: grouped only when expected random pages exceed a sequential pass',()=>{
-  const k={counts:{visits:100000,payments:20000,invoices:20000},bytes:23_000_000};
-  assert.equal(useGrouped(10,k,10000),false);assert.equal(useGrouped(500,k,10000),true);assert.equal(useGrouped(1,{counts:{},bytes:0},0),false);
+test('there is no whole-collection history read: only per-member index lookups',async()=>{
+  const src=(await import('node:fs')).readFileSync(new URL('../app/lib/member-summary-store.ts',import.meta.url),'utf8');
+  assert.ok(!/readGrouped|useGrouped|groupedInFlight/.test(src));
+  assert.ok(!/FROM gymos\.gym_entities WHERE owner_id=\$1 AND collection=\$2 LIMIT/.test(src),'no unfiltered collection read');
 });
 test('unready, truncate, beyond-cap and too-many-dirty fail closed without a history read',async()=>{
   await seed('O2',{...fixture(),members:[],visits:[],payments:[],invoices:[]});
@@ -142,23 +141,4 @@ test('stale owner is read-only without refresh:true (no writes), and refresh wai
   // a writer growing a collection after the counters check is detected, not read without bound
   const rc=await via('R2',async(c,s,v,phase)=>{if(phase==='after'&&/FROM gymos.gym_entity_counters/.test(s)){await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('R2','visits','vgrow',50,'a','{\"id\":\"vgrow\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\"}')");}return null;});
   assert.equal(rc.status,'raced');
-});
-test('grouped admission is held through retention, computation and every upsert, and released on return and on error',async()=>{
-  await seed('A1',fixture());
-  const run=(hook)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",['A1']);return refreshDirtySummaries({query:async(s,v)=>{await hook(s,c);return c.query(s,v);}},'A1',500,'grouped');});
-  await db.query("SELECT gymos.backfill_member_summaries('A1')");
-  const seen=[];let nested;
-  const r=await run(async(s,c)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){seen.push(groupedInFlightNow());
-    if(nested===undefined){nested='pending';nested=await refreshDirtySummaries(c,'A1',500,'grouped').catch(e=>'threw:'+(e.code??e.message));}}});
-  assert.equal(r.status,'ok');assert.ok(seen.length>=10);assert.deepEqual([...new Set(seen)],[1],'counter is 1 during every upsert');
-  assert.equal(groupedInFlightNow(),0,'0 after return');
-  assert.ok(nested&&nested!=='pending'&&nested.status==='busy','a second grouped pass during the first is refused or blocked: '+JSON.stringify(nested));
-  // error path
-  await db.query("SELECT gymos.backfill_member_summaries('A1')");
-  await assert.rejects(run(async s=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s))throw new Error('boom');}),/boom/);
-  assert.equal(groupedInFlightNow(),0,'0 after an error');
-  // busy path (40001 during an upsert) also releases
-  await db.query("SELECT gymos.backfill_member_summaries('A1')");
-  const bz=await run(async s=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}});
-  assert.equal(bz.status,'busy');assert.equal(groupedInFlightNow(),0,'0 after busy');
 });
