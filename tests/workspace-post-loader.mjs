@@ -1,0 +1,9 @@
+// POST /api/workspace over a REAL entity-layout club on PGlite (real migrations, real persistSpace, real slice backend).
+// Only auth/context and the packet helpers are stubbed. entity-store is NOT stubbed.
+import {registerHooks} from 'node:module';import './commercial-loader.mjs';
+const packetUrl=new URL('../app/lib/workspace-packet.ts',import.meta.url).href,accessUrl=new URL('../app/lib/access.ts',import.meta.url).href,storeUrl=new URL('../app/lib/entity-store.ts',import.meta.url).href;
+registerHooks({load(url,ctx,next){
+  if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__postDb.query(sql,v),release(){}})});export async function withScope(owner,work){return globalThis.__postDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);});}`};
+  if(url.endsWith('/app/lib/server-workspace.ts'))return{format:'module',shortCircuit:true,source:`import {packet} from ${JSON.stringify(packetUrl)};import {fullAdministration} from ${JSON.stringify(accessUrl)};import {readEntitySpace} from ${JSON.stringify(storeUrl)};import {createHash} from 'node:crypto';export {packet};export const context=async()=>globalThis.__qaContext;export const readSpace=async owner=>readEntitySpace(owner);export const readRevision=async owner=>(await readEntitySpace(owner)).revision;export const readSpaceForPacket=async owner=>({current:await readEntitySpace(owner),photoVersions:undefined});export const administrator=async ctx=>fullAdministration(ctx.role,ctx.branches,[]);export const reply=(data,status=200)=>Response.json(data,{status});export const sameOrigin=request=>request.headers.get('origin')===new URL(request.url).origin;export const hash=async text=>createHash('sha256').update(text).digest('hex');`};
+  return next(url,ctx);
+}});
