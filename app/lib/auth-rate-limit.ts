@@ -7,12 +7,21 @@ import { requestClientIp } from './request-origin';
 // is actually used. Firestore counters only when Firestore is the persistence
 // backend; Postgres when GYMOS_DATA_BACKEND=postgres (or any deployment with
 // DATABASE_URL and no Firebase envs); otherwise a per-process Map.
-const firestoreEnabled = () => process.env.NODE_ENV !== 'test' && Boolean(
-  process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
-  process.env.FIREBASE_PROJECT_ID ||
-  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-) && process.env.GYMOS_DATA_BACKEND !== 'postgres';
-const postgresEnabled = () => process.env.NODE_ENV !== 'test' && !firestoreEnabled() && Boolean(process.env.DATABASE_URL);
+export type RateLimitStore = 'firestore' | 'postgres' | 'local';
+
+// Pure selection, exported for tests. Tests and local development always use
+// the per-process Map regardless of backend envs.
+export function rateLimitStoreFor(env: Record<string, string | undefined> = process.env): RateLimitStore {
+  if (env.NODE_ENV === 'test') return 'local';
+  const firebase = Boolean(
+    env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
+    env.FIREBASE_PROJECT_ID ||
+    env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
+  );
+  if (firebase && env.GYMOS_DATA_BACKEND !== 'postgres') return 'firestore';
+  if (env.DATABASE_URL) return 'postgres';
+  return 'local';
+}
 
 // Rate limiting for unauthenticated auth endpoints.
 //
@@ -112,8 +121,11 @@ async function consumePostgres(key: string, limit: number, windowMs: number, now
   }
 }
 
-async function consume(key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
-  const shared = firestoreEnabled() ? consumeShared : postgresEnabled() ? consumePostgres : null;
+// Store parameter is explicit so outage behavior is testable without a live
+// backend: any shared-store failure fails OPEN (logged), since blocking all
+// sign-ins because the counter store is down is the worse failure.
+export async function consumeWithStore(store: 'firestore' | 'postgres' | null, key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
+  const shared = store === 'firestore' ? consumeShared : store === 'postgres' ? consumePostgres : null;
   if (shared) {
     try {
       return await shared(key, limit, windowMs, now);
@@ -123,6 +135,11 @@ async function consume(key: string, limit: number, windowMs: number, now: number
     }
   }
   return consumeLocal(key, limit, windowMs, now);
+}
+
+async function consume(key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
+  const store = rateLimitStoreFor();
+  return consumeWithStore(store === 'local' ? null : store, key, limit, windowMs, now);
 }
 
 export async function consumeAuthRateLimit(scope: string, request: Request, email: string, limit: number, windowMs = WINDOW_MS, now = Date.now()): Promise<RateLimitDecision> {
