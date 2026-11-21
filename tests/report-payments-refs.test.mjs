@@ -20,6 +20,7 @@ async function seed(owner,state){
   const {metadata,entities}=splitState(state);
   await db.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),'x']);
   for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
+  await db.query('SELECT gymos.invoice_allocation_refs_complete($1)',[owner]); // refs reader needs migration-authorized readiness (no automatic claim)
 }
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
 const {readReportPaymentsRefs,REPORT_PAGE}=await import('../app/lib/report-payments-page.ts');

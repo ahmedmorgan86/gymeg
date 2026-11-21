@@ -62,7 +62,7 @@ export async function readReportPaymentsRefs(scope:Scope,q:{owner:string;branch:
   return scope(q.owner,c=>boundedRead(c,q.owner,'repayR\u0000'+q.branch+'\u0000'+JSON.stringify(bl)+'\u0000'+q.from+'\u0000'+q.to+'\u0000'+(q.after?q.after.day+'\u0000'+q.after.pos+'\u0000'+q.after.id+'\u0000'+q.ver:''),async()=>{
     const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable',reason:'no-version'} as const;
     if(q.after&&q.ver!==ver)return{status:'stale'} as const;
-    const ready=(await c.query(`SELECT (EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1) OR NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices')) AS x`,[q.owner])).rows[0] as {x:boolean};
+    const ready=(await c.query(`SELECT (EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1 AND ready) OR (NOT EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1) AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'))) AS x`,[q.owner])).rows[0] as {x:boolean};
     if(!ready.x)return{status:'unavailable',reason:'refs-not-ready'} as const;
     // a visible (branch-scoped) invoice with an unsupported allocation shape makes the legacy ledger throw: refuse explicitly (hidden-branch ones do not block). Voided invoices with such a shape are refused too (conservative).
     const oddInv=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.invoice_allocation_odd WHERE owner_id=$1 AND ($2::text[] IS NULL OR invoice_branch IS NULL OR invoice_branch=ANY($2::text[]))) AS x`,[q.owner,bl])).rows[0] as {x:boolean};

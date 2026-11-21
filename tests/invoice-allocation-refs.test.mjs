@@ -63,7 +63,7 @@ test('runtime role cannot write derived tables, claim readiness or call maintena
   try{
     await q("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('RT','invoices','i1',1,'a','{\"allocations\":[{\"payment\":\"p\",\"minor\":1}]}')");
     const cnt=async t=>Number((await q("SELECT count(*) n FROM gymos."+t)).rows[0].n);
-    assert.equal(await cnt('invoice_allocation_refs'),1);assert.equal(await cnt('invoice_allocation_refs_state'),1);
+    assert.equal(await cnt('invoice_allocation_refs'),1);assert.equal(await cnt('invoice_allocation_refs_state'),0);
     const denied=async(sql)=>{await q("BEGIN");let ok=false;try{await q(sql);ok=true;}catch(e){assert.match(String(e.message),/permission denied|row-level security|must be owner|not allowed/i,sql);}await q("ROLLBACK");assert.ok(!ok,'runtime must be denied: '+sql);};
     await denied("INSERT INTO gymos.invoice_allocation_refs VALUES('RT','i1',9,'p',md5('p'),true,'1',1,'a')");
     await denied("DELETE FROM gymos.invoice_allocation_refs");
@@ -84,16 +84,39 @@ test('runtime role cannot write derived tables, claim readiness or call maintena
     await q("UPDATE gymos.gym_entities SET payload='{\"allocations\":[{\"payment\":\"p\"},{\"payment\":\"q\"}]}' WHERE owner_id='RT' AND entity_id='i1'");assert.equal(await cnt('invoice_allocation_refs'),2);
     await q("DELETE FROM gymos.gym_entities WHERE owner_id='RT'");assert.equal(await cnt('invoice_allocation_refs'),0);
   }finally{await q("RESET ROLE");}
+  await q("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('RT','invoices','k',1,'a','{\"allocations\":[]}')");
+  assert.equal((await q("SELECT gymos.invoice_allocation_refs_complete('RT') x")).rows[0].x,true); // migration-authorized readiness
   // epoch change (no invoice diff) removes readiness; unrelated metadata change does not
-  assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),1);
-  await q("UPDATE gymos.gym_states SET payload='{\"other\":1}',revision=2 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),1);
-  await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"e1\"}',revision=3 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n),0);
+  assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE ready AND owner_id='RT'")).rows[0].n),1);
+  await q("UPDATE gymos.gym_states SET payload='{\"other\":1}',revision=2 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE ready AND owner_id='RT'")).rows[0].n),1);
+  await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"e1\"}',revision=3 WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE ready AND owner_id='RT'")).rows[0].n),0);
   assert.equal((await q("SELECT gymos.invoice_allocation_refs_complete('RT') x")).rows[0].x,true);
   // same generation again keeps readiness; invalid metadata text and a type change fail closed
-  const rdy=async()=>Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE owner_id='RT'")).rows[0].n);
+  const rdy=async()=>Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE ready AND owner_id='RT'")).rows[0].n);
   await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"e1\",\"x\":2}',revision=4 WHERE user_id='RT'");assert.equal(await rdy(),1);
   await q("UPDATE gymos.gym_states SET payload='{\"generation\":5}',revision=5 WHERE user_id='RT'");assert.equal(await rdy(),0);
   await q("SELECT gymos.invoice_allocation_refs_complete('RT')");await q("UPDATE gymos.gym_states SET payload='not json',revision=6 WHERE user_id='RT'");assert.equal(await rdy(),0);
   await q("SELECT gymos.invoice_allocation_refs_complete('RT')");assert.equal(await rdy(),1);
-  await q("DELETE FROM gymos.gym_states WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state")).rows[0].n),0);
+  await q("DELETE FROM gymos.gym_states WHERE user_id='RT'");assert.equal(Number((await q("SELECT count(*) n FROM gymos.invoice_allocation_refs_state WHERE ready")).rows[0].n),0);
+});
+test('invalidated readiness is a tombstone: no first-invoice auto-ready after generation change, delete/reinsert, empty restored owner, rollback',async()=>{
+  const q=s=>db.query(s);const ready=async o=>(await q("SELECT ready FROM gymos.invoice_allocation_refs_state WHERE owner_id='"+o+"'")).rows[0]?.ready;
+  await q("DELETE FROM gymos.gym_entities");await q("DELETE FROM gymos.gym_states");await q("DELETE FROM gymos.invoice_allocation_refs_state");
+  const inv=(o,id)=>q("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('"+o+"','invoices','"+id+"',1,'a','{\"allocations\":[{\"payment\":\"p\"}]}')");
+  await q("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('T1','{}',1,'x')");
+  await inv('T1','a');assert.equal(await ready('T1'),undefined); // no automatic claim, even for a brand new owner
+  assert.equal((await q("SELECT gymos.invoice_allocation_refs_complete('T1') x")).rows[0].x,true);assert.equal(await ready('T1'),true);
+  await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g1\"}',revision=2 WHERE user_id='T1'");assert.equal(await ready('T1'),false);
+  // delete the only invoice, then reinsert: tombstone blocks the shortcut
+  await q("DELETE FROM gymos.gym_entities WHERE owner_id='T1'");await inv('T1','b');assert.equal(await ready('T1'),false);
+  // empty restored owner, then first invoice: still tombstoned
+  await q("DELETE FROM gymos.gym_entities WHERE owner_id='T1'");await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g2\"}',revision=3 WHERE user_id='T1'");await inv('T1','c');assert.equal(await ready('T1'),false);
+  // only the migration-authorized complete() restores readiness
+  assert.equal((await q("SELECT gymos.invoice_allocation_refs_complete('T1') x")).rows[0].x,true);assert.equal(await ready('T1'),true);
+  // rollback: a restore transaction that fails leaves readiness untouched
+  await q("BEGIN");await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g3\"}',revision=4 WHERE user_id='T1'");assert.equal(await ready('T1'),false);await q("ROLLBACK");assert.equal(await ready('T1'),true);
+  // an owner with stale refs but no state row: a new first invoice never claims readiness
+  await q("DELETE FROM gymos.invoice_allocation_refs_state WHERE owner_id='T1'");await q("DELETE FROM gymos.gym_entities WHERE owner_id='T1'");
+  await q("INSERT INTO gymos.invoice_allocation_refs VALUES('T1','ghost',0,'p',md5('p'),false,NULL,1,'a')");await inv('T1','d');assert.equal(await ready('T1'),undefined);
+  await q("DELETE FROM gymos.invoice_allocation_refs WHERE owner_id='T1' AND invoice_id='ghost'");
 });
