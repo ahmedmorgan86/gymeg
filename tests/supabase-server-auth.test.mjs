@@ -89,33 +89,18 @@ test('getUser rejects unconfirmed accounts (email gate)', async () => {
   assert.equal((await auth.getUser()).data.user, null);
 });
 
-test('getUser rotates an expired access token and rewrites the cookie', async () => {
-  let userCalls = 0;
-  mockFetch({
-    'GET /user': () => (++userCalls === 1
-      ? { status: 401, json: { error_code: 'bad_jwt' } }
-      : { status: 200, json: CONFIRMED }),
-    'POST /token?grant_type=refresh_token': { status: 200, json: { access_token: 'acc2', refresh_token: 'ref2', user: CONFIRMED } },
-  });
-  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
-  const { auth } = supabaseServerAuth(store);
-  const { data } = await auth.getUser();
-  // The refresh response already carries the verified user, so no second
-  // /user call is needed; the rotated tokens replace the cookie.
-  assert.equal(data.user.id, 'u1');
-  assert.equal(userCalls, 1);
-  assert.equal(store.jar.get('gymos_session'), encodeSession('acc2', 'ref2'));
-});
-
-test('getUser drops the cookie when the refresh token is dead', async () => {
+test('getUser never rotates: the middleware boundary owns refresh', async () => {
+  let refreshCalls = 0;
   mockFetch({
     'GET /user': { status: 401, json: { error_code: 'bad_jwt' } },
-    'POST /token?grant_type=refresh_token': { status: 400, json: { error_code: 'refresh_token_not_found' } },
+    'POST /token?grant_type=refresh_token': () => { refreshCalls++; return { status: 200, json: {} }; },
   });
   const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
   const { auth } = supabaseServerAuth(store);
   assert.equal((await auth.getUser()).data.user, null);
-  assert.equal(store.jar.has('gymos_session'), false);
+  assert.equal(refreshCalls, 0);
+  // Cookie untouched — no rotation, no clear, in a writable store either.
+  assert.equal(store.jar.get('gymos_session'), encodeSession('acc', 'ref'));
 });
 
 test('signInWithPassword maps provider outcomes without leaking which one', async () => {
@@ -232,7 +217,7 @@ test('signInWithIdToken exchanges a Google ID token for a session', async () => 
   assert.equal(bad.error.status, 401);
 });
 
-test('read-only cookie store (Server Component) never consumes a refresh token', async () => {
+test('a read-only cookie store (Server Component) is never written or consulted for refresh', async () => {
   let refreshCalls = 0;
   mockFetch({
     'GET /user': { status: 401, json: { error_code: 'bad_jwt' } },
@@ -248,17 +233,13 @@ test('read-only cookie store (Server Component) never consumes a refresh token',
   assert.equal(store.jar.get('gymos_session'), encodeSession('acc', 'ref'));
 });
 
-test('a rotated cookie is used by the next getUser on the same object', async () => {
-  let userCalls = 0;
-  mockFetch({
-    'GET /user': (opts) => (++userCalls === 1
-      ? { status: 401, json: { error_code: 'bad_jwt' } }
-      : { status: 200, json: CONFIRMED }),
-    'POST /token?grant_type=refresh_token': { status: 200, json: { access_token: 'acc2', refresh_token: 'ref2', user: CONFIRMED } },
-  });
+test('a cookie rotated by the middleware boundary is used by the next getUser on the same object', async () => {
+  mockFetch({ 'GET /user': { status: 200, json: CONFIRMED } });
   const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
   const { auth } = supabaseServerAuth(store);
   await auth.getUser();
+  // Middleware rotates between the two calls: the next read must see it.
+  store.jar.set('gymos_session', encodeSession('acc2', 'ref2'));
   await auth.getUser();
   assert.equal(calls.at(-1).auth, 'Bearer acc2');
 });

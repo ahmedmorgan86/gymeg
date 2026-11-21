@@ -95,21 +95,6 @@ function openSession(store: CookieStore, payload: SessionPayload, opts: { allowU
   return { access_token: payload.access_token };
 }
 
-// Next Server Components expose a read-only cookie store whose set() throws.
-// Probe with the unchanged value before touching the refresh token, so a
-// read-only render never consumes a refresh token it cannot persist; the
-// middleware boundary (middleware.ts) owns rotation for page requests.
-function cookieStoreWritable(store: CookieStore): boolean {
-  const current = store.get('gymos_session')?.value;
-  if (current === undefined) return true;
-  try {
-    store.set('gymos_session', current, sessionCookieOptions);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export function supabaseServerAuth(store: CookieStore) {
   // Cookies are read fresh on every call: a rotation by middleware or by an
   // earlier method on this same object must never leave a stale token behind.
@@ -123,7 +108,7 @@ export function supabaseServerAuth(store: CookieStore) {
     const config = supabaseConfig();
     if (!config) return null;
     const mobileToken = readMobileToken();
-    const { raw, tokens } = readSession();
+    const { tokens } = readSession();
     if (mobileToken && !tokens) {
       const mobile = await gotrue(config, '/user', { token: mobileToken });
       // GET /user returns the raw user object, not { user }.
@@ -132,23 +117,14 @@ export function supabaseServerAuth(store: CookieStore) {
     if (!tokens) return null;
     const first = await gotrue(config, '/user', { token: tokens.a });
     if (first.ok) return toAuthUser(confirmedUser(first.json));
-    if (first.status !== 401 && first.status !== 403) return null;
-    // Rotation consumes the refresh token; only a writable cookie context may
-    // do it. Read-only page renders rely on the middleware refresh boundary.
-    if (!cookieStoreWritable(store)) return null;
-    const rotated = await gotrue(config, '/token?grant_type=refresh_token', { body: { refresh_token: tokens.r } });
-    if (!rotated.ok) {
-      if (rotated.status === 400 || rotated.status === 401 || rotated.status === 403) {
-        // Delete only if the cookie is still the one we read: a concurrent
-        // request may already have rotated it.
-        if (store.get('gymos_session')?.value === raw) store.delete('gymos_session');
-      }
-      return null;
-    }
-    const opened = openSession(store, rotated.json);
-    if (!opened || 'error' in opened) return null;
-    // The refresh response already carries the verified user.
-    return toAuthUser(confirmedUser(rotated.json.user as Record<string, unknown>));
+    // Expired or rejected access token: rotation belongs exclusively to the
+    // middleware refresh boundary (middleware.ts). Rotating here would consume
+    // the single-use refresh token in a context that may not be able to
+    // persist the new pair, and a stale clear/set from this request could
+    // clobber a concurrent request's successful rotation — races a per-request
+    // cookie comparison cannot detect. Read-only and writable contexts alike
+    // therefore just report "no user" and let the boundary refresh.
+    return null;
   }
 
   return {

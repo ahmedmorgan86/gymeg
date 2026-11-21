@@ -15,6 +15,10 @@ export async function middleware(request: NextRequest) {
     key,
     cookie: request.cookies.get('gymos_session')?.value,
   });
+  // Write the rotated pair to the request as well so the downstream render
+  // (RSC cookies()) reads the fresh token, and to the response so the browser
+  // stores it.
+  if (plan.action === 'set') request.cookies.set('gymos_session', plan.value);
   const response = NextResponse.next({ request });
   if (plan.action === 'set') response.cookies.set('gymos_session', plan.value, plan.options);
   else if (plan.action === 'clear') response.cookies.delete('gymos_session');
@@ -22,5 +26,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|icons|manifest.json).*)'],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|icons|manifest.json).*)'],
 };

@@ -24,9 +24,14 @@ function accessTokenExpiry(access: string): number | null {
 }
 
 // Pure refresh plan for the writable middleware boundary. Never consumes the
-// refresh token unless the access token is actually near expiry; a dead
-// refresh token clears the cookie, a transient provider failure keeps it so a
-// concurrent successful rotation is never clobbered.
+// refresh token unless the access token is actually near expiry. Only two
+// outcomes write anything: a successful rotation (set) and a locally
+// undecodable cookie (clear — a deterministic local fact, not a race). Any
+// provider rejection, including 400/401/403, KEEPS the cookie: an identical
+// concurrent request may have already consumed the refresh token and set the
+// rotated pair, and a late clear from this request would log the user out.
+// A genuinely dead cookie is unusable and harmless; the next sign-in or
+// explicit sign-out replaces it.
 export async function planSupabaseSessionRefresh(args: {
   url: string;
   key: string;
@@ -51,9 +56,6 @@ export async function planSupabaseSessionRefresh(args: {
     const json = (await response.json().catch(() => null)) as { access_token?: unknown; refresh_token?: unknown } | null;
     if (!response.ok) {
       logAuthDiagnostic('middleware-refresh', response.status, typeof json === 'object' && json && 'error_code' in json ? String((json as { error_code?: unknown }).error_code) : null);
-      // Dead refresh token: clear. Transient provider failure: keep, so a
-      // concurrent request that already rotated is not logged out.
-      if (response.status === 400 || response.status === 401 || response.status === 403) return { action: 'clear' };
       return { action: 'keep' };
     }
     if (typeof json?.access_token !== 'string' || typeof json?.refresh_token !== 'string') return { action: 'keep' };

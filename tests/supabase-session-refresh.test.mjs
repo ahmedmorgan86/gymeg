@@ -33,13 +33,38 @@ test('middleware refresh plan: keep fresh, rotate expired, clear dead, survive o
   const rotated = await planSupabaseSessionRefresh({ ...env, cookie: expired, now });
   assert.equal(rotated.action, 'set');
   assert.ok(rotated.value.length <= 4000);
-  // Dead refresh token clears; transient failure keeps (a concurrent request
-  // may already have rotated).
+  // Provider rejections NEVER clear: an identical concurrent request may have
+  // consumed the refresh token and set the rotated pair, and a late clear
+  // from this request would log the user out. Only a locally undecodable
+  // cookie clears.
   global.fetch = async () => ({ ok: false, status: 400, json: async () => ({ error_code: 'refresh_token_not_found' }) });
-  assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: expired, now }), { action: 'clear' });
+  assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: expired, now }), { action: 'keep' });
+  global.fetch = async () => ({ ok: false, status: 403, json: async () => ({}) });
+  assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: expired, now }), { action: 'keep' });
   global.fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
   assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: expired, now }), { action: 'keep' });
   global.fetch = async () => { throw new Error('down'); };
   assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: expired, now }), { action: 'keep' });
+  delete global.fetch;
+});
+
+test('staggered concurrent refreshes of the same cookie never produce a clear', async () => {
+  const now = Date.now();
+  const expired = encodeSession(jwt(Math.floor(now / 1000) - 10), 'ref');
+  // First request's rotation succeeds; the second request (which read the
+  // same old cookie before the first responded) gets the single-use
+  // refresh_token_not_found. Its plan must be keep, not clear.
+  let call = 0;
+  global.fetch = async () => {
+    call++;
+    if (call === 1) return { ok: true, status: 200, json: async () => ({ access_token: jwt(Math.floor(now / 1000) + 3600), refresh_token: 'ref2' }) };
+    return { ok: false, status: 400, json: async () => ({ error_code: 'refresh_token_not_found' }) };
+  };
+  const [winner, loser] = await Promise.all([
+    planSupabaseSessionRefresh({ ...env, cookie: expired, now }),
+    planSupabaseSessionRefresh({ ...env, cookie: expired, now }),
+  ]);
+  assert.equal(winner.action, 'set');
+  assert.equal(loser.action, 'keep');
   delete global.fetch;
 });
