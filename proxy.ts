@@ -2,7 +2,7 @@ import {supportWriteBlocked} from './app/lib/support-policy';
 import {planSupabaseSessionRefresh} from './app/lib/supabase-session-refresh';
 import {NextResponse,type NextRequest} from 'next/server';
 
-// Next 16 allows a single edge entry point: proxy.ts. It merges the legacy
+// Next 16 allows a single proxy entry point (Node runtime): proxy.ts. It merges the legacy
 // header policy (support write-block plus robots/cache headers on the app
 // surfaces) with the Supabase session-refresh boundary, which must run on
 // every matched route because any page render can touch the session.
@@ -31,15 +31,19 @@ export async function proxy(request:NextRequest){
   // browser stores it.
   if(plan&&plan.action==='set')request.cookies.set('gymos_session',plan.value);
   const response=NextResponse.next({request});
+  // Robots policy is independent of refresh: a refreshed request to an app
+  // surface still must not be indexed.
+  const pathname=request.nextUrl.pathname;
+  if(headerPath(pathname)&&pathname!=='/')response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
   if(plan&&plan.action==='set'){
     response.cookies.set('gymos_session',plan.value,plan.options);
     // A session-changing response must never be stored or replayed by any
-    // cache between us and the browser.
+    // cache between us and the browser; this stronger policy replaces the
+    // default one below.
     response.headers.set('Cache-Control','private, no-store, must-revalidate');
     response.headers.set('Pragma','no-cache');
     response.headers.set('Expires','0');
-  }else if(headerPath(request.nextUrl.pathname)){
-    if(request.nextUrl.pathname!=='/')response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
+  }else if(headerPath(pathname)){
     response.headers.set('Cache-Control','private, no-store');
   }
   return response;
