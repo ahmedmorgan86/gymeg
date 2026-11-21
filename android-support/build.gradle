@@ -5,24 +5,26 @@ plugins {
 android {
     namespace 'com.gymos.support'
     compileSdk 36
-    defaultConfig { applicationId 'com.gymos.support'; minSdk 26; targetSdk 36; versionCode 8; versionName '1.0.7' }
+    defaultConfig { applicationId 'com.gymos.support'; minSdk 26; targetSdk 36; versionCode 9; versionName '1.0.8' }
     buildFeatures { buildConfig true }
     // Reproducible target flavors: production is the committed default;
     // freshtest points the same reviewed source at the fresh Supabase build
     // with a coexisting applicationId. WEB_HOST/SUPABASE_HOST are the single
-    // origin sources for Java (BuildConfig); no auth App Links exist here.
+    // origin sources for Java (BuildConfig) and the manifest App Link host.
     flavorDimensions += ['target']
     productFlavors {
         production {
             dimension 'target'
             buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
             buildConfigField 'String', 'SUPABASE_HOST', '"frsstuqstutbflkaffcx.supabase.co"'
+            manifestPlaceholders = [webHost: 'gymeg.vercel.app']
         }
         freshtest {
             dimension 'target'
             applicationIdSuffix '.freshtest'
             buildConfigField 'String', 'WEB_HOST', '"gymeg-supabase.vercel.app"'
             buildConfigField 'String', 'SUPABASE_HOST', '"aynycpumwcopbnkbkqhr.supabase.co"'
+            manifestPlaceholders = [webHost: 'gymeg-supabase.vercel.app']
         }
     }
     signingConfigs { release { storeFile file(System.getenv('GYMEG_KEYSTORE') ?: 'missing-keystore.jks'); storePassword System.getenv('GYMEG_KEYSTORE_PASSWORD'); keyAlias System.getenv('GYMEG_KEY_ALIAS'); keyPassword System.getenv('GYMEG_KEYSTORE_PASSWORD') } }

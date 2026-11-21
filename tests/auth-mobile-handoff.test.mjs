@@ -68,8 +68,18 @@ test('start route carries android client and challenge in the state cookie', asy
   assert.equal(hc, CHALLENGE);
 });
 
+test('start route carries the support client and challenge in the state cookie', async () => {
+  const response = await startGET(new Request(`https://gym.example/api/auth/google?client=android-support&hc=${CHALLENGE}`));
+  assert.equal(response.status, 303);
+  const stateCookie = store.jar.get('gymos_google_state');
+  const [, target, client, hc] = stateCookie.split('.');
+  assert.equal(target, 'c');
+  assert.equal(client, 'android-support');
+  assert.equal(hc, CHALLENGE);
+});
+
 test('start route rejects an android client without a well-formed challenge', async () => {
-  for (const q of ['client=android-members', `client=android-members&hc=short`, `client=android-other&hc=${CHALLENGE}`]) {
+  for (const q of ['client=android-members', `client=android-support&hc=short`, `client=android-other&hc=${CHALLENGE}`]) {
     const response = await startGET(new Request('https://gym.example/api/auth/google?' + q));
     assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=google_failed', q);
     assert.equal(store.jar.has('gymos_google_state'), false, q);
@@ -152,7 +162,7 @@ test('exchange validates body shapes', async () => {
 
 test('per-app handoff fallback pages exist and never read the code', async () => {
   const { readFileSync } = await import('node:fs');
-  for (const app of ['members', 'management']) {
+  for (const app of ['members', 'management', 'support']) {
     const page = readFileSync(new URL(`../app/auth/mobile/callback/${app}/page.tsx`, import.meta.url), 'utf8');
     assert.match(page, /force-dynamic/);
     assert.ok(!/searchParams|useSearchParams|useParams|get\(['"]code/.test(page), `${app} fallback never reads query params`);
@@ -194,6 +204,113 @@ test('handoff table: runtime row secrecy and expiry cleanup evidence', async () 
   assert.doesNotMatch(migration, /GRANT .*TO (anon|authenticated)/);
   const storeSource = readFileSync(new URL('../app/lib/mobile-handoff.ts', import.meta.url), 'utf8');
   assert.match(storeSource, /DELETE FROM gymos\.auth_handoff_codes WHERE expires_at <= now\(\)/);
+});
+
+test('support client round trip uses its own return path and sets no browser cookie', async () => {
+  mockFetch();
+  store.jar.set('gymos_google_state', `STATE123.c.android-support.${CHALLENGE}`);
+  store.jar.set('gymos_google_nonce', 'NONCE123');
+  const response = await callbackGET(new Request('https://gym.example/api/auth/google/callback?code=authcode&state=STATE123'));
+  assert.equal(response.status, 303);
+  const location = new URL(response.headers.get('location'));
+  assert.equal(location.pathname, '/auth/mobile/callback/support');
+  assert.equal(location.searchParams.get('client'), 'android-support');
+  const code = location.searchParams.get('code');
+  assert.match(code, /^[A-Za-z0-9_-]{43}$/);
+  // Session isolation: the system browser that ran the callback gets nothing.
+  assert.equal(store.jar.has('gymos_session'), false);
+  const exchange = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-support' }),
+  }));
+  assert.equal(exchange.status, 204);
+  const setCookie = exchange.headers.get('set-cookie');
+  assert.match(setCookie, /^gymos_session=[^;]+; Path=\/; HttpOnly; SameSite=Lax; Max-Age=\d+/);
+  const session = decodeSession(setCookie.split(';')[0].slice('gymos_session='.length));
+  assert.deepEqual(session, { a: 'supa-acc', r: 'supa-ref' });
+});
+
+test('cross-client exchange is denied without burning the code', async () => {
+  mockFetch();
+  store.jar.set('gymos_google_state', `STATE123.c.android-members.${CHALLENGE}`);
+  store.jar.set('gymos_google_nonce', 'NONCE123');
+  const response = await callbackGET(new Request('https://gym.example/api/auth/google/callback?code=authcode&state=STATE123'));
+  const code = new URL(response.headers.get('location')).searchParams.get('code');
+  // A members code presented by the support or management shell is rejected.
+  for (const alien of ['android-support', 'android-management']) {
+    const bad = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, verifier: VERIFIER, client: alien }),
+    }));
+    assert.equal(bad.status, 401, alien);
+    assert.equal(bad.headers.get('set-cookie'), null);
+  }
+  // The legitimate client can still claim it afterwards.
+  const after = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-members' }),
+  }));
+  assert.equal(after.status, 204);
+  assert.match(after.headers.get('set-cookie'), /^gymos_session=/);
+});
+
+test('cross-client denial also holds for a support-created code', async () => {
+  mockFetch();
+  store.jar.set('gymos_google_state', `STATE123.c.android-support.${CHALLENGE}`);
+  store.jar.set('gymos_google_nonce', 'NONCE123');
+  const response = await callbackGET(new Request('https://gym.example/api/auth/google/callback?code=authcode&state=STATE123'));
+  const code = new URL(response.headers.get('location')).searchParams.get('code');
+  for (const alien of ['android-members', 'android-management']) {
+    const bad = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, verifier: VERIFIER, client: alien }),
+    }));
+    assert.equal(bad.status, 401, alien);
+    assert.equal(bad.headers.get('set-cookie'), null);
+  }
+  const after = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-support' }),
+  }));
+  assert.equal(after.status, 204);
+});
+
+test('a code expires after the handoff TTL', async () => {
+  const sessionValue = 'test-session-value';
+  const code = await handoff.createHandoff(sessionValue, 'android-support', CHALLENGE);
+  const realNow = Date.now;
+  try {
+    Date.now = () => realNow() + handoff.HANDOFF_TTL_MS + 1000;
+    const session = await handoff.consumeHandoff(code, VERIFIER, 'android-support');
+    assert.equal(session, null);
+  } finally {
+    Date.now = realNow;
+  }
+  // Expiry denial did not burn an unexpired code: a fresh one still works.
+  const code2 = await handoff.createHandoff(sessionValue, 'android-support', CHALLENGE);
+  assert.equal(await handoff.consumeHandoff(code2, VERIFIER, 'android-support'), sessionValue);
+});
+
+test('concurrent exchanges of the same code settle exactly once', async () => {
+  const sessionValue = 'race-session-value';
+  const code = await handoff.createHandoff(sessionValue, 'android-support', CHALLENGE);
+  const attempts = await Promise.all([
+    exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-support' }),
+    })),
+    exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-support' }),
+    })),
+  ]);
+  const statuses = attempts.map((r) => r.status).sort();
+  assert.deepEqual(statuses, [204, 401]);
 });
 
 test('web sign-in path is unchanged by the handoff support', async () => {

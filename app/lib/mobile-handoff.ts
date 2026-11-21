@@ -18,11 +18,11 @@ import { rateLimitStoreFor } from './auth-rate-limit.ts';
 // Neither the code, the verifier, nor the session value is ever logged.
 
 export const HANDOFF_TTL_MS = 2 * 60 * 1000;
-export const HANDOFF_CLIENTS = ['android-members', 'android-management'] as const;
+export const HANDOFF_CLIENTS = ['android-members', 'android-management', 'android-support'] as const;
 export type HandoffClient = (typeof HANDOFF_CLIENTS)[number];
 
 export function isHandoffClient(value: string | undefined | null): value is HandoffClient {
-  return value === 'android-members' || value === 'android-management';
+  return value === 'android-members' || value === 'android-management' || value === 'android-support';
 }
 
 // The App Link the OAuth callback redirects to, per app. The paths differ so
@@ -30,7 +30,7 @@ export function isHandoffClient(value: string | undefined | null): value is Hand
 // flow even when both shells are installed (the client query parameter alone
 // does not influence Android link routing).
 export function handoffReturnPath(client: HandoffClient): string {
-  return '/auth/mobile/callback/' + (client === 'android-members' ? 'members' : 'management');
+  return '/auth/mobile/callback/' + (client === 'android-members' ? 'members' : client === 'android-management' ? 'management' : 'support');
 }
 
 const sha256Hex = (input: string) => createHash('sha256').update(input).digest('hex');
