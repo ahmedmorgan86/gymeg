@@ -1,7 +1,18 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {registerHooks} from 'node:module';
 import {bootstrapDb} from './db-bootstrap-helpers.mjs';
+
+registerHooks({
+  resolve(specifier, context, next) {
+    try { return next(specifier, context); }
+    catch (error) {
+      if (error.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context);
+      throw error;
+    }
+  },
+});
 
 const docId = key => createHash('sha256').update(key).digest('hex');
 
