@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS gymos.gym_member_summary_dirty(owner_id text NOT NULL
 CREATE TABLE IF NOT EXISTS gymos.gym_member_summary_ready(owner_id text PRIMARY KEY);
 DO $rls$ DECLARE t text; BEGIN
  FOREACH t IN ARRAY ARRAY['gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'] LOOP
-  EXECUTE format('ALTER TABLE gymos.%I ENABLE ROW LEVEL SECURITY',t);/* not FORCEd: definer writers run as the owner (see 20261121190000) */
+  EXECUTE format('ALTER TABLE gymos.%I ENABLE ROW LEVEL SECURITY',t);EXECUTE format('ALTER TABLE gymos.%I FORCE ROW LEVEL SECURITY',t);
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename=t AND policyname=t||'_runtime') THEN
    EXECUTE format('CREATE POLICY %I ON gymos.%I FOR ALL TO gymos_app USING (owner_id=current_setting(''app.gym_owner'',true)) WITH CHECK (owner_id=current_setting(''app.gym_owner'',true))',t||'_runtime',t);
   END IF;
