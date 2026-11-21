@@ -23,7 +23,7 @@ async function seed(owner,state){
 }
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
 const {readOpenVisits}=await import('../app/lib/open-visits-page.ts');
-const {checkinProfile,checkinProfileFromOpen}=await import('../app/lib/checkin-profile.ts');
+const {checkinProfile,checkinProfileFromOpen,checkinPick}=await import('../app/lib/checkin-profile.ts');
 const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
 let sd=11;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
 test('open visits == legacy !leftAt filter; popup selection == checkinProfile over consecutive states; falsy leftAt fails closed',async()=>{
@@ -45,6 +45,28 @@ test('open visits == legacy !leftAt filter; popup selection == checkinProfile ov
     assert.equal(lazy,checkinProfile(prev,next,branch,NOW));
   }
   assert.equal(checkinProfileFromOpen(null,[],new Set(),NOW),null);
-  const b=cur.visits[0].branch;await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{leftAt}','\"\"') WHERE owner_id='O1' AND entity_id=$1".replace('$1',"'"+cur.visits[0].id+"'"));
-  assert.deepEqual(await readOpenVisits(scope,{owner:'O1',branch:b}),{status:'unavailable',reason:'falsy-leftAt'});
+  // legacy `!leftAt`: '' , 0, 0.0, -0, false are open; a number/boolean/object/array/'' must make the server read fail closed (never a silent empty)
+  const b=cur.visits[0].branch,id0="'"+cur.visits[0].id+"'";
+  for(const lit of ['""','0','0.0','-0','false','5','{}','[]']){
+    await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{leftAt}','"+lit+"'::jsonb) WHERE owner_id='O1' AND entity_id="+id0);
+    assert.deepEqual(await readOpenVisits(scope,{owner:'O1',branch:b}),{status:'unavailable',reason:'odd-leftAt'},lit);
+  }
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{leftAt}','null'::jsonb) WHERE owner_id='O1' AND entity_id="+id0);
+  assert.equal((await readOpenVisits(scope,{owner:'O1',branch:b})).status,'ok'); // JSON null is open, exactly like legacy
+});
+test('failed interval keeps the previous map; a member registered after the packet is carried, not lost; reopened id is the documented divergence',()=>{
+  const NOW=Date.parse('2026-03-14T12:00:00.000Z'),t=ms=>new Date(NOW-ms).toISOString();
+  const before=new Map([['a','x']]);
+  // check-in during a failed interval: the map was kept, so the next success still sees it as new
+  const open=[{id:'a',member:'m1',at:'x'},{id:'b',member:'m2',at:t(30000)}];
+  assert.equal(checkinPick(before,open,new Set(['m1','m2']),NOW).member,'m2');
+  // member m3 registered after the packet: not in members -> carried, then shown on the next packet that knows it
+  const o2=[{id:'c',member:'m3',at:t(10000)}];
+  const r1=checkinPick(new Map(),o2,new Set(['m1']),NOW);assert.equal(r1.member,null);assert.deepEqual(r1.carry.map(v=>v.id),['c']);
+  const r2=checkinPick(new Map([['c',t(10000)]]),o2,new Set(['m1','m3']),NOW,r1.carry);assert.equal(r2.member,'m3');
+  // a carried entry that is no longer open or out of the window is dropped
+  assert.equal(checkinPick(new Map(),[],new Set(['m3']),NOW,r1.carry).member,null);
+  assert.equal(checkinPick(new Map(),o2,new Set(['m3']),NOW+500000,[]).member,null);
+  // documented: legacy before also holds closed ids (id unchanged => not new); lazy only has open ids (=> new). Visits are never reopened by any operation.
+  assert.equal(checkinPick(new Map(),[{id:'z',member:'m1',at:t(1000)}],new Set(['m1']),NOW).member,'m1');
 });
