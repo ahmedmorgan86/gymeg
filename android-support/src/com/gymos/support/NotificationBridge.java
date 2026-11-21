@@ -18,7 +18,7 @@ import java.util.Collections;
 /** Native permission, registration-token, and foreground notification routes for the trusted support WebView. */
 final class NotificationBridge {
  private static final int REQUEST_CODE=7305;
- private static final String CHANNEL="gymeg_support",HOST="gymeg.vercel.app";
+ private static final String CHANNEL="gymeg_support",HOST=BuildConfig.WEB_HOST;
  static WebResourceResponse intercept(Activity activity,Uri uri){
   if(!trusted(uri))return null;String path=uri.getPath();
   if("/__native_fcm_token__".equals(path)){String token=activity.getSharedPreferences("gymeg_fcm",Context.MODE_PRIVATE).getString("token","");return token.isEmpty()?new WebResourceResponse("application/json","UTF-8",404,"Not Ready",Collections.singletonMap("Cache-Control","no-store"),new ByteArrayInputStream("{\"token\":null}".getBytes(java.nio.charset.StandardCharsets.UTF_8))):response("{\"token\":"+org.json.JSONObject.quote(token)+"}");}

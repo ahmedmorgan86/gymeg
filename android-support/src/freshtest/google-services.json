@@ -1,0 +1,22 @@
+{
+  "project_info": {
+    "project_number": "744394281001",
+    "project_id": "gymeg-mobile-notifications"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:744394281001:android:1189d366d035fdbe4b8c38",
+        "android_client_info": {
+          "package_name": "com.gymos.support.freshtest"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "AIzaSyDI-lcaykNL_6B0k9hj6LiD4UK9GPsW2Lw"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}

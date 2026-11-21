@@ -25,13 +25,13 @@ import java.io.ByteArrayInputStream;
 
 /** Authenticated management HTTPS shell. No JavaScript bridge, file access, or device permissions. */
 public final class MainActivity extends Activity {
- private static final String HOST="gymeg.vercel.app";
+ private static final String HOST=BuildConfig.WEB_HOST;
  private static final String HOME="https://"+HOST+"/platform";
  private android.widget.ImageView splash;private android.webkit.ValueCallback<Uri[]> fileCallback;private android.webkit.PermissionRequest cameraRequest;private static final int PICK_FILE=7001,CAMERA_PERMISSION=7002;
  private WebView web; private ProgressBar progress; private LinearLayout error;
  private static boolean trusted(Uri uri){return uri!=null&&"https".equals(uri.getScheme())&&HOST.equalsIgnoreCase(uri.getHost())&&(uri.getPort()==-1||uri.getPort()==443)&&uri.getUserInfo()==null;}
  private void openExternal(Uri uri){if(uri==null||!"https".equals(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null||(uri.getPort()!=-1&&uri.getPort()!=443))return;try{startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,uri));}catch(Exception e){android.widget.Toast.makeText(this,"تعذر فتح الرابط / Cannot open link",android.widget.Toast.LENGTH_LONG).show();}}
- private static boolean authResource(Uri u){return u!=null&&"https".equals(u.getScheme())&&"frsstuqstutbflkaffcx.supabase.co".equalsIgnoreCase(u.getHost())&&u.getUserInfo()==null&&(u.getPort()==-1||u.getPort()==443)&&u.getPath()!=null&&u.getPath().startsWith("/auth/v1/");}
+ private static boolean authResource(Uri u){return u!=null&&"https".equals(u.getScheme())&&BuildConfig.SUPABASE_HOST.equalsIgnoreCase(u.getHost())&&u.getUserInfo()==null&&(u.getPort()==-1||u.getPort()==443)&&u.getPath()!=null&&u.getPath().startsWith("/auth/v1/");}
  private static boolean memberPage(Uri uri){String path=uri.getPath();return trusted(uri)&&path!=null;}
  @Override public void onCreate(Bundle state){super.onCreate(state);
   getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
