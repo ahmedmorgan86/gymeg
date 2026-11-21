@@ -32,6 +32,32 @@ $$;
 REVOKE ALL ON FUNCTION gymos.messaging_cron_valid(text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION gymos.messaging_cron_valid(text) TO gymos_app;
 DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='gymos' AND table_name='whatsapp_connections' AND column_name='last_run_at') THEN ALTER TABLE gymos.whatsapp_connections ADD COLUMN last_run_at timestamptz; END IF; END $$;
+-- Portable pg_cron install helper. Direct cron.job reads/updates are denied on
+-- Supabase and can race extension privilege grants on fresh projects, so
+-- installation goes through the cron function API and catalog access is
+-- privilege-tolerant. Jobs are always installed inactive; activation is an
+-- explicit post-deploy step, never part of schema migration. Run inside the
+-- migration transaction so a freshly scheduled job cannot fire before it is
+-- deactivated: pg_cron only sees committed metadata.
+CREATE OR REPLACE FUNCTION gymos.cron_install_disabled(p_name text,p_schedule text,p_command text)
+RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public AS $$
+DECLARE v_job bigint;
+BEGIN
+ IF to_regclass('cron.job') IS NULL THEN RETURN; END IF;
+ BEGIN
+  SELECT jobid INTO v_job FROM cron.job WHERE jobname=p_name;
+ EXCEPTION WHEN insufficient_privilege THEN
+  v_job:=NULL;
+  BEGIN PERFORM cron.unschedule(p_name); EXCEPTION WHEN OTHERS THEN NULL; END;
+ END;
+ IF v_job IS NOT NULL THEN
+  PERFORM cron.alter_job(v_job,schedule=>p_schedule,command=>p_command,active=>false);
+ ELSE
+  SELECT cron.schedule(p_name,p_schedule,p_command) INTO v_job;
+  PERFORM cron.alter_job(v_job,active=>false);
+ END IF;
+END $$;
+REVOKE ALL ON FUNCTION gymos.cron_install_disabled(text,text,text) FROM PUBLIC,anon,authenticated;
 -- Install disabled; enable only after the matching production route is deployed.
 DO $$
 DECLARE job_url text; cron_secret text;
@@ -42,8 +68,5 @@ BEGIN
   SELECT decrypted_secret INTO cron_secret FROM vault.decrypted_secrets WHERE name='gymos_whatsapp_cron';
  END IF;
  job_url:=coalesce(job_url,current_setting('app.whatsapp_cron_url',true),'https://gymos-enterprise.vercel.app');
- IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='gymos-whatsapp-worker') THEN
-  PERFORM cron.schedule('gymos-whatsapp-worker','*/5 * * * *',format($job$SELECT net.http_get(url:=%L,headers:=jsonb_build_object('Authorization','Bearer '||%L),timeout_milliseconds:=55000);$job$,job_url||'/api/cron/whatsapp',coalesce(cron_secret,'')));
- END IF;
- UPDATE cron.job SET active=false WHERE jobname='gymos-whatsapp-worker';
+ PERFORM gymos.cron_install_disabled('gymos-whatsapp-worker','*/5 * * * *',format($job$SELECT net.http_get(url:=%L,headers:=jsonb_build_object('Authorization','Bearer '||%L),timeout_milliseconds:=55000);$job$,job_url||'/api/cron/whatsapp',coalesce(cron_secret,'')));
 END $$;

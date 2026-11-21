@@ -28,7 +28,12 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
   // is issued by a private CA (Supabase Root), so verification then always fails and
   // every request returns 503. Strip those parameters so our TLS settings always win.
   for(const param of ['sslmode','ssl','sslrootcert','sslcert','sslkey','sslnegotiation'])url.searchParams.delete(param);
-  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:[...rootCertificates]};
+  // Managed providers (Supabase) issue database certificates from a private CA
+  // that is not in Node's bundled roots. GYMOS_DB_CA (inline PEM) or
+  // GYMOS_DB_CA_PATH (PEM file) extend the trusted roots; verification itself is
+  // never disabled: rejectUnauthorized stays true whether or not a CA is given.
+  const extraCa=[process.env.GYMOS_DB_CA,process.env.GYMOS_DB_CA_PATH?readFileSync(process.env.GYMOS_DB_CA_PATH,'utf8'):undefined].filter((pem):pem is string=>Boolean(pem&&pem.includes('BEGIN CERTIFICATE')));
+  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:[...rootCertificates,...extraCa]};
   return {url,ssl};
 }
 export function getPool(){

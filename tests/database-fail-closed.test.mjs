@@ -33,3 +33,27 @@ test('Production refuses localhost and unconfigured databases instead of serving
   if(previous.mock===undefined)delete process.env.GYMOS_ALLOW_DB_MOCK;else process.env.GYMOS_ALLOW_DB_MOCK=previous.mock;
  }
 });
+
+test('Provider CA from environment extends trusted roots without disabling verification',async()=>{
+ const pem='-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUDummyTestOnlyNotARealCertificate\n-----END CERTIFICATE-----\n';
+ const previous={ca:process.env.GYMOS_DB_CA,path:process.env.GYMOS_DB_CA_PATH};
+ try{
+  process.env.GYMOS_DB_CA=pem;delete process.env.GYMOS_DB_CA_PATH;
+  const inline=databaseSecurityConfig('postgresql://user:pass@db.example:6543/postgres','production');
+  assert.equal(inline.ssl.rejectUnauthorized,true);
+  assert.ok(inline.ssl.ca.includes(pem),'inline GYMOS_DB_CA must be appended to trusted roots');
+  const {writeFileSync,unlinkSync}=await import('node:fs');
+  const path='/tmp/gymos-test-ca.pem';writeFileSync(path,pem);
+  delete process.env.GYMOS_DB_CA;process.env.GYMOS_DB_CA_PATH=path;
+  const fromFile=databaseSecurityConfig('postgresql://user:pass@db.example:6543/postgres','production');
+  unlinkSync(path);
+  assert.ok(fromFile.ssl.ca.includes(pem),'GYMOS_DB_CA_PATH contents must be appended to trusted roots');
+  assert.equal(fromFile.ssl.rejectUnauthorized,true);
+  delete process.env.GYMOS_DB_CA_PATH;
+  const none=databaseSecurityConfig('postgresql://user:pass@db.example:6543/postgres','production');
+  assert.equal(none.ssl.ca.some(c=>typeof c==='string'&&c.includes('DummyTestOnly')),false,'no env CA means bundled roots only');
+ }finally{
+  if(previous.ca===undefined)delete process.env.GYMOS_DB_CA;else process.env.GYMOS_DB_CA=previous.ca;
+  if(previous.path===undefined)delete process.env.GYMOS_DB_CA_PATH;else process.env.GYMOS_DB_CA_PATH=previous.path;
+ }
+});
