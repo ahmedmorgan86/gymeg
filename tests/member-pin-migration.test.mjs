@@ -24,3 +24,13 @@ test('Application writes and accepts only generated non-shared PINs',()=>{
   assert.match(memberPinRoute,/isSharedLegacyPin\(pin\)/);
   assert.match(memberPinRoute,/licenseState\(normalizeLicense\(license\)\)\.writable/);
 });
+
+test('Member phone sign-in uses the SECURITY DEFINER projection, never a direct table read',()=>{
+  const sessionRoute=readFileSync(new URL('../app/api/member-session/route.ts',import.meta.url),'utf8');
+  assert.match(sessionRoute,/FROM gymos\.member_phone_login\(\$1,\$2\)/);
+  assert.doesNotMatch(sessionRoute,/FROM gymos\.member_code_access\b/);
+  assert.doesNotMatch(sessionRoute,/app\.member_phone/);
+  const defense=readFileSync(new URL('../supabase/migrations/20261117130000_db_defense_in_depth.sql',import.meta.url),'utf8');
+  assert.match(defense,/DROP POLICY IF EXISTS member_phone_login/);
+  assert.match(defense,/CREATE OR REPLACE FUNCTION gymos\.member_phone_login/);
+});
