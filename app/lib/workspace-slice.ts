@@ -42,6 +42,9 @@ export interface SliceBackend{
   /** One read of the trigger-maintained counters: exact row counts per collection and a safe UPPER bound of JSON.stringify(full state) in bytes (never an exact size).
    * null when the counters are absent or not marked ready for this owner, so callers fall back to the full path. */
   counters(owner:string):Promise<{counts:Record<string,number>;bound:number}|null>;
+  /** A member's visits ordered like the profile list: `at` descending (plain code-point order), ties in position order. Returns 'irregular' when some scoped visit has an `at` string that is not the canonical ISO form (code-point order may then differ
+   * from the legacy localeCompare, so the caller uses its exact fallback), and null when no exact order exists (Firestore, or a visit without a string `at`). */
+  visitsByAt(owner:string,q:{member:string;branches?:string[]|null;cursor?:{at:string;position:number};limit:number}):Promise<Entity[]|null|'irregular'>;
 }
 export const MAX_SLICE=500;
 /** Counters for an owner whose marker row says they were built from every row (a new owner, or after recount_entity_counters). null otherwise or when the migration is absent. */
@@ -91,6 +94,15 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     async counters(owner){return scope(owner,async c=>{const k=await readCounters(c,owner);if(!k)return null;const m=(await c.query('SELECT octet_length(payload) AS n FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {n:number}|undefined;if(!m)return null;
       // metadata text + every row's payload (jsonb text >= compact JSON) + a comma per row + per-collection key and bracket overhead + photos
       return{counts:k.counts,bound:Number(m.n)+k.bytes+k.rows+4096};});},
+    async visitsByAt(owner,q){return scope(owner,async c=>{
+      const base:unknown[]=[owner,q.member];let br='';if(q.branches){if(!q.branches.length)return [];base.push(q.branches);br=`AND branch=ANY($${base.length}::text[])`;}
+      // Two EXISTS probes on the tiny partial index of non-canonical visits (gym_entities_visit_irregular_at); O(1) while every `at` is canonical.
+      const flags=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND jsonb_typeof(payload->'at') IS DISTINCT FROM 'string') AS missing,EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND jsonb_typeof(payload->'at')='string' AND payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$') AS irregular`,base)).rows[0] as {missing:boolean;irregular:boolean};
+      if(flags.missing)return null;if(flags.irregular)return 'irregular';
+      const values=[...base];let cur='';if(q.cursor){values.push(q.cursor.at,q.cursor.position);cur=`AND ((payload->>'at') COLLATE "C"<$${values.length-1}::text COLLATE "C" OR ((payload->>'at') COLLATE "C"=$${values.length-1}::text COLLATE "C" AND position>$${values.length}))`;}
+      values.push(Math.max(1,Math.min(MAX_SLICE,Math.floor(q.limit))));
+      return (await c.query(`SELECT collection,entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} ${cur} ORDER BY (payload->>'at') COLLATE "C" DESC, position ASC LIMIT $${values.length}`,values)).rows as Entity[];
+    });},
     async hasOversizedFreezes(owner){return scope(owner,async c=>((await c.query("SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000 LIMIT 1",[owner])).rows.length>0));},
     async count(owner,collection,branches){return scope(owner,async c=>{
       if(!branches){const fast=await readCounters(c,owner);if(fast)return fast.counts[collection]??0;}
@@ -139,6 +151,7 @@ export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):Slic
     async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
     async hasOversizedFreezes(){return true;}, // fail closed: Firestore never takes the hot path
     async counters(){return null;},
+    async visitsByAt(){return null;}, // fail closed: no proven at-order on Firestore
     async count(owner,collection,branches){
       const db=getDb();let total=0;
       const groups=branches?Array.from({length:Math.ceil(branches.length/30)},(_,i)=>branches.slice(i*30,i*30+30)):[null];

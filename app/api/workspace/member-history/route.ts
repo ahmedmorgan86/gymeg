@@ -2,7 +2,7 @@ import {assertRequestTenant} from '../../../lib/request-tenant';
 import {CommercialError} from '../../../lib/licensing';
 import {context,readSpaceMeta,reply} from '../../../lib/server-workspace';
 import {sliceBackend} from '../../../lib/workspace-reads';
-import {HISTORY_COLLECTIONS,isEntityLayout,HISTORY_PAGE_MAX,historyScope,readMemberHistory,type HistoryCollection} from '../../../lib/member-history';
+import {HISTORY_COLLECTIONS,isEntityLayout,HISTORY_PAGE_MAX,historyScope,readMemberHistory,readMemberVisitsByAt,type HistoryCollection} from '../../../lib/member-history';
 export const dynamic='force-dynamic';
 /** Default-off (GYMOS_MEMBER_HISTORY=1). Paged, newest-first member history. Same role and branch scope as the packet. */
 export async function GET(request:Request){try{
@@ -16,6 +16,7 @@ export async function GET(request:Request){try{
  if(!await isEntityLayout(be,ctx.owner))return reply({error:'unsupported'},501);
  const meta=await readSpaceMeta(ctx.owner);
  const scope=historyScope(ctx,meta.state.settings,collection);if(!scope.allowed)return reply({error:'forbidden'},403);
+ if(url.searchParams.get('order')==='at'){if(collection!=='visits')return reply({error:'invalid'},400);const cur=url.searchParams.get('cursor')??undefined;const p=await readMemberVisitsByAt(be,ctx.owner,{member,branches:scope.branches,cursor:cur,limit});if(p==='badCursor')return reply({error:'invalid'},400);if(p==='race')return reply({error:'retry'},409);if(p==='missing')return reply({error:'notFound'},404);if(!p)return reply({error:'unsupported'},501);return reply(p);}
  const page=await readMemberHistory(be,ctx.owner,{member,collection,branches:scope.branches,before,limit});
  if(page==='race')return reply({error:'retry'},409); // a write landed between the reads
  if(!page)return reply({error:'notFound'},404); // unknown member or member outside the caller's branches
