@@ -67,7 +67,7 @@ test('targeted: float order, string/null/missing minor, voided truthiness, forei
   for(const pid of ['pf','pn','pv']){const p=s.payments.filter(x=>x.id===pid);const rr=await allocatingInvoicesFromRefs(db,'C4',[pid]);assert.ok(Object.is(memberCredit(s,m.id,m.branch)-0,legacy-0));assert.ok(Object.is(memberCredit({...s,payments:p},m.id,m.branch),memberCredit({payments:p,invoices:rr.invoices},m.id,m.branch)),pid);}
 });
 
-const trig=async(on)=>{for(const [tbl,names] of [['gym_entities',['ins','upd','del','trunc']],['gym_states',['epoch_upd','epoch_del','epoch_trunc']]])for(const n of names)await db.query(`ALTER TABLE gymos.${tbl} ${on?'ENABLE':'DISABLE'} TRIGGER invoice_allocation_refs_${n}`);};
+const trig=async(on)=>{for(const [tbl,names] of [['gym_entities',['ins','upd','del','trunc']],['gym_states',['epoch_upd','epoch_del','epoch_trunc']]])for(const n of names)await db.query(`ALTER TABLE gymos.${tbl} ${on?'ENABLE ALWAYS':'DISABLE'} TRIGGER invoice_allocation_refs_${n}`);};
 test('tie at the same position is refused (legacy order undefined); cap; stale version; disabled trigger; empty owner then first invoice',async()=>{
   const s=fixture();s.visits=[];const m=s.members[0];
   s.payments=[{id:'p1',member:m.id,branch:m.branch,minor:900,day:'2026-03-05',method:'cash',creditable:true}];
@@ -93,4 +93,17 @@ test('tie at the same position is refused (legacy order undefined); cap; stale v
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('NEW2','invoices','i1',0,'a','{\"id\":\"i1\",\"allocations\":[{\"payment\":\"p1\",\"minor\":1}]}')");
   const first=await allocatingInvoicesFromRefs(db,'NEW2',['p1']);assert.deepEqual(first,{status:'unavailable',reason:first.reason});assert.ok(['refs-not-ready','no-version'].includes(first.reason),first.reason);
   const st=(await db.query("SELECT ready FROM gymos.invoice_allocation_refs_state WHERE owner_id='NEW2'")).rows[0];assert.ok(!st||st.ready===false,'no automatic readiness claim after the first invoice');
+});
+
+test('replica-role writers (bulk load / logical-apply style) still maintain refs and tombstone restores because the triggers are ENABLE ALWAYS',async()=>{
+  const s=fixture();s.visits=[];const m=s.members[0];s.payments=[{id:'p1',member:m.id,branch:m.branch,minor:900,day:'2026-03-05',method:'cash',creditable:true}];s.invoices=[{id:'i1',member:m.id,title:'T',total:5,due:'2026-03-20',branch:m.branch,allocations:[{payment:'p1',minor:100}]}];
+  await seed('C6',s);assert.equal((await allocatingInvoicesFromRefs(db,'C6',['p1'])).invoices.length,1);
+  await db.query("SET session_replication_role=replica");
+  try{
+    await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('C6','invoices','i2',5,$1,$2)",[m.branch,JSON.stringify({id:'i2',allocations:[{payment:'p1',minor:7}]})]);
+    assert.equal((await db.query("SELECT count(*)::int n FROM gymos.invoice_allocation_refs WHERE owner_id='C6' AND invoice_id='i2'")).rows[0].n,1,'replica-role insert maintained the refs');
+    await db.query("UPDATE gymos.gym_states SET payload=jsonb_set(payload::jsonb,'{generation}','\"restored\"')::text WHERE user_id='C6'");
+  }finally{await db.query("SET session_replication_role=origin");}
+  assert.equal((await db.query("SELECT ready FROM gymos.invoice_allocation_refs_state WHERE owner_id='C6'")).rows[0].ready,false,'replica-role generation change left the owner unready');
+  assert.deepEqual(await allocatingInvoicesFromRefs(db,'C6',['p1']),{status:'unavailable',reason:'refs-not-ready'});
 });
