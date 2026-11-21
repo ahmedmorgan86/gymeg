@@ -6,6 +6,25 @@ android {
     namespace 'com.pushtorq.management'
     compileSdk 36
     defaultConfig { applicationId 'com.pushtorq.management'; minSdk 26; targetSdk 36; versionCode 11; versionName '1.1.9' }
+    buildFeatures { buildConfig true }
+    // Reproducible target flavors: production is the committed default;
+    // freshtest points the same reviewed source at the fresh Supabase build
+    // with a coexisting applicationId. WEB_HOST is the single origin source
+    // for Java (BuildConfig) and the manifest (placeholder) alike.
+    flavorDimensions += ['target']
+    productFlavors {
+        production {
+            dimension 'target'
+            buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
+            manifestPlaceholders = [webHost: 'gymeg.vercel.app']
+        }
+        freshtest {
+            dimension 'target'
+            applicationIdSuffix '.freshtest'
+            buildConfigField 'String', 'WEB_HOST', '"gymeg-supabase.vercel.app"'
+            manifestPlaceholders = [webHost: 'gymeg-supabase.vercel.app']
+        }
+    }
     signingConfigs { release { storeFile file(System.getenv('GYMEG_KEYSTORE') ?: 'missing-keystore.jks'); storePassword System.getenv('GYMEG_KEYSTORE_PASSWORD'); keyAlias System.getenv('GYMEG_KEY_ALIAS'); keyPassword System.getenv('GYMEG_KEYSTORE_PASSWORD') } }
     buildTypes { release { signingConfig signingConfigs.release } }
     sourceSets { main { manifest.srcFile 'AndroidManifest.xml'; java.srcDirs = ['src']; res.srcDirs = ['res'] } }

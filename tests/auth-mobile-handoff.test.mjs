@@ -128,13 +128,16 @@ test('exchange rejects a wrong verifier and a wrong client without setting a coo
   assert.equal(bad.status, 401);
   assert.equal(bad.headers.get('set-cookie'), null);
 
-  // The failed attempt consumed the code: even the right verifier now fails.
+  // A wrong proof must NOT burn the code: the legitimate app's correct
+  // verifier still succeeds afterwards (predicates live inside the atomic
+  // delete, so only a fully matching presentation consumes the row).
   const after = await exchangePOST(new Request('https://gym.example/api/auth/mobile/exchange', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-members' }),
+    body: JSON.stringify({ code, verifier: VERIFIER, client: 'android-management' }),
   }));
-  assert.equal(after.status, 401);
+  assert.equal(after.status, 204);
+  assert.match(after.headers.get('set-cookie'), /^gymos_session=/);
 });
 
 test('exchange validates body shapes', async () => {
@@ -154,6 +157,34 @@ test('callback rejects a partial android marker in the state cookie', async () =
   const response = await callbackGET(new Request('https://gym.example/api/auth/google/callback?code=authcode&state=STATE123'));
   assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=google_failed');
   assert.equal(store.jar.has('gymos_session'), false);
+});
+
+test('handoff table: runtime row secrecy and expiry cleanup evidence', async () => {
+  const { readdirSync, readFileSync, statSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  // Only the handoff store may reference the table at runtime: no route,
+  // page, or other lib can read session rows out of it.
+  const roots = ['app', 'components'];
+  const offenders = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const file = join(dir, name);
+      if (statSync(file).isDirectory()) { walk(file); continue; }
+      if (!/\.(ts|tsx|mjs)$/.test(name)) continue;
+      const text = readFileSync(file, 'utf8');
+      if (text.includes('auth_handoff_codes') && !file.endsWith('app/lib/mobile-handoff.ts')) offenders.push(file);
+    }
+  };
+  for (const root of roots) walk(new URL('../' + root, import.meta.url).pathname);
+  assert.deepEqual(offenders, []);
+  // The migration keeps the table gymos_app-only with FORCE RLS, and the
+  // store sweeps expired rows on every create so secrets never linger.
+  const migration = readFileSync(new URL('../supabase/migrations/20261121210000_auth_handoff_codes.sql', import.meta.url), 'utf8');
+  assert.match(migration, /FORCE ROW LEVEL SECURITY/);
+  assert.match(migration, /REVOKE ALL ON gymos\.auth_handoff_codes FROM PUBLIC,anon,authenticated/);
+  assert.doesNotMatch(migration, /GRANT .*TO (anon|authenticated)/);
+  const storeSource = readFileSync(new URL('../app/lib/mobile-handoff.ts', import.meta.url), 'utf8');
+  assert.match(storeSource, /DELETE FROM gymos\.auth_handoff_codes WHERE expires_at <= now\(\)/);
 });
 
 test('web sign-in path is unchanged by the handoff support', async () => {

@@ -1,0 +1,66 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+
+// Android system-browser OAuth handoff: source-level invariants for the
+// review artifact. Runtime recreation/background-return verification is owed
+// on a device; these assertions pin the mechanisms that make it work.
+for (const role of ['members','management']) {
+  test(`Android ${role} OAuth handoff: task reuse, pending verifier, no token in URL`, () => {
+    const base = new URL(`../mobile-android/${role}/`, import.meta.url);
+    const manifest = readFileSync(new URL('AndroidManifest.xml', base), 'utf8');
+    const main = readFileSync(new URL(`src/com/pushtorq/${role}/MainActivity.java`, base), 'utf8');
+
+    // App Link must reuse the running task so the flow returns to the same
+    // activity instance (singleTask -> onNewIntent), and the link is a
+    // verified https App Link for the handoff path only.
+    assert.match(manifest, /android:launchMode="singleTask"/);
+    assert.match(manifest, /android:autoVerify="true"/);
+    assert.match(manifest, /android:path="\/auth\/mobile\/callback"/);
+    assert.match(manifest, /android:host="\$\{webHost\}"/);
+
+    // The verifier survives activity recreation and process death via
+    // app-private prefs, is single-use, and expires with the server flow.
+    assert.ok(main.includes('takePendingVerifier()'), 'pending verifier recovery');
+    assert.ok(main.includes('remove(PENDING_VERIFIER)'), 'pending verifier is single-use');
+    assert.ok(main.includes('PENDING_TTL_MS=600000L'), 'pending verifier expiry matches flow cookies');
+    assert.ok(!main.includes('private String oauthVerifier'), 'no lost-on-recreation in-memory-only verifier');
+
+    // The flow starts in the system browser, never inside the WebView, and
+    // the session arrives only as a Set-Cookie copied into the CookieManager
+    // after the native exchange - never in any URL the WebView loads.
+    assert.ok(main.includes('openExternal(out)'), 'system-browser start');
+    assert.ok(main.includes('/api/auth/mobile/exchange'), 'native exchange endpoint');
+    // Authenticated navigation happens only inside the CookieManager
+    // completion callback after the cookie is accepted.
+    assert.ok(main.includes('setCookie("https://"+HOST,cookie,new android.webkit.ValueCallback<Boolean>()'), 'cookie handoff with completion callback');
+    assert.ok(main.indexOf('onReceiveValue(Boolean accepted)') < main.indexOf('flush();loadHome();'), 'navigation after acceptance');
+    assert.ok(!/loadUrl\([^)]*code/.test(main), 'no code in WebView URLs');
+    assert.ok(!/loadUrl\([^)]*gymos_session/.test(main), 'no session in WebView URLs');
+    assert.ok(main.includes('"android-' + role + '"'), 'client tag');
+
+    // The origin comes from the flavor BuildConfig, never a hardcoded literal.
+    assert.ok(main.includes('HOST=BuildConfig.WEB_HOST'), 'BuildConfig origin');
+    assert.ok(!main.includes('HOST="gymeg'), 'no hardcoded host in MainActivity');
+
+    // Transient-error handling: exchange failures and missing/expired
+    // verifiers fail cleanly back to sign-in, never loop or crash.
+    assert.ok(main.includes('/sign-in?error=google_failed'), 'clean failure path');
+    assert.ok(main.includes('catch(Exception e)'), 'transient network failure handled');
+  });
+
+  test(`Android ${role} flavors: production default + reproducible freshtest overlay`, () => {
+    const gradle = readFileSync(new URL(`../mobile-android/${role}/build.gradle`, import.meta.url), 'utf8');
+    assert.match(gradle, /production \{[\s\S]*?WEB_HOST', '"gymeg\.vercel\.app"'/);
+    assert.match(gradle, /freshtest \{[\s\S]*?applicationIdSuffix '\.freshtest'/);
+    assert.match(gradle, /freshtest \{[\s\S]*?WEB_HOST', '"gymeg-supabase\.vercel\.app"'/);
+    // Committed defaults stay production: applicationId without suffix.
+    assert.match(gradle, new RegExp(`defaultConfig \\{ applicationId 'com\\.pushtorq\\.${role}'`));
+    // Freshtest flavor resources exist in the tree (Arabic test label).
+    const label = readFileSync(new URL(`../mobile-android/${role}/src/freshtest/res/values/strings.xml`, import.meta.url), 'utf8');
+    assert.ok(label.includes('تجريبي'));
+    const firebase = JSON.parse(readFileSync(new URL(`../mobile-android/${role}/src/freshtest/google-services.json`, import.meta.url), 'utf8'));
+    const ids = firebase.client.map((c) => c.client_info.android_client_info.package_name);
+    assert.ok(ids.every((id) => id.endsWith('.freshtest')), 'freshtest google-services only freshtest packages');
+  });
+}

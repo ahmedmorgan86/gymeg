@@ -86,35 +86,35 @@ export async function createHandoff(sessionValue: string, client: HandoffClient,
   return code;
 }
 
-// Atomically consumes a handoff: the row is deleted in the same statement
-// that reads it, so concurrent exchanges can succeed at most once. Returns
-// null for unknown, expired, or already-used codes, and when the verifier or
-// client does not match, without distinguishing which check failed.
+// Atomically consumes a handoff. Every predicate - code hash, challenge,
+// client, expiry - lives INSIDE the single DELETE, so a wrong proof does not
+// burn the legitimate app's code: only a fully matching presentation deletes
+// the row. Concurrent correct exchanges can still succeed at most once.
+// Returns null for unknown, expired, or already-used codes and for any
+// verifier/client mismatch, without distinguishing which check failed.
 export async function consumeHandoff(code: string, verifier: string, client: HandoffClient): Promise<string | null> {
   if (!CHALLENGE_PATTERN.test(code) || !CHALLENGE_PATTERN.test(verifier)) return null;
   const codeHash = sha256Hex(code);
+  const challenge = handoffChallenge(verifier);
   const store = rateLimitStoreFor();
-  let row: HandoffRow | null = null;
   if (store === 'postgres') {
+    let session: string | null = null;
     await pg(async (c) => {
       const result = await c.query(
-        'DELETE FROM gymos.auth_handoff_codes WHERE code_hash = $1 AND expires_at > now() RETURNING session, app_challenge, client',
-        [codeHash],
+        'DELETE FROM gymos.auth_handoff_codes WHERE code_hash = $1 AND app_challenge = $2 AND client = $3 AND expires_at > now() RETURNING session',
+        [codeHash, challenge, client],
       );
-      const found = result.rows[0];
-      row = found ? { session: found.session, app_challenge: found.app_challenge, client: found.client } : null;
+      session = result.rows[0]?.session ?? null;
     });
-  } else if (store === 'local') {
-    const candidate = localRows.get(codeHash) ?? null;
-    if (candidate) localRows.delete(codeHash);
-    row = candidate && candidate.expires_at > Date.now() ? candidate : null;
-  } else {
-    return null;
+    return session;
   }
-  if (!row) return null;
-  if (row.client !== client) return null;
-  if (row.app_challenge !== handoffChallenge(verifier)) return null;
-  return row.session;
+  if (store === 'local') {
+    const candidate = localRows.get(codeHash);
+    if (!candidate || candidate.expires_at <= Date.now() || candidate.client !== client || candidate.app_challenge !== challenge) return null;
+    localRows.delete(codeHash);
+    return candidate.session;
+  }
+  return null;
 }
 
 // Test-only introspection/reset for the local store.
