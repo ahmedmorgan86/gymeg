@@ -82,8 +82,15 @@ type SessionPayload = { access_token?: unknown; refresh_token?: unknown; user?: 
 // flow explicitly allows it (account recovery).
 function openSession(store: CookieStore, payload: SessionPayload, opts: { allowUnconfirmed?: boolean } = {}): { access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
   if (typeof payload.access_token !== 'string' || typeof payload.refresh_token !== 'string') return null;
+  // A session is only opened for a well-formed email identity: GoTrue always
+  // returns the user on a token grant, so a missing or malformed one means
+  // the response is not what it claims to be.
   const user = payload.user;
-  if (!opts.allowUnconfirmed && user && typeof user.email === 'string' && !user.email_confirmed_at) {
+  if (!user || typeof user.id !== 'string' || typeof user.email !== 'string') {
+    logAuthDiagnostic('session-cookie', null, 'MALFORMED_USER');
+    return { error: UNAVAILABLE };
+  }
+  if (!opts.allowUnconfirmed && !user.email_confirmed_at) {
     return { error: EMAIL_NOT_CONFIRMED };
   }
   const value = encodeSession(payload.access_token, payload.refresh_token);
@@ -222,9 +229,14 @@ export function supabaseServerAuth(store: CookieStore) {
             }
           }
         }
+        if (failure) {
+          // Keep both cookies: the session is still server-side valid, and
+          // discarding them would lose the ability to retry the revocation.
+          return { error: failure };
+        }
         store.delete('gymos_session');
         store.delete('sb-token');
-        return { error: failure };
+        return { error: null };
       },
 
       async resetPasswordForEmail(email: string) {

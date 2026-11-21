@@ -12,7 +12,7 @@ export async function DELETE(request:Request){
   // Supabase supports 'global' | 'local' | 'others'. 'local' leaves refresh
   // tokens on other devices alive, so a shared-device sign-out must be global.
   const {error}=await auth.auth.signOut({scope:'global'});
-  if(error)return reply({error:'signout_failed'},400);
+  if(error)return reply({error:'signout_failed'},(error.status??0)>=500?503:400);
   return reply({ok:true},200);
  }catch{return reply({error:'connection'},503);}
 }

@@ -167,7 +167,15 @@ test('signOut and updateUser surface server revocation failures', async () => {
   const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
   const { error } = await supabaseServerAuth(store).auth.signOut({ scope: 'global' });
   assert.equal(error.status, 503);
-  assert.equal(store.jar.size, 0); // local cookies still cleared
+  // Cookies are KEPT on failure: the session is still server-side valid and
+  // the revocation must stay retryable.
+  assert.ok(store.jar.has('gymos_session'));
+
+  mockFetch({ 'POST /logout?scope=global': { status: 204, json: null } });
+  const okStore = fakeStore({ gymos_session: encodeSession('acc', 'ref'), 'sb-token': 'mob' });
+  const ok = await supabaseServerAuth(okStore).auth.signOut({ scope: 'global' });
+  assert.equal(ok.error, null);
+  assert.equal(okStore.jar.size, 0);
 
   mockFetch({
     'GET /user': { status: 200, json: CONFIRMED },
@@ -273,6 +281,17 @@ test('session-opening methods reject unconfirmed users; recovery is the exceptio
   result = await supabaseServerAuth(fakeStore()).auth.verifyEmailToken('hash', 'invite');
   assert.equal(result.error.status, 400);
   assert.equal(fetchCalled, false);
+});
+
+test('session-opening rejects a malformed or missing grant user', async () => {
+  for (const user of [undefined, { id: 7, email: 'a@b.c' }, { id: 'u1' }]) {
+    mockFetch({ 'POST /token?grant_type=password': { status: 200, json: { access_token: 'a', refresh_token: 'r', ...(user ? { user } : {}) } } });
+    const store = fakeStore();
+    const result = await supabaseServerAuth(store).auth.signInWithPassword({ email: 'a@b.c', password: 'x'.repeat(12) });
+    assert.equal(result.data.session, null);
+    assert.equal(result.error.status, 503);
+    assert.equal(store.jar.has('gymos_session'), false);
+  }
 });
 
 test('updateUser requires a session, rotates it, and signs out everywhere', async () => {
