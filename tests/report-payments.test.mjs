@@ -55,3 +55,27 @@ test('report payment rows == legacy paymentBreakdown rows (all invoices scan) ac
   const b1=cur.payments.find(p=>p.id==='p1').branch;
   assert.deepEqual(await readReportPayments(scope,{owner:'R1',branch:b1,from:'2026-03-01',to:'2026-03-31'}),{status:'unavailable',reason:'non-canonical-day'});
 });
+
+test('bulk invoice: intermediate data per payment is only its own allocations; non-string member name refused; duplicate payload payment ids across branches match legacy',async()=>{
+  const s=fixture();s.visits=[];s.payments=[];s.invoices=[];const [m1,m2]=s.members;m1.branch='a';m2.branch='b';m1.name='N1';m2.name='N2';
+  for(let k=0;k<3000;k++)s.payments.push({id:'q'+k,member:m1.id,branch:'a',minor:1000,day:'2026-03-05',method:'cash',voided:false});
+  // two payments in different branches share the same payload id 'dup' (entity ids differ)
+  s.payments.push({id:'dup',member:m1.id,branch:'a',minor:700,day:'2026-03-06',method:'cash',voided:false});
+  s.invoices.push({id:'bulk',member:m1.id,title:'T',total:9e6,due:'2026-03-20',branch:'a',allocations:[...s.payments.slice(0,3000).map(p=>({payment:p.id,minor:10,note:'x'.repeat(200)})),{payment:'dup',minor:25,note:'y'}],category:'coaching',voided:false});
+  s.invoices.push({id:'other',member:m2.id,title:'T',total:100,due:'2026-03-20',branch:'b',allocations:[{payment:'dup',minor:5}]});
+  await seed('B1',s);
+  // entity ids are unique per owner but a payload id can repeat across rows/branches (legacy matches by payload id only): add a second row with payload id 'dup' in branch b
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('B1','payments','dup-b',99999,'b',$1)",[JSON.stringify({id:'dup',member:m2.id,branch:'b',minor:900,day:'2026-03-06',method:'card',voided:false})]);
+  const cur=await current('B1');
+  let maxLen=0;const spy=(o,work)=>scope(o,c=>work({query:async(sql,v)=>{const r=await c.query(sql,v);if(/jsonb_agg/.test(sql))for(const row of r.rows)maxLen=Math.max(maxLen,JSON.stringify(row.invoices).length);return r;}}));
+  const full={...cur};
+  for(const branch of ['a','b']){
+    const r=await readReportPayments(spy,{owner:'B1',branch,branches:null,from:'2026-03-01',to:'2026-03-31'});assert.equal(r.status,'ok');
+    for(const x of r.rows){const p=cur.payments.find(p=>p.id===x.payment.id&&p.branch===branch&&p.member===x.payment.member);assert.deepEqual(x.breakdown,paymentBreakdown(full,p),x.payment.id+branch);}
+  }
+  assert.ok(maxLen<600,'intermediate per payment stays small: '+maxLen); // the bulk invoice payload is ~700KB; only the matching allocation travels
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{name}','5') WHERE owner_id='B1' AND collection='members' AND entity_id=$1".replace('$1',"'"+m1.id+"'"));
+  assert.deepEqual(await readReportPayments(scope,{owner:'B1',branch:'a',branches:null,from:'2026-03-01',to:'2026-03-31'}),{status:'unavailable',reason:'member-name'});
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{name}','null') WHERE owner_id='B1' AND collection='members' AND entity_id=$1".replace('$1',"'"+m1.id+"'"));
+  assert.equal((await readReportPayments(scope,{owner:'B1',branch:'a',branches:null,from:'2026-03-01',to:'2026-03-31'})).rows[0].name,null);
+});
