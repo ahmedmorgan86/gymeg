@@ -8,6 +8,7 @@ import FinanceBook from '../app/finance-book-page.tsx';
 import Operations from '../app/operations.tsx';
 import {emptyState} from '../app/lib/domain.ts';
 import {commercialAction,commercialContext} from '../app/lib/commercial.ts';
+import {licenseState} from '../app/lib/licensing.ts';
 import {PLATFORM_OWNER_ACCOUNT_ID,OWNER_FREE_PLAN,ownerComplimentary} from '../app/lib/platform-owner-license.ts';
 const actor={userId:'owner-a',displayName:'Owner',email:'owner@example.invalid'},id='11111111-1111-4111-8111-111111111111';
 function database({denyTrial=false,platform=false}={}){let data={clubs:[],memberships:[],licenses:[],trialCalls:0},snapshot;const calls=[];const client={release(){},async query(sql,args=[]){calls.push(sql);const rows=[];if(sql.startsWith('SELECT user_id FROM gymos.platform_admins')&&platform)rows.push({user_id:args[0]});else if(sql.startsWith('UPDATE gymos.tenant_licenses SET plan_id=')){Object.assign(data.licenses.find(l=>l.id===args[2]),{plan_id:args[0],mode:'perpetual',status:'active',ends_at:null,limits:JSON.parse(args[1])});}else if(sql==='BEGIN')snapshot=structuredClone(data);else if(sql==='ROLLBACK')data=snapshot;else if(sql.startsWith('SELECT tenant_id,role,branches'))rows.push(...data.memberships.filter(m=>m.user===args[0]).map(m=>({tenant_id:m.id,role:'owner',branches:null})));else if(sql.startsWith('SELECT id,storage_key,name'))rows.push(...data.clubs.filter(c=>c.id===args[0]));else if(sql.startsWith('SELECT * FROM gymos.tenant_licenses'))rows.push(...data.licenses.filter(l=>l.id===args[0]));else if(sql.startsWith('SELECT count(*)'))rows.push({count:data.memberships.filter(m=>m.user===args[0]).length});else if(sql.startsWith('INSERT INTO gymos.tenants')){if(data.clubs.some(c=>c.id===args[0]))throw Object.assign(Error('duplicate'),{code:'23505'});data.clubs.push({id:args[0],storage_key:args[1],name:args[2]});}else if(sql.startsWith('INSERT INTO gymos.tenant_memberships'))data.memberships.push({id:args[0],user:args[1]});else if(sql.startsWith('INSERT INTO gymos.tenant_licenses'))data.licenses.push({id:args[0],status:'pending'});else if(sql.startsWith('SELECT gymos.start_public_trial')){data.trialCalls++;if(denyTrial)throw Error('trial_used');data.licenses.find(l=>l.id===args[0]).status='active';rows.push({trial:{startsAt:'2026-01-01T00:00:00Z',endsAt:'2026-01-31T00:00:00Z'}});}return{rows,rowCount:sql.startsWith('SELECT')?rows.length:1};}};globalThis.__setupPool={connect:async()=>client};return{calls,get data(){return data;}};}
@@ -27,7 +28,7 @@ test('The platform-owner creation screen explains free use and hides the trial c
 test('Verified platform owner opens an unrelated club; ordinary users and other admins cannot',async()=>{for(const [userId,platform,allowed]of [[PLATFORM_OWNER_ACCOUNT_ID,true,true],[PLATFORM_OWNER_ACCOUNT_ID,false,false],['other-admin',true,false],['ordinary-user',false,false]]){const db=database({platform});db.data.clubs.push({id,storage_key:'tenant:'+id,name:'Existing unrelated club'});const request=commercialAction({...actor,userId},{action:'select',tenant:id,platformOwnerAccess:true});if(allowed){assert.deepEqual(await request,{id});assert.equal(db.data.memberships.length,0);assert.ok(db.calls.some(q=>q.includes('commercial_audit')));}else await assert.rejects(()=>request,e=>e.code==='forbidden');}});
 
 test('Verified owner authority reaches the workspace packet while the actual expired license stays read only',async()=>{const db=database({platform:true});db.data.clubs.push({id,storage_key:'tenant:'+id,name:'Expired trial'});const license={id,tenant_id:id,plan_id:'trial',mode:'trial',status:'active',starts_at:'2000-01-01',ends_at:'2000-02-01',maintenance_until:null,limits:{branches:1,members:10,staff:1},revision:0};db.data.licenses.push(license);const user={...actor,userId:PLATFORM_OWNER_ACCOUNT_ID},club=await commercialContext(user,id);assert.equal(club.platformOwnerAccess,true);const {packet}=await import('../app/lib/workspace-packet.ts');const view=packet({state:emptyState(),revision:0},{user,tenantId:id,owner:club.storage_key,role:club.role,branches:club.branches,license:club.license,support:undefined,platformOwnerAccess:club.platformOwnerAccess});assert.equal(view.platformOwnerAccess,true);assert.equal(view.license.writable,false);assert.equal(db.data.memberships.length,0);});
-test('Platform-owner binding honors a valid server env override and rejects malformed ones',async()=>{
+test('Platform-owner binding fails closed: valid override binds, invalid or non-canonical override binds NO account',async()=>{
  const other='1b7b6ae8-0bd2-438a-b9a3-4ea7f8a4655c';
  const previous=process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID;
  try{
@@ -35,7 +36,21 @@ test('Platform-owner binding honors a valid server env override and rejects malf
   process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=other;
   assert.equal(ownerComplimentary(true,other),true);
   assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),false);
-  process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID='ahmed@example.com';
-  assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),true,'malformed override must fall back to the default, never bind an email string');
+  for(const bad of ['ahmed@example.com','1b7b6ae80bd2438ab9a34ea7f8a4655c','1b7b6ae8-0bd2-438a-b9a3-4ea7f8a4655c/extra','', 'ffffffff-ffff-ffff-ffff-fffffffffffF'.toLowerCase().replace(/.$/,'!')]){
+   process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=bad;
+   assert.equal(ownerComplimentary(true,other),false,'invalid override must not bind the override target');
+   assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),false,'invalid override must fail closed, never fall back to the historical identity');
+  }
+  delete process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID;
+  assert.equal(ownerComplimentary(true,PLATFORM_OWNER_ACCOUNT_ID),true,'absent override keeps the documented legacy default');
  }finally{if(previous===undefined)delete process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID;else process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=previous;}
+});
+test('Platform owner opening an unrelated club does not make its license writable',async()=>{
+ const db=database({platform:true});
+ db.data.clubs.push({id,storage_key:'tenant:'+id,name:'Unrelated club'});
+ db.data.licenses.push({tenant_id:id,plan_id:'custom',mode:'monthly',status:'pending',starts_at:null,ends_at:null,maintenance_until:null,limits:{branches:1,members:100,staff:5},revision:0});
+ assert.deepEqual(await commercialAction({...actor,userId:PLATFORM_OWNER_ACCOUNT_ID},{action:'select',tenant:id,platformOwnerAccess:true}),{id});
+ const license=db.data.licenses.find(l=>l.tenant_id===id);
+ assert.equal(license.status,'pending');assert.equal(license.starts_at,null);
+ assert.equal(licenseState(license).writable,false,'owner view/open must not mutate or unlock an unrelated tenant license');
 });

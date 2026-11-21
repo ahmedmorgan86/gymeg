@@ -24,7 +24,7 @@ export async function POST(request:Request){
   const raw=await request.text();if(raw.length>12000)return reply({error:'limit'},413);
   const body=bodySchema.parse(JSON.parse(raw)),subscription=body.subscription as WebPushSubscription;
   if(!isAllowedWebPushEndpoint(subscription.endpoint))return reply({error:'invalid'},400);
-  if(!webPushConfigured())return reply({error:'pushNotConfigured'},503);
+  if(body.action==='subscribe'&&!webPushConfigured())return reply({error:'pushNotConfigured'},503);
   const identity=await codeMemberIdentity(request);
   let owner:string,recipientType:'staff'|'member',recipientId:string,branch:string;
   if(identity){
@@ -36,7 +36,8 @@ export async function POST(request:Request){
    const license=useFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(body.action==='subscribe'&&license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
-   const ctx=await context();if(!ctx)return reply({error:'auth'},401);if(ctx.support||!['owner','manager'].includes(ctx.role))return reply({error:'forbidden'},403);
+   // Opt-out stays available even when the club workspace is trial-locked.
+   const ctx=await context(body.action!=='subscribe');if(!ctx)return reply({error:'auth'},401);if(ctx.support||!['owner','manager'].includes(ctx.role))return reply({error:'forbidden'},403);
    if(body.action==='subscribe'&&ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);
    owner=ctx.owner;recipientType='staff';recipientId=ctx.user.userId;branch=body.branch??'';
    if(!branch||(ctx.branches&&!ctx.branches.includes(branch)))return reply({error:'forbidden'},403);

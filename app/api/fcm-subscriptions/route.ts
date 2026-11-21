@@ -21,7 +21,7 @@ export async function POST(request:Request){
  if(request.headers.get('content-type')?.split(';')[0]!=='application/json')return reply({error:'invalid'},415);
  try{
   const raw=await request.text();if(raw.length>6000)return reply({error:'limit'},413);
-  const body=bodySchema.parse(JSON.parse(raw));if(!pushEncryptionConfigured())return reply({error:'pushNotConfigured'},503);
+  const body=bodySchema.parse(JSON.parse(raw));if(body.action==='register'&&!pushEncryptionConfigured())return reply({error:'pushNotConfigured'},503);
   const identity=await codeMemberIdentity(request);
   let owner:string,recipientType:'staff'|'member',recipientId:string,branch:string;
   if(identity){
@@ -33,7 +33,8 @@ export async function POST(request:Request){
    const license=useFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(body.action==='register'&&license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
-   const ctx=await context();if(!ctx)return reply({error:'auth'},401);
+   // Opt-out stays available even when the club workspace is trial-locked.
+   const ctx=await context(body.action!=='register');if(!ctx)return reply({error:'auth'},401);
    if(ctx.support){
     if(useFirestorePersistence())return reply({error:'supportUnavailable'},503);
     const tokenHash=fcmTokenDigest(body.token),userId=ctx.user.userId;

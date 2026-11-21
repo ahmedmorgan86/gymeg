@@ -8,7 +8,7 @@ const request=(body,{origin='https://gym.example',type='application/json'}={})=>
 function setup(){
  process.env.GYMEG_PUSH_SUBSCRIPTION_KEY=Buffer.alloc(32,9).toString('base64');
  process.env.GYMEG_VAPID_SUBJECT='mailto:qa@example.test';process.env.GYMEG_VAPID_PUBLIC_KEY='A'.repeat(87);process.env.GYMEG_VAPID_PRIVATE_KEY='B'.repeat(43);
- globalThis.__pushQueries=[];globalThis.__pushOwners=[];globalThis.__pushIdentity=null;globalThis.__pushContext=null;
+ globalThis.__pushQueries=[];globalThis.__pushOwners=[];globalThis.__pushIdentity=null;globalThis.__pushContext=null;globalThis.__pushTrialLocked=false;globalThis.__webPushConfigured=true;
  globalThis.__pushSpace={state:{members:[{id:'member-1',branch:'main',demo:false,archived:false}],branches:[{id:'main'}]}};
 }
 test('GET exposes only the public VAPID key and reports the configured server path',async()=>{setup();const r=await GET(),body=await r.json();assert.equal(body.configured,true);assert.equal(body.publicKey,'A'.repeat(87));assert.equal(JSON.stringify(body).includes('PRIVATE'),false);});
@@ -16,3 +16,27 @@ test('subscription route rejects cross-origin, wrong content type and untrusted 
 test('member subscription is bound to the authenticated member and branch and is encrypted at rest',async()=>{setup();globalThis.__pushIdentity={owner_id:'club-a',member_id:'member-1',branch:'main',pin_must_change:false};const r=await POST(request({action:'subscribe',branch:'foreign',subscription:sub}));assert.equal(r.status,200);const insert=globalThis.__pushQueries.find(x=>x.text.includes('INSERT INTO gymos.push_subscriptions'));assert.ok(insert);assert.deepEqual(insert.params.slice(0,4),['club-a','main','member','member-1']);assert.notEqual(insert.params[4],sub.endpoint);assert.deepEqual(decryptPushSubscription(insert.params[5]),sub);assert.equal(globalThis.__pushOwners.every(x=>x==='club-a'),true);});
 test('manager registration must stay within an assigned branch; support and reception cannot subscribe',async()=>{setup();globalThis.__pushContext={owner:'club-a',user:{userId:'manager-1'},role:'manager',branches:['main'],support:false};assert.equal((await POST(request({action:'subscribe',branch:'foreign',subscription:sub}))).status,403);assert.equal((await POST(request({action:'subscribe',branch:'main',subscription:sub}))).status,200);globalThis.__pushContext={owner:'club-a',user:{userId:'reception-1'},role:'reception',branches:['main'],support:false};assert.equal((await POST(request({action:'subscribe',branch:'main',subscription:sub}))).status,403);globalThis.__pushContext={owner:'club-a',user:{userId:'support-1'},role:'owner',branches:['main'],support:true};assert.equal((await POST(request({action:'subscribe',branch:'main',subscription:sub}))).status,403);});
 test('anonymous and temporary-PIN member sessions cannot register devices',async()=>{setup();assert.equal((await POST(request({action:'subscribe',subscription:sub}))).status,401);globalThis.__pushIdentity={owner_id:'club-a',member_id:'member-1',branch:'main',pin_must_change:true};assert.equal((await POST(request({action:'subscribe',subscription:sub}))).status,403);assert.equal(globalThis.__pushQueries.length,0);});
+test('expired-trial workspace lock blocks subscription but never the staff own opt-out',async()=>{
+ setup();globalThis.__pushContext={owner:'club-a',user:{userId:'manager-1'},role:'manager',branches:['main'],support:false};
+ globalThis.__pushTrialLocked=true;
+ const locked=await POST(request({action:'subscribe',branch:'main',subscription:sub}));
+ assert.equal(locked.status,403);assert.deepEqual(await locked.json(),{error:'trialExpired'});
+ const optOut=await POST(request({action:'unsubscribe',branch:'main',subscription:sub}));
+ assert.equal(optOut.status,200);
+ assert.equal(globalThis.__pushQueries.some(x=>x.text.includes('DELETE FROM gymos.push_subscriptions')),true);
+});
+test('missing web-push sending config blocks subscription but not hashed own-row removal',async()=>{
+ setup();globalThis.__pushContext={owner:'club-a',user:{userId:'manager-1'},role:'manager',branches:['main'],support:false};
+ globalThis.__webPushConfigured=false;
+ const blocked=await POST(request({action:'subscribe',branch:'main',subscription:sub}));
+ assert.equal(blocked.status,503);assert.deepEqual(await blocked.json(),{error:'pushNotConfigured'});
+ const optOut=await POST(request({action:'unsubscribe',branch:'main',subscription:sub}));
+ assert.equal(optOut.status,200);
+ assert.equal(globalThis.__pushQueries.some(x=>x.text.includes('DELETE FROM gymos.push_subscriptions')),true);
+});
+test('web-push opt-out deletion is scoped to the authenticated recipient and endpoint only',async()=>{
+ setup();globalThis.__pushContext={owner:'club-a',user:{userId:'manager-1'},role:'manager',branches:['main'],support:false};
+ await POST(request({action:'unsubscribe',branch:'main',subscription:sub}));
+ const del=globalThis.__pushQueries.find(x=>x.text.includes('DELETE FROM gymos.push_subscriptions'));
+ assert.ok(del);assert.deepEqual(del.params.slice(0,4),['club-a','main','staff','manager-1']);
+});
