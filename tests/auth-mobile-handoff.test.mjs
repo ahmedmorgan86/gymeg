@@ -83,7 +83,7 @@ test('android callback stores a handoff instead of setting the session cookie', 
   const response = await callbackGET(new Request('https://gym.example/api/auth/google/callback?code=authcode&state=STATE123'));
   assert.equal(response.status, 303);
   const location = new URL(response.headers.get('location'));
-  assert.equal(location.pathname, '/auth/mobile/callback');
+  assert.equal(location.pathname, '/auth/mobile/callback/members');
   assert.equal(location.searchParams.get('client'), 'android-members');
   const code = location.searchParams.get('code');
   assert.match(code, /^[A-Za-z0-9_-]{43}$/);

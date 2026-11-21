@@ -25,6 +25,14 @@ export function isHandoffClient(value: string | undefined | null): value is Hand
   return value === 'android-members' || value === 'android-management';
 }
 
+// The App Link the OAuth callback redirects to, per app. The paths differ so
+// Android routes the return deterministically to the app that started the
+// flow even when both shells are installed (the client query parameter alone
+// does not influence Android link routing).
+export function handoffReturnPath(client: HandoffClient): string {
+  return '/auth/mobile/callback/' + (client === 'android-members' ? 'members' : 'management');
+}
+
 const sha256Hex = (input: string) => createHash('sha256').update(input).digest('hex');
 const sha256Base64Url = (input: string) => createHash('sha256').update(input).digest('base64url');
 

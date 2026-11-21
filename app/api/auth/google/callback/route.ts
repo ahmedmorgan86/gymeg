@@ -1,7 +1,7 @@
 import { cookies } from 'next/headers';
 import { serverAuth } from '../../../../lib/auth';
 import { authBackend } from '../../../../lib/auth-backend';
-import { isHandoffClient, createHandoff } from '../../../../lib/mobile-handoff.ts';
+import { isHandoffClient, createHandoff, handoffReturnPath } from '../../../../lib/mobile-handoff.ts';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,7 +73,7 @@ export async function GET(request: Request) {
           return fail(url.origin, result.error && 'code' in result.error && result.error.code === 'email_not_confirmed' ? 'email_not_confirmed' : 'google_failed');
         }
         const code = await createHandoff(result.data.sessionValue, handoffClient, savedChallenge as string);
-        const handoffUrl = new URL('/auth/mobile/callback', url.origin);
+        const handoffUrl = new URL(handoffReturnPath(handoffClient), url.origin);
         handoffUrl.searchParams.set('client', handoffClient);
         handoffUrl.searchParams.set('code', code);
         return Response.redirect(handoffUrl, 303);

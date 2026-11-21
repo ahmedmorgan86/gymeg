@@ -16,7 +16,7 @@ for (const role of ['members','management']) {
     // verified https App Link for the handoff path only.
     assert.match(manifest, /android:launchMode="singleTask"/);
     assert.match(manifest, /android:autoVerify="true"/);
-    assert.match(manifest, /android:path="\/auth\/mobile\/callback"/);
+    assert.match(manifest, new RegExp(`android:path="\\/auth\\/mobile\\/callback\\/${role}"`), 'per-app deterministic App Link path');
     assert.match(manifest, /android:host="\$\{webHost\}"/);
 
     // The verifier survives activity recreation and process death via
@@ -28,6 +28,13 @@ for (const role of ['members','management']) {
     assert.ok(main.includes('PENDING_TTL_MS=600000L'), 'pending verifier expiry matches flow cookies');
     assert.ok(!main.includes('private String oauthVerifier'), 'no lost-on-recreation in-memory-only verifier');
     assert.ok(main.indexOf('OAUTH_CLIENT.equals(client)') < main.indexOf('final String verifier=readPendingVerifier()'), 'validation precedes proof read');
+    assert.ok(main.includes(`CALLBACK_PATH="/auth/mobile/callback/${role}"`), 'app handles only its own return path');
+    // Duplicate-callback races: a response is used only while its attempt
+    // still owns the pending proof; losers neither install cookies nor
+    // navigate away after another attempt succeeded.
+    assert.ok(main.includes('attemptCurrent(verifier)'), 'attempt ownership check present');
+    assert.ok(main.indexOf('if(!attemptCurrent(verifier))return;CookieManager') > main.indexOf('status==204'), 'cookie install guarded by attempt ownership');
+    assert.ok((main.match(/if\(attemptCurrent\(verifier\)\)web\.loadUrl/g) || []).length >= 2, 'failure and exception navigation guarded');
     assert.ok(main.indexOf('setCookie("https://"+HOST,cookie') < main.indexOf('clearPendingVerifierIfMatches(verifier)'), 'clear after bound exchange');
     assert.ok(!main.includes('takePendingVerifier'), 'no delete-on-read proof');
     // The proof file is explicitly excluded from backup and device transfer.
