@@ -1,5 +1,6 @@
 import { initializeApp, cert, getApps, type App } from 'firebase-admin/app';
 import { createHash } from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import { getFirestore, type Firestore, FieldValue } from 'firebase-admin/firestore';
 import { emptyState, type GymState } from './domain.ts';
 import { normalize } from './extensions.ts';
@@ -49,6 +50,37 @@ export async function firestoreReadRevision(owner: string): Promise<number> {
 
 // Firestore rejects undefined values inside documents; entity payloads carry
 // optional fields, so strip them before writing (JSON round-trip).
+// Revision snapshots: chunk size stays comfortably under Firestore's 1 MiB
+// document limit; states needing more than SNAPSHOT_MAX_CHUNKS chunks skip
+// snapshotting and keep the entity-scan read path.
+const SNAPSHOT_CHUNK_BYTES = 700_000;
+const SNAPSHOT_MAX_CHUNKS = 8;
+const snapshotRef = (db: Firestore, owner: string, chunk: number) =>
+  db.collection('gym_state_snapshots').doc(`${owner}_${chunk}`);
+
+// Reads the gzipped snapshot chunks for an exact revision. Returns null when
+// no complete snapshot for that revision exists; never returns a state for a
+// different revision, so a snapshot can never serve stale data after another
+// writer has advanced the state document.
+async function readSnapshot(db: Firestore, owner: string, revision: number): Promise<GymState | null> {
+  try {
+    const first = await snapshotRef(db, owner, 0).get();
+    if (!first.exists) return null;
+    const meta = first.data() as { revision?: number; chunks?: number; data?: Buffer };
+    if (meta.revision !== revision || typeof meta.chunks !== 'number' || meta.chunks < 1 || meta.chunks > SNAPSHOT_MAX_CHUNKS || !meta.data) return null;
+    const parts: Buffer[] = [Buffer.from(meta.data)];
+    for (let index = 1; index < meta.chunks; index++) {
+      const part = await snapshotRef(db, owner, index).get();
+      const partData = part.exists ? (part.data() as { data?: Buffer }).data : undefined;
+      if (!partData) return null;
+      parts.push(Buffer.from(partData));
+    }
+    return JSON.parse(gunzipSync(Buffer.concat(parts)).toString('utf8')) as GymState;
+  } catch {
+    return null;
+  }
+}
+
 function sanitize<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
@@ -126,6 +158,16 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
   if (parsedMeta._entityStorage === 1) {
     const cached = cachedSpace(owner, data.revision);
     if (cached) return { state: cached, revision: data.revision };
+
+    // Cold read: prefer the revision snapshot written by persist (1 + chunks
+    // document reads). Fall back to the entity scan only when no matching
+    // snapshot exists (states written before snapshots, or oversized states).
+    const snapshot = await readSnapshot(db, owner, data.revision);
+    if (snapshot) {
+      const state = normalize(snapshot as GymState);
+      cacheSpace(owner, data.revision, state);
+      return { state, revision: data.revision };
+    }
 
     // Read entities
     const entitiesSnap = await db.collection('gym_entities')
@@ -272,11 +314,38 @@ export async function firestorePersistSpace(
     after.metadata._entityStorage = 1;
     const newRevision = current.revision + 1;
 
+    // Revision snapshot: a gzipped copy of the whole assembled state, chunked
+    // to stay under Firestore's 1 MiB document limit and written in this same
+    // transaction, so it always matches the state document's revision. Cold
+    // instances read it (1 + chunks document reads) instead of scanning every
+    // entity document (~12.6 docs/member) to rebuild the state. Chunk count
+    // rides on the state document so stale extra chunks from a larger older
+    // state can be deleted here without an extra read. Oversized states skip
+    // the snapshot; reads fall back to the entity scan for those revisions.
+    const snapshotBuffer = gzipSync(JSON.stringify(next));
+    const snapshotChunks: Buffer[] = [];
+    for (let offset = 0; offset < snapshotBuffer.length; offset += SNAPSHOT_CHUNK_BYTES) {
+      snapshotChunks.push(snapshotBuffer.subarray(offset, offset + SNAPSHOT_CHUNK_BYTES));
+    }
+    const previousChunks = typeof (curData as { _snapshotChunks?: unknown })._snapshotChunks === 'number'
+      ? (curData as unknown as { _snapshotChunks: number })._snapshotChunks
+      : 0;
+    const snapshotWritten = snapshotChunks.length >= 1 && snapshotChunks.length <= SNAPSHOT_MAX_CHUNKS;
+    if (snapshotWritten) {
+      snapshotChunks.forEach((chunk, index) => {
+        tx.set(snapshotRef(db, owner, index), { revision: newRevision, chunks: snapshotChunks.length, data: chunk });
+      });
+    }
+    for (let index = snapshotWritten ? snapshotChunks.length : 0; index < previousChunks; index++) {
+      tx.delete(snapshotRef(db, owner, index));
+    }
+
     // Update state doc
     tx.update(stateDocRef, {
       payload: JSON.stringify(after.metadata),
       revision: newRevision,
       updated_at: new Date().toISOString(),
+      _snapshotChunks: snapshotWritten ? snapshotChunks.length : 0,
     });
 
     // Append workspace outbox
