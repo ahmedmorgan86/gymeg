@@ -31,12 +31,16 @@ export async function POST(request:Request){try{
  const result=await withScope(ctx.owner,async c=>{
   const audit=async(action:string)=>c.query('INSERT INTO gymos.gym_access_events(id,owner_id,actor,target,action,details) VALUES($1,$2,$3,$4,$5,$6::jsonb)',[crypto.randomUUID(),ctx.owner,ctx.user.userId,m.id,action,JSON.stringify({branch:m.branch})]);
   const existing=(await c.query('SELECT 1 FROM gymos.member_code_access WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id])).rowCount;
+  // A PIN is returned to staff exactly once, when generated here. Storage is
+  // hash-only (pin_hash); pin_cipher stays NULL so no later read can reveal it.
+  let createdPin:string|null=null;
   if(!existing){
     const normPhone=normalizeMemberPhone(m.phone);
     const phoneDigest=normPhone?createHash('sha256').update(normPhone).digest('hex'):null;
     const code='GM-'+randomBytes(16).toString('hex').toUpperCase();
     const pin=normPhone?newMemberPin():null;
-    await c.query("INSERT INTO gymos.member_code_access(owner_id,member_id,branch,code_hash,code_cipher,phone_hash,pin_hash,pin_cipher,pin_must_change,version,revoked,inactive) VALUES($1,$2,$3,encode(extensions.digest($4,'sha256'),'hex'),gymos.member_code_encrypt($4),$5,CASE WHEN $6::text IS NOT NULL THEN gymos.member_pin_hash($6) END,CASE WHEN $6::text IS NOT NULL THEN gymos.member_pin_encrypt($6) END,true,1,false,false) ON CONFLICT(owner_id,member_id) DO UPDATE SET branch=EXCLUDED.branch",[ctx.owner,m.id,m.branch,code,phoneDigest,pin]);
+    createdPin=pin;
+    await c.query("INSERT INTO gymos.member_code_access(owner_id,member_id,branch,code_hash,code_cipher,phone_hash,pin_hash,pin_cipher,pin_must_change,version,revoked,inactive) VALUES($1,$2,$3,encode(extensions.digest($4,'sha256'),'hex'),gymos.member_code_encrypt($4),$5,CASE WHEN $6::text IS NOT NULL THEN gymos.member_pin_hash($6) END,NULL,true,1,false,false) ON CONFLICT(owner_id,member_id) DO UPDATE SET branch=EXCLUDED.branch",[ctx.owner,m.id,m.branch,code,phoneDigest,pin]);
   }
   if(body.action==='requireChange'){
     if(!normalizeMemberPhone(m.phone))return{needsPhone:true};
@@ -57,7 +61,7 @@ export async function POST(request:Request){try{
     if(!normalizeMemberPhone(m.phone))return{phone:null,pin:null,needsPhone:true};
     const customPin=normalizeMemberPin(body.pin);
     if(!customPin||isSharedLegacyPin(customPin))return reply({error:'invalidPin'},400);
-    await c.query('UPDATE gymos.member_code_access SET pin_hash=gymos.member_pin_hash($1),pin_cipher=gymos.member_pin_encrypt($1),pin_must_change=true,version=version+1,revoked=false WHERE owner_id=$2 AND member_id=$3',[customPin,ctx.owner,m.id]);
+    await c.query('UPDATE gymos.member_code_access SET pin_hash=gymos.member_pin_hash($1),pin_cipher=NULL,pin_must_change=true,version=version+1,revoked=false WHERE owner_id=$2 AND member_id=$3',[customPin,ctx.owner,m.id]);
     await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id]);
     await audit('member.pin.set');
     return{phone:normalizeMemberPhone(m.phone),pin:customPin,revoked:false,needsPhone:false,changeRequired:true};
@@ -66,15 +70,14 @@ export async function POST(request:Request){try{
     if(!normalizeMemberPhone(m.phone))return{phone:null,pin:null,needsPhone:true};
     const customPin=body.pin?normalizeMemberPin(body.pin):null;
     if(body.pin&&(!customPin||isSharedLegacyPin(customPin)))return reply({error:'invalidPin'},400);
-    const currentPin=(await c.query('SELECT gymos.member_code_decrypt(pin_cipher) AS pin FROM gymos.member_code_access WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id])).rows[0]?.pin??null;
-    const pin=customPin??newMemberPin(currentPin);
-    await c.query('UPDATE gymos.member_code_access SET pin_hash=gymos.member_pin_hash($1),pin_cipher=gymos.member_pin_encrypt($1),pin_must_change=true,version=version+1,revoked=false WHERE owner_id=$2 AND member_id=$3',[pin,ctx.owner,m.id]);
+    const pin=customPin??newMemberPin();
+    await c.query('UPDATE gymos.member_code_access SET pin_hash=gymos.member_pin_hash($1),pin_cipher=NULL,pin_must_change=true,version=version+1,revoked=false WHERE owner_id=$2 AND member_id=$3',[pin,ctx.owner,m.id]);
     await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id]);
     await audit('member.pin.reset');
     return{phone:normalizeMemberPhone(m.phone),pin,revoked:false,needsPhone:false,changeRequired:true};
   }
-  const row=(await c.query('SELECT CASE WHEN pin_cipher IS NOT NULL THEN gymos.member_code_decrypt(pin_cipher) END AS pin,revoked,pin_must_change FROM gymos.member_code_access WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id])).rows[0]??{pin:null,revoked:false,pin_must_change:true};
-  return{phone:normalizeMemberPhone(m.phone),pin:row.revoked?null:row.pin,revoked:row.revoked,needsPhone:!normalizeMemberPhone(m.phone),pinChanged:!row.pin_must_change,changeRequired:!row.revoked&&row.pin_must_change&&!row.pin};
+  const row=(await c.query('SELECT revoked,pin_must_change FROM gymos.member_code_access WHERE owner_id=$1 AND member_id=$2',[ctx.owner,m.id])).rows[0]??{revoked:false,pin_must_change:true};
+  return{phone:normalizeMemberPhone(m.phone),pin:row.revoked?null:createdPin,revoked:row.revoked,needsPhone:!normalizeMemberPhone(m.phone),pinChanged:!row.pin_must_change,changeRequired:!row.revoked&&row.pin_must_change&&!createdPin};
  });
  if(result instanceof Response)return result;
  return reply(result);

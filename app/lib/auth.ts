@@ -30,6 +30,17 @@ function adminErrorCode(error: unknown): string | null {
   return typeof code === 'string' && /^[a-z0-9/_-]+$/i.test(code) ? code : null;
 }
 
+// Session cookies live for 5 days on both the minted cookie and the browser.
+const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 5;
+
+const sessionCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'lax' as const,
+  path: '/',
+  maxAge: SESSION_MAX_AGE_SECONDS,
+};
+
 // The Admin SDK app is registered under a fixed name (see firestore-db.ts);
 // the no-argument getAuth() resolves the default app, which never exists here
 // and throws app/no-app at runtime. Always bind Auth to the named app.
@@ -45,29 +56,41 @@ async function adminAuth() {
 export async function serverAuth() {
   const store = await cookies();
   const sessionToken = store.get('gymos_session')?.value;
+  // Mobile clients authenticate with a Firebase ID token in this cookie.
+  const mobileToken = store.get('sb-token')?.value;
 
   return {
     auth: {
       async getUser() {
-        if (!sessionToken) return { data: { user: null }, error: null };
+        const token = sessionToken ?? mobileToken;
+        if (!token) return { data: { user: null }, error: null };
         try {
           if (isFirebaseConfigured()) {
             const auth = await adminAuth();
+            // Sessions are trusted only after firebase-admin verifies them
+            // with revocation checks: a session cookie for web clients, an ID
+            // token for mobile clients. No unsigned or decoded-only token is
+            // ever accepted.
+            let decoded;
             try {
-              const decoded = await auth.verifySessionCookie(sessionToken, true);
-              if (!decoded.email_verified) return { data: { user: null }, error: null };
-              return {
-                data: {
-                  user: {
-                    id: decoded.uid,
-                    email: decoded.email,
-                    is_anonymous: false,
-                    user_metadata: { name: decoded.name || decoded.email || 'Member' },
-                  },
+              decoded = await auth.verifySessionCookie(token, true);
+            } catch {
+              try {
+                decoded = await auth.verifyIdToken(token, true);
+              } catch { return { data: { user: null }, error: null }; }
+            }
+            if (!decoded.email_verified) return { data: { user: null }, error: null };
+            return {
+              data: {
+                user: {
+                  id: decoded.uid,
+                  email: decoded.email,
+                  is_anonymous: false,
+                  user_metadata: { name: decoded.name || decoded.email || 'Member' },
                 },
-                error: null,
-              };
-            } catch { return { data: { user: null }, error: null }; }
+              },
+              error: null,
+            };
           }
           return { data: { user: null }, error: null };
         } catch (e) {
@@ -95,7 +118,7 @@ export async function serverAuth() {
             const code = await responseErrorCode(response);
             logAuthDiagnostic('sign-in', response.status, code);
             if (response.status >= 500) return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
-            if (code === 'TOO_MANY_ATTEMPTS_TRY_LATER') return { data: { session: null }, error: { message: 'Too many attempts', status: 429 } };
+            if (response.status === 429 || code === 'TOO_MANY_ATTEMPTS_TRY_LATER') return { data: { session: null }, error: { message: 'Too many attempts', status: 429 } };
             return { data: { session: null }, error: { code: 'invalid_credentials', message: 'Invalid credentials', status: 401 } };
           }
           result = await response.json() as { idToken?: string };
@@ -108,14 +131,8 @@ export async function serverAuth() {
           const auth = await adminAuth();
           const verified = await auth.verifyIdToken(result.idToken, true);
           if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
-          const tokenPayload = await auth.createSessionCookie(result.idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
-          store.set('gymos_session', tokenPayload, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 60 * 60 * 24 * 7,
-          });
+          const tokenPayload = await auth.createSessionCookie(result.idToken, { expiresIn: SESSION_MAX_AGE_SECONDS * 1000 });
+          store.set('gymos_session', tokenPayload, sessionCookieOptions);
           return { data: { session: { access_token: tokenPayload } }, error: null };
         } catch (e) {
           logAuthDiagnostic('sign-in-session', null, adminErrorCode(e));
@@ -134,14 +151,8 @@ export async function serverAuth() {
           const auth = await adminAuth();
           const verified = await auth.verifyIdToken(idToken, true);
           if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
-          const tokenPayload = await auth.createSessionCookie(idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
-          store.set('gymos_session', tokenPayload, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 60 * 60 * 24 * 7,
-          });
+          const tokenPayload = await auth.createSessionCookie(idToken, { expiresIn: SESSION_MAX_AGE_SECONDS * 1000 });
+          store.set('gymos_session', tokenPayload, sessionCookieOptions);
           return { data: { session: { access_token: tokenPayload } }, error: null };
         } catch (e) {
           logAuthDiagnostic('firebase-token-sign-in', null, adminErrorCode(e));
@@ -202,6 +213,17 @@ export async function serverAuth() {
       },
 
       async signOut(_options?: { scope?: string }) {
+        // Global sign-out: revoke the verified user's refresh tokens so every
+        // other device session dies too, then drop the local cookies.
+        try {
+          const user = await this.getUser();
+          if (user.data.user && isFirebaseConfigured()) {
+            const auth = await adminAuth();
+            await auth.revokeRefreshTokens(user.data.user.id);
+          }
+        } catch (e) {
+          logAuthDiagnostic('sign-out-revoke', null, adminErrorCode(e));
+        }
         store.delete('gymos_session');
         store.delete('sb-token');
         return { error: null };
@@ -215,9 +237,18 @@ export async function serverAuth() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ requestType: 'PASSWORD_RESET', email }), cache: 'no-store',
           });
-          if (!response.ok && response.status >= 500) {
-            logAuthDiagnostic('password-reset', response.status, await responseErrorCode(response));
-            return { error: { message: 'Auth unavailable', status: 503 } };
+          if (!response.ok) {
+            const code = await responseErrorCode(response);
+            // Existence is never revealed: only throttling and provider
+            // outages surface; every other failure looks like success.
+            if (response.status === 429 || code === 'TOO_MANY_ATTEMPTS_TRY_LATER') {
+              logAuthDiagnostic('password-reset', response.status, code);
+              return { error: { message: 'Too many attempts', status: 429 } };
+            }
+            if (response.status >= 500) {
+              logAuthDiagnostic('password-reset', response.status, code);
+              return { error: { message: 'Auth unavailable', status: 503 } };
+            }
           }
           return { error: null };
         } catch {
@@ -229,6 +260,7 @@ export async function serverAuth() {
       async updateUser(data: { password?: string }) {
         const user = await this.getUser();
         if (!user.data.user || !data.password || !isFirebaseConfigured()) return { data: { user: null }, error: { message: 'Unauthorized', status: 401 } };
+        if (data.password.length < 12) return { data: { user: null }, error: { message: 'Password too short', status: 400 } };
         try {
           const auth = await adminAuth();
           await auth.updateUser(user.data.user.id, { password: data.password });
@@ -241,9 +273,29 @@ export async function serverAuth() {
         }
       },
 
+      // The only accepted "code" is a genuine Firebase ID token (minted by an
+      // email-link or provider flow); anything else is rejected. The token is
+      // verified with revocation checks and exchanged for a session cookie.
       async exchangeCodeForSession(code: string) {
-        void code;
-        return { data: { session: null }, error: { message: 'Unsupported auth callback', status: 400 } };
+        if (!code || typeof code !== 'string' || !isFirebaseConfigured()) {
+          return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
+        }
+        try {
+          const auth = await adminAuth();
+          let verified;
+          try {
+            verified = await auth.verifyIdToken(code, true);
+          } catch {
+            return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
+          }
+          if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
+          const tokenPayload = await auth.createSessionCookie(code, { expiresIn: SESSION_MAX_AGE_SECONDS * 1000 });
+          store.set('gymos_session', tokenPayload, sessionCookieOptions);
+          return { data: { session: { access_token: tokenPayload } }, error: null };
+        } catch (e) {
+          logAuthDiagnostic('exchange-code', null, adminErrorCode(e));
+          return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        }
       },
     },
   };

@@ -56,9 +56,14 @@ export async function recordMemberAttempt(bucket: string, limit: number) {
 export async function registerMemberSession(token: string, owner: string, member: string, version: number) {
   await memberSessionRef(token).create({ owner_id: owner, member_id: member, version, expires_at: new Date(Date.now() + 7 * 86400_000).toISOString() });
 }
+// Member PINs are stored hash-only: staff see a PIN exactly once, at creation
+// or reset, and it can never be read back afterwards. protectPin still returns
+// a cipher for backwards compatibility with records written before this rule;
+// new writes keep only the hash.
 export function memberCredentialFor(member: { id: string; branch: string; phone: string }, pin: string, version = 1) {
   const phone = normalizeMemberPhone(member.phone);
-  return { member_id: member.id, branch: member.branch, phone_hash: phone ? phoneDigest(phone) : null, ...protectPin(pin), pin_must_change: true, version, revoked: false, inactive: false };
+  const { pin_hash, pin_salt } = protectPin(pin);
+  return { member_id: member.id, branch: member.branch, phone_hash: phone ? phoneDigest(phone) : null, pin_hash, pin_salt, pin_must_change: true, version, revoked: false, inactive: false };
 }
 
 export async function firebaseChangeMemberPin(owner: string, member: string, version: number, current: string, next: string, oldToken: string, freshToken: string) {
