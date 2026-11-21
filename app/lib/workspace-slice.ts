@@ -201,7 +201,7 @@ export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|Sl
  * programs/sessions their assignments point at. Checked against memberView over
  * the full state in tests. Returns null for legacy single-payload clubs.
  */
-export async function readMemberSlice(be:SliceBackend,owner:string,memberId:string,branch:string,normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
+export async function readMemberSlice(be:SliceBackend,owner:string,memberId:string,branch:string,normalizeState:(s:GymState)=>GymState=s=>s,opts?:{skipOccupancy?:boolean}):Promise<Sliced|null>{
   if(!be.supportsOpen)return null; // occupancy needs open visits; without a bounded query use the full read
   const got=await consistently(be,owner,async meta=>{
     const own=(c:Collection):SliceQuery=>({collections:[c],match:{field:'member',values:[memberId]},branches:[branch]});
@@ -211,7 +211,7 @@ export async function readMemberSlice(be:SliceBackend,owner:string,memberId:stri
       be.entities(owner,{collections:['plans','classes','shifts'],branches:[branch]}),
       // Branch occupancy: open visits only, then every visit of those members so the
       // "latest visit per member" rule matches presentVisits over the full state.
-      be.entities(owner,{collections:['visits'],branches:[branch],open:true}),
+      opts?.skipOccupancy?[]:be.entities(owner,{collections:['visits'],branches:[branch],open:true}),
     ])).flat();
     const openMembers=[...new Set(first.filter(e=>e.collection==='visits'&&!(e.payload as {leftAt?:unknown}).leftAt).map(e=>String(e.payload.member)))];
     const assignments=first.filter(e=>e.collection==='trainingAssignments');
@@ -221,8 +221,8 @@ export async function readMemberSlice(be:SliceBackend,owner:string,memberId:stri
       programIds.length?be.entities(owner,{collections:['programs'],ids:programIds,branches:[branch]}):[],
       assignmentIds.length?be.entities(owner,{collections:['trainingSessions'],match:{field:'assignment',values:assignmentIds},branches:[branch]}):[],
       coachIds.length?be.entities(owner,{collections:['coaches'],ids:coachIds}):[],
-      openMembers.length?be.entities(owner,{collections:['visits'],match:{field:'member',values:openMembers},branches:[branch]}):[],
-      openMembers.length?be.entities(owner,{collections:['members'],ids:openMembers,branches:[branch]}):[],
+      !opts?.skipOccupancy&&openMembers.length?be.entities(owner,{collections:['visits'],match:{field:'member',values:openMembers},branches:[branch]}):[],
+      !opts?.skipOccupancy&&openMembers.length?be.entities(owner,{collections:['members'],ids:openMembers,branches:[branch]}):[],
     ])).flat();
     const seen=new Set<string>(),rows=[...first,...second].filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
     return normalizeState(assembleState(meta.metadata,rows,{}));
