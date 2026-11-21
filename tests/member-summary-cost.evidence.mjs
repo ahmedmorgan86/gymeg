@@ -1,8 +1,9 @@
-// Evidence, not a test: synthetic scanned work of the stored-summary refresh at the admission caps. Local PGlite; NOT capacity.
+// Evidence, not a test: synthetic scanned work of the stored-summary refresh at the admission caps. PGlite, or a real rehearsal_ Postgres when REHEARSAL_DATABASE_URL is set; NOT capacity.
 // args: members visitsPerOrdinary heavyVisits   (cap scale: 10000 8 20000 -> about 100,000 visits)
 import {registerHooks} from 'node:module';
 import {bootstrapDb} from './db-bootstrap-helpers.mjs';
-const db=globalThis.__hotDb=await bootstrapDb();
+let db;if(process.env.REHEARSAL_DATABASE_URL){const {rehearsalDb}=await import('./pg-rehearsal-db.mjs');db=await rehearsalDb(process.env.REHEARSAL_DATABASE_URL);await db.reset();console.log('BACKEND: real PostgreSQL (rehearsal_ database)');}else{db=await bootstrapDb();console.log('BACKEND: PGlite');}
+globalThis.__hotDb=db;
 registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}},load(u,x,n){return n(u,x);}});
 const {readMemberCandidates,refreshDirtySummaries,CHUNK}=await import('../app/lib/member-summary-store.ts');
 const M=Number(process.argv[2]??10000),PER=Number(process.argv[3]??8),HEAVY=Number(process.argv[4]??20000);
@@ -36,3 +37,5 @@ console.log('read, clean, read-only:',{status:r2.status,candidates:r2.candidates
 const tr=(await db.query("SELECT count(*)::int n,sum(octet_length(stored::text))::bigint total,max(octet_length(stored::text))::int biggest FROM gymos.gym_member_summaries WHERE owner_id='E'")).rows[0];
 const mp=(await db.query("SELECT sum(octet_length(payload::text))::bigint total FROM gymos.gym_entities WHERE owner_id='E' AND collection='members'")).rows[0];
 console.log('all-member candidate transfer DB->server (what readMemberCandidates selects):',{members:tr.n,memberPayloadBytes:Number(mp.total),storedInputsBytes:Number(tr.total),biggestStoredRow:tr.biggest,totalBytes:Number(mp.total)+Number(tr.total)});
+
+if(db.close)await db.close();
