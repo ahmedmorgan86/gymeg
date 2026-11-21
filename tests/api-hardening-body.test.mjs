@@ -28,7 +28,7 @@ registerHooks({
       export const getPool=()=>{throw new Error('unexpected DB');};
       export const withScope=async(_owner,fn)=>fn({query:async()=>({rows:[]})});
     ` };
-    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>false;export const getFirestoreDb=()=>{throw Error("unexpected Firestore")};' };
+    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>false;export const useFirestorePersistence=()=>false;export const getFirestoreDb=()=>{throw Error("unexpected Firestore")};' };
     if (url.endsWith('/app/lib/firebase-member-auth.ts')) return { format: 'module', shortCircuit: true, source: 'export const memberPortalRef=()=>{throw Error("unexpected Firestore")};export const firebaseMemberLicense=async()=>null;' };
     if (url.endsWith('/app/lib/member-code-session.ts')) return { format: 'module', shortCircuit: true, source: 'export const codeMemberIdentity=async()=>null;' };
     if (url.endsWith('/app/lib/member-code.ts')) return { format: 'module', shortCircuit: true, source: 'export const memberSessionToken=()=>null;' };

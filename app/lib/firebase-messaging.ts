@@ -2,7 +2,7 @@ import 'server-only';
 import {createPrivateKey,createSign} from 'node:crypto';
 import {withScope} from './database';
 import {decryptFcmToken} from './push-crypto';
-import {isFirebaseConfigured} from './firestore-db.ts';
+import {useFirestorePersistence} from './firestore-db.ts';
 import {eligibleFcmSubscriptions} from './firestore-fcm';
 
 type ServiceAccount={project_id:string;client_email:string;private_key:string};
@@ -35,7 +35,7 @@ async function sendOne(account:ServiceAccount,token:string,url:'/member'|'/clubs
 /** Send privacy-safe chat alerts to registered native Android devices in one tenant branch. */
 export async function sendCommunityFcm(owner:string,branch:string,recipient:'staff'|'member',recipientId:string|null,url:'/member'|'/clubs',tag:string){
  const account=serviceAccount();if(!account)return{configured:false,sent:0,failed:0};
- if(isFirebaseConfigured()){
+ if(useFirestorePersistence()){
   const rows=await eligibleFcmSubscriptions(owner,branch,recipient,recipientId);let sent=0,failed=0;
   await Promise.all(rows.map(async row=>{try{const result=await sendOne(account,decryptFcmToken(row.token_ciphertext),url,tag);if(result.ok)sent++;else{failed++;if(result.expired)await row.ref.delete();}}catch{failed++;}}));
   return{configured:true,sent,failed};

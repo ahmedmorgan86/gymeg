@@ -2,7 +2,7 @@ import {context, reply} from '../../../lib/server-workspace';
 import {CommercialError} from '../../../lib/licensing';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {withScope} from '../../../lib/database';
-import {isFirebaseConfigured, firestoreReadRevision, getFirestoreDb} from '../../../lib/firestore-db';
+import { firestoreReadRevision, getFirestoreDb,useFirestorePersistence} from '../../../lib/firestore-db';
 
 export async function GET(request: Request) {
   try {
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       });
     }
 
-    if (isFirebaseConfigured()) {
+    if (useFirestorePersistence()) {
       // Revision check costs a single document read; when the client is
       // current, no entity document is touched at all.
       const revision = await firestoreReadRevision(ctx.owner);

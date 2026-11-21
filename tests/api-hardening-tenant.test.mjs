@@ -31,7 +31,7 @@ registerHooks({
       export const getPool=()=>{throw new Error('unexpected database access');};
       export const withScope=async()=>{throw new Error('unexpected database access');};
     `);
-    if (url.endsWith('/app/lib/firestore-db.ts')) return module('export const isFirebaseConfigured=()=>false;export const getFirestoreDb=()=>{throw Error("unexpected Firestore access")};');
+    if (url.endsWith('/app/lib/firestore-db.ts')) return module('export const isFirebaseConfigured=()=>false;export const useFirestorePersistence=()=>false;export const getFirestoreDb=()=>{throw Error("unexpected Firestore access")};');
     if (url.endsWith('/app/lib/firebase-member-auth.ts')) return module('export const memberPortalRef=()=>{throw Error("unexpected Firestore")};export const firebaseMemberLicense=async()=>null;');
     if (url.endsWith('/app/lib/entity-store.ts')) return module('export const persistSpace=async()=>true;');
     if (url.endsWith('/app/lib/domain.ts')) return module('export class RuleError extends Error {} export const applyOperation=()=>({});');

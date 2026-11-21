@@ -2,7 +2,7 @@ import {getPool} from '../../../lib/database';
 import {reply} from '../../../lib/server-workspace';
 import {runWhatsApp} from '../../../lib/whatsapp-server';
 import {timingSafeEqual} from 'node:crypto';
-import {isFirebaseConfigured} from '../../../lib/firestore-db';
+import {useFirestorePersistence} from '../../../lib/firestore-db';
 import {markWhatsAppRun,runWhatsAppFirestore,whatsappOwners} from '../../../lib/firestore-whatsapp';
 export const maxDuration=60;
 // Vercel Cron sends Authorization: Bearer $CRON_SECRET when CRON_SECRET is set.
@@ -18,9 +18,9 @@ export async function GET(request:Request){
   if(!/^Bearer [^\s]{16,}$/.test(actual))return reply({error:'forbidden'},403);
   const presented=actual.slice(7);
   const cronSecret=process.env.CRON_SECRET;
-  const authorized=Boolean(cronSecret&&secretEquals(presented,cronSecret))||!isFirebaseConfigured()&&await legacyTokenValid(presented);
+  const authorized=Boolean(cronSecret&&secretEquals(presented,cronSecret))||!useFirestorePersistence()&&await legacyTokenValid(presented);
   if(!authorized)return reply({error:'forbidden'},403);
-  if(isFirebaseConfigured()){
+  if(useFirestorePersistence()){
     let sent=0;const deadline=Date.now()+40000;
     for(const owner of await whatsappOwners()){if(Date.now()>deadline)break;try{sent+=(await runWhatsAppFirestore(owner,undefined,deadline)).sent;await markWhatsAppRun(owner);}catch{/* isolate tenant failures */}}
     return reply({sent});
