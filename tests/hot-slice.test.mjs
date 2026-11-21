@@ -72,3 +72,29 @@ test('A club with a member over 1000 freezes is refused (full path decides); cou
     console.log('FREEZE-GUARD plan',plan.rows.map(r=>r['QUERY PLAN']).slice(0,3).join(' | '));
   }finally{await db.close();}
 });
+
+test('Member history pages newest-first and equals the full filtered list; scope and plan are bounded',async()=>{
+  const {readMemberHistory}=await import('../app/lib/member-history.ts');
+  const db=await bootstrapDb();
+  try{
+    const full=club(3);{const seen=new Set();for(const v of full.visits){if(v.leftAt)continue;if(seen.has(v.member))v.leftAt=v.at.slice(0,11)+'23:00:00.000Z';else seen.add(v.member);}}
+    await db.query('BEGIN');await seed(db,'h',full);await db.query('COMMIT');
+    const {backend,stat}=counted(db);
+    let checked=0;
+    for(const m of full.members.slice(0,6)){
+      for(const c of ['visits','payments','invoices']){
+        const want=full[c].filter(x=>x.member===m.id).map(x=>x.id).reverse();
+        const got=[];let before,pages=0;
+        for(;;){const p=await readMemberHistory(backend,'h',{member:m.id,collection:c,branches:[m.branch],before,limit:7});assert.ok(p,'page');got.push(...p.rows.map(r=>r.id));pages++;if(p.next===null)break;before=p.next;assert.ok(pages<200);}
+        assert.deepEqual(got,want,`${m.id} ${c} pages equal the full list newest-first`);checked++;
+      }
+    }
+    const other=full.members.find(m=>m.branch!==full.members[0].branch);
+    assert.equal(await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',branches:['nonexistent']}),null,'member outside the allowed branches is refused, not returned empty');
+    assert.equal(await readMemberHistory(backend,'h',{member:'nobody',collection:'visits'}),null);
+    assert.equal(await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'members'}),null,'only history collections');
+    const big=await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',limit:100000});assert.ok(big.rows.length<=100,'page size capped');
+    stat.queries=0;stat.rows=0;await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',branches:[full.members[0].branch],limit:10});
+    console.log('MEMBER-HISTORY pages checked',checked,'one page cost',stat.queries,'queries',stat.rows,'rows');assert.ok(stat.rows<=12);
+  }finally{await db.close();}
+});

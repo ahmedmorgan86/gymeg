@@ -1,0 +1,22 @@
+import type {SliceBackend} from './workspace-slice';
+/**
+ * Bounded, paged per-member history for the profile and account screens (visits, payments, invoices).
+ * Newest first, keyed by stored position, so concatenated pages equal the full filtered list reversed.
+ * The caller supplies the branch scope it is allowed to see; a member outside it is refused (null),
+ * never returned empty, so a scope bug cannot look like "no history". Nothing here is route-wired.
+ */
+export const HISTORY_COLLECTIONS=['visits','payments','invoices'] as const;
+export type HistoryCollection=typeof HISTORY_COLLECTIONS[number];
+export const HISTORY_PAGE_MAX=100;
+export type HistoryPage={rows:Record<string,unknown>[];/** Pass as `before` for the next page; null when there is no older row. */next:number|null;revision:number};
+export async function readMemberHistory(be:SliceBackend,owner:string,q:{member:string;collection:HistoryCollection;branches?:string[]|null;before?:number;limit?:number}):Promise<HistoryPage|null>{
+  if(!HISTORY_COLLECTIONS.includes(q.collection)||!q.member)return null;
+  const limit=Math.max(1,Math.min(HISTORY_PAGE_MAX,Math.floor(q.limit??50)));
+  const rev=await be.revision(owner);if(rev===null)return null;
+  const [m]=await be.entities(owner,{collections:['members'],ids:[q.member],branches:q.branches??null});
+  if(!m)return null;
+  const rows=await be.entities(owner,{collections:[q.collection],match:{field:'member',values:[q.member]},desc:true,limit:limit+1,...(q.before!==undefined?{before:q.before}:{})});
+  const page=rows.slice(0,limit);
+  const after=await be.revision(owner);if(after!==rev)return null; // a write landed between the reads: caller retries or falls back
+  return{rows:page.map(r=>r.payload as Record<string,unknown>),next:rows.length>limit?Number(page[page.length-1].position):null,revision:rev};
+}
