@@ -22,6 +22,17 @@ test('Remote database connections verify TLS certificates and keep SSL parameter
  assert.match(String(effective.ca[effective.ca.length-1]),/BEGIN CERTIFICATE/);
 });
 
+test('bundled CA is a real PEM and matches the official Supabase root fingerprint',async()=>{
+ const {X509Certificate}=await import('node:crypto');
+ const {SUPABASE_CA_CHAIN}=await import('../certs/supabase-ca-chain.ts');
+ assert.ok(SUPABASE_CA_CHAIN.includes('\n'),'PEM uses real newlines, not escaped sequences');
+ assert.ok(!SUPABASE_CA_CHAIN.includes('\\n'),'no literal backslash-n sequences');
+ assert.equal((SUPABASE_CA_CHAIN.match(/-----BEGIN CERTIFICATE-----/g)||[]).length,1,'exactly one PEM block');
+ assert.ok(SUPABASE_CA_CHAIN.trimEnd().endsWith('-----END CERTIFICATE-----'),'nothing after the end marker');
+ const cert=new X509Certificate(SUPABASE_CA_CHAIN);
+ assert.equal(cert.fingerprint256,'80:70:25:AD:50:D4:ED:21:9D:2C:9C:7D:29:9C:00:4F:82:4E:B0:0C:F7:F6:5A:FE:F6:07:D0:7B:72:E6:CA:FA','official Supabase Root 2021 CA fingerprint');
+});
+
 test('The Supabase CA is scoped to Supabase hosts only',()=>{
  const {rootCertificates}=process.getBuiltinModule?process.getBuiltinModule('node:tls'):require('node:tls');
  const supabase=databaseSecurityConfig('postgresql://u:p@aws-0-eu-central-1.pooler.supabase.com:5432/postgres','production');
