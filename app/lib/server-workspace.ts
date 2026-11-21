@@ -28,10 +28,11 @@ export async function readSpaceSlice(owner:string,query:SliceQuery|null){const s
 async function hydrateMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number}>{if(portalNow&&process.env.GYMOS_MEMBER_PORTAL_READS==='1'&&!useFirestorePersistence()){try{const portal=await readMemberPortalSlice(sliceBackend(),withScope,{owner,member:memberId,branch,now:portalNow});if(portal)return portal;}catch{/* Exact existing hydration remains the fallback. */}}const sliced=await readMemberSlice(sliceBackend(),owner,memberId,branch,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
 /** Private money override never enters GymState or invoice output. Refuse stale/capped data. */
 export async function readMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number;credit?:number}>{
- if(useFirestorePersistence()){const full=await readSpace(owner);return full;}
+ if(process.env.GYMOS_PRIVATE_MEMBER_CREDIT!=='1')return hydrateMemberSpace(owner,memberId,branch,portalNow);
+ if(useFirestorePersistence())throw Error('credit-backend-unsupported');
  const deadline=Date.now()+4000,scope=readDeadlineScope(deadline),before=await scope(owner,c=>readOwnerVersion(c,owner));if(before===null)throw Error('credit-version');
  const hydrated=await hydrateMemberSpace(owner,memberId,branch,portalNow);
- const credit=await scope(owner,async c=>{if(await readOwnerVersion(c,owner)!==before)throw Error('credit-changed');const row=(await c.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {revision:number}|undefined;if(!row||row.revision!==hydrated.revision)throw Error('credit-revision');const result=await exactPrivateCredit(c,owner,hydrated.state.payments,memberId,branch);if(result.status!=='ok'||await readOwnerVersion(c,owner)!==before)throw Error('credit-unavailable');return result.credit;});
+ const credit=await scope(owner,async c=>{if(await readOwnerVersion(c,owner)!==before)throw Error('credit-changed');const row=(await c.query('SELECT revision,payload FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {revision:number;payload:string}|undefined;if(!row||row.revision!==hydrated.revision)throw Error('credit-revision');if(JSON.parse(row.payload)._entityStorage!==1)throw Error('credit-legacy-layout');const result=await exactPrivateCredit(c,owner,hydrated.state.payments,memberId,branch);if(result.status!=='ok'||await readOwnerVersion(c,owner)!==before)throw Error('credit-unavailable');return result.credit;});
  return{...hydrated,credit};
 }
 /**
