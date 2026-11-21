@@ -27,11 +27,13 @@ beforeEach(() => {
       verifyEmailToken: async (tokenHash, type) => tokenHash === 'genuine-hash' && type === 'recovery'
         ? {data: {session: {access_token: 'session'}}, error: null}
         : {data: {session: null}, error: {message: 'Invalid confirmation code', status: 400}},
-      exchangeCodeForSession: async (code, opts) => {
-        exchangeArgs = {code, opts};
+      exchangeCodeForSession: async (code) => {
+        exchangeArgs = {code};
         return code === 'genuine-code'
           ? {data: {session: {access_token: 'session'}}, error: null}
-          : {data: {session: null}, error: {message: 'Invalid confirmation code', status: 400}};
+          : code === 'other-device-code'
+          ? {data: {session: null}, error: {code: 'pkce_verifier_missing', message: 'Confirmation link opened away from the requesting browser', status: 400}}
+          : {data: {session: null}, error: {code: 'pkce_exchange_failed', message: 'Invalid confirmation code', status: 400}};
       },
     },
   };
@@ -40,11 +42,16 @@ beforeEach(() => {
 const PW = 'https://gym.example/auth/action?mode=resetPassword';
 const FAIL = 'https://gym.example/sign-in?error=confirmation';
 
-test('recovery PKCE code exchanges with the unconfirmed allowance and lands on the password form', async () => {
+test('recovery PKCE code exchanges and lands on the password form', async () => {
   const response = await GET(new Request('https://gym.example/auth/callback/recovery?code=genuine-code'));
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), PW);
-  assert.deepEqual(exchangeArgs, {code: 'genuine-code', opts: {allowUnconfirmed: true}});
+  assert.deepEqual(exchangeArgs, {code: 'genuine-code'});
+});
+
+test('a link opened away from the requesting browser gets the same-browser explanation', async () => {
+  const response = await GET(new Request('https://gym.example/auth/callback/recovery?code=other-device-code'));
+  assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=confirmation_same_browser');
 });
 
 test('recovery token_hash link lands on the password form', async () => {

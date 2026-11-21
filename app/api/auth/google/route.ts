@@ -1,10 +1,11 @@
 import { cookies } from 'next/headers';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 
 export const dynamic = 'force-dynamic';
 
 // Starts the Google OAuth flow. The state cookie binds the callback to this
-// browser and carries the post-sign-in destination ('c' clubs, 'p' platform).
+// browser and carries the post-sign-in destination ('c' clubs, 'p' platform);
+// a hashed nonce binds Google's ID token to this authorize request.
 const fail = (origin: string, code: string) =>
   Response.redirect(new URL('/sign-in?error=' + code, origin), 303);
 
@@ -22,11 +23,20 @@ export async function GET(request: Request) {
     path: '/',
     maxAge: 600,
   });
+  const nonce = randomBytes(24).toString('base64url');
+  store.set('gymos_google_nonce', nonce, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 600,
+  });
   const authorize = new URL('https://accounts.google.com/o/oauth2/v2/auth');
   authorize.searchParams.set('client_id', clientId);
   authorize.searchParams.set('redirect_uri', new URL('/api/auth/google/callback', url.origin).href);
   authorize.searchParams.set('response_type', 'code');
   authorize.searchParams.set('scope', 'openid email profile');
   authorize.searchParams.set('state', state);
+  authorize.searchParams.set('nonce', createHash('sha256').update(nonce).digest('base64url'));
   return Response.redirect(authorize.href, 303);
 }

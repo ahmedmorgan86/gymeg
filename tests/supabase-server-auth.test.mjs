@@ -158,6 +158,13 @@ test('signUp sets a session only when the provider returns one', async () => {
   mockFetch({ 'POST /signup': { status: 422, json: { error_code: 'user_already_exists' } } });
   result = await supabaseServerAuth(fakeStore()).auth.signUp({ email: 'dup@example.com', password: 'x'.repeat(12), name: 'Dup' });
   assert.equal(result.error.code, 'email_exists');
+  // A failed request must not overwrite an earlier in-flight link's verifier.
+  for (const status of [400, 429, 500]) {
+    mockFetch({ 'POST /signup': { status, json: {} } });
+    const pending = fakeStore({ gymos_pkce_verifier: 'pending-v' });
+    await supabaseServerAuth(pending).auth.signUp({ email: 'x@example.com', password: 'x'.repeat(12), name: 'X' });
+    assert.equal(pending.jar.get('gymos_pkce_verifier'), 'pending-v');
+  }
 });
 
 test('signOut revokes globally at the auth server and clears both cookies', async () => {
@@ -203,6 +210,13 @@ test('resetPasswordForEmail issues a PKCE challenge and stores the verifier', as
   assert.equal(calls[0].body.email, 'a@b.c');
   assert.equal(calls[0].body.code_challenge_method, 's256');
   assert.ok(store.jar.has('gymos_pkce_verifier'));
+  // A failed request leaves an earlier pending verifier untouched.
+  for (const status of [400, 429, 500]) {
+    mockFetch({ 'POST /recover': { status, json: {} } });
+    const pending = fakeStore({ gymos_pkce_verifier: 'pending-v' });
+    await supabaseServerAuth(pending).auth.resetPasswordForEmail('a@b.c');
+    assert.equal(pending.jar.get('gymos_pkce_verifier'), 'pending-v');
+  }
 });
 
 test('exchangeCodeForSession trades a code plus verifier cookie for a session', async () => {
@@ -211,19 +225,32 @@ test('exchangeCodeForSession trades a code plus verifier cookie for a session', 
   global.fetch = async () => { fetchCalled = true; throw new Error('nope'); };
   let result = await supabaseServerAuth(fakeStore()).auth.exchangeCodeForSession('code1');
   assert.equal(result.error.status, 400);
+  assert.equal(result.error.code, 'pkce_verifier_missing');
   assert.equal(fetchCalled, false);
-  // Happy path, and a recovery session may precede confirmation.
-  mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
+  // Happy path: GoTrue confirms the address before granting on recovery
+  // links, so every exchanged session carries a confirmed user.
+  mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: CONFIRMED } } });
   const store = fakeStore({ gymos_pkce_verifier: 'verifier123' });
-  result = await supabaseServerAuth(store).auth.exchangeCodeForSession('code1', { allowUnconfirmed: true });
+  result = await supabaseServerAuth(store).auth.exchangeCodeForSession('code1');
   assert.equal(result.error, null);
   assert.equal(result.data.session.access_token, 'a');
   assert.deepEqual(calls[0].body, { auth_code: 'code1', code_verifier: 'verifier123' });
   assert.equal(store.jar.has('gymos_pkce_verifier'), false);
-  // Without the recovery allowance the same unconfirmed user is refused.
+  // An unconfirmed grant is refused by the normal gate; no exceptions.
   mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
   result = await supabaseServerAuth(fakeStore({ gymos_pkce_verifier: 'verifier123' })).auth.exchangeCodeForSession('code1');
   assert.equal(result.error.code, 'email_not_confirmed');
+  // A failed exchange keeps the verifier, so a bogus callback cannot destroy
+  // the pending emailed flow and the genuine link still succeeds after it.
+  mockFetch({ 'POST /token?grant_type=pkce': { status: 400, json: { error_code: 'bad_code' } } });
+  const pending = fakeStore({ gymos_pkce_verifier: 'verifier123' });
+  result = await supabaseServerAuth(pending).auth.exchangeCodeForSession('bogus-code');
+  assert.equal(result.error.code, 'pkce_exchange_failed');
+  assert.equal(pending.jar.get('gymos_pkce_verifier'), 'verifier123');
+  mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: CONFIRMED } } });
+  result = await supabaseServerAuth(pending).auth.exchangeCodeForSession('real-code');
+  assert.equal(result.error, null);
+  assert.equal(pending.jar.has('gymos_pkce_verifier'), false);
 });
 
 test('resetPasswordForEmail never reveals account existence', async () => {
@@ -302,19 +329,20 @@ test('an oversized token pair fails loudly instead of truncating the cookie', as
   assert.equal(store.jar.has('gymos_session'), false);
 });
 
-test('session-opening methods reject unconfirmed users; recovery is the exception', async () => {
+test('session-opening methods reject unconfirmed users', async () => {
   mockFetch({ 'POST /token?grant_type=id_token': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
   let store = fakeStore();
   let result = await supabaseServerAuth(store).auth.signInWithIdToken('google', 'tok');
   assert.equal(result.error.status, 403);
   assert.equal(result.error.code, 'email_not_confirmed');
   assert.equal(store.jar.has('gymos_session'), false);
-  // Recovery sessions may precede confirmation.
+  // Recovery carries no exception: the auth server confirms the address
+  // before granting, so an unconfirmed grant is still refused.
   mockFetch({ 'POST /verify': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
   store = fakeStore();
   result = await supabaseServerAuth(store).auth.verifyEmailToken('hash', 'recovery');
-  assert.equal(result.error, null);
-  assert.equal(result.data.session.access_token, 'a');
+  assert.equal(result.error.code, 'email_not_confirmed');
+  assert.equal(store.jar.has('gymos_session'), false);
   // Unsupported token types never reach the provider.
   let fetchCalled = false;
   global.fetch = async () => { fetchCalled = true; throw new Error('nope'); };

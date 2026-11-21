@@ -17,10 +17,15 @@ export async function GET(request: Request) {
   const state = url.searchParams.get('state');
   const store = await cookies();
   const saved = store.get('gymos_google_state')?.value;
-  store.delete('gymos_google_state');
-  if (!code || !state || !saved) return fail(url.origin, 'google_failed');
+  const savedNonce = store.get('gymos_google_nonce')?.value;
+  // The flow cookies are consumed only after the callback proves it belongs
+  // to the flow they guard: a stray or bogus callback must not destroy a
+  // pending sign-in from this browser.
+  if (!code || !state || !saved || !savedNonce) return fail(url.origin, 'google_failed');
   const [savedState, savedTarget] = saved.split('.');
   if (!savedState || savedState !== state) return fail(url.origin, 'google_failed');
+  store.delete('gymos_google_state');
+  store.delete('gymos_google_nonce');
   const target = savedTarget === 'p' ? '/platform' : '/clubs';
 
   const clientId = process.env.GYMEG_GOOGLE_CLIENT_ID;
@@ -50,7 +55,7 @@ export async function GET(request: Request) {
     // directly (id_token grant); no Firebase web API key is involved.
     if (authBackend() === 'supabase') {
       const auth = await serverAuth();
-      const result = await auth.auth.signInWithIdToken('google', tokens.id_token);
+      const result = await auth.auth.signInWithIdToken('google', tokens.id_token, savedNonce);
       if (result.error || !result.data.session) {
         return fail(url.origin, result.error && 'code' in result.error && result.error.code === 'email_not_confirmed' ? 'email_not_confirmed' : 'google_failed');
       }

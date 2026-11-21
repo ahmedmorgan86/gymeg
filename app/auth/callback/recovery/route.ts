@@ -23,10 +23,14 @@ export async function GET(request: Request) {
     }
     const code = url.searchParams.get('code') ?? '';
     if (code) {
-      // A recovery session must work even before the address is confirmed.
-      const { data, error } = await auth.auth.exchangeCodeForSession(code, { allowUnconfirmed: true });
+      // GoTrue confirmed the address before issuing this code (verify.go
+      // recoverVerify), so the normal confirmed-session gate applies.
+      const { data, error } = await auth.auth.exchangeCodeForSession(code);
       if (!error && data.session) {
         return Response.redirect(new URL('/auth/action?mode=resetPassword', url.origin), 303);
+      }
+      if (error && 'code' in error && error.code === 'pkce_verifier_missing') {
+        return Response.redirect(new URL('/sign-in?error=confirmation_same_browser', url.origin), 303);
       }
     }
   } catch {

@@ -34,6 +34,11 @@ export async function GET(request: Request) {
       if (!error && data.session) {
         return Response.redirect(new URL('/clubs', url.origin), 303);
       }
+      // A link opened on another device gets its own explanation, distinct
+      // from a genuinely invalid or superseded code.
+      if (error && 'code' in error && error.code === 'pkce_verifier_missing') {
+        return Response.redirect(new URL('/sign-in?error=confirmation_same_browser', url.origin), 303);
+      }
     } catch {
       // Fall through to the failure redirect.
     }

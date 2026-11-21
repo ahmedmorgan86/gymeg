@@ -91,9 +91,11 @@ type SessionPayload = { access_token?: unknown; refresh_token?: unknown; user?: 
 
 // Persists a token pair from a grant response. Fails (no cookie) when the
 // pair is missing or the encoded value would exceed the browser cookie
-// budget, and refuses to open a session for an unconfirmed email unless the
-// flow explicitly allows it (account recovery).
-function openSession(store: CookieStore, payload: SessionPayload, opts: { allowUnconfirmed?: boolean } = {}): { access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
+// budget, and refuses to open a session for an unconfirmed email. GoTrue
+// confirms the address before granting on recovery links too (verify.go's
+// recoverVerify runs before any code or tokens are issued), so no flow
+// needs an unconfirmed exception.
+function openSession(store: CookieStore, payload: SessionPayload): { access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
   if (typeof payload.access_token !== 'string' || typeof payload.refresh_token !== 'string') return null;
   // A session is only opened for a well-formed email identity: GoTrue always
   // returns the user on a token grant, so a missing or malformed one means
@@ -103,7 +105,7 @@ function openSession(store: CookieStore, payload: SessionPayload, opts: { allowU
     logAuthDiagnostic('session-cookie', null, 'MALFORMED_USER');
     return { error: UNAVAILABLE };
   }
-  if (!opts.allowUnconfirmed && !user.email_confirmed_at) {
+  if (!user.email_confirmed_at) {
     return { error: EMAIL_NOT_CONFIRMED };
   }
   const value = encodeSession(payload.access_token, payload.refresh_token);
@@ -178,10 +180,13 @@ export function supabaseServerAuth(store: CookieStore) {
       // Google sign-in: the app's own OAuth flow (state cookie, code exchange
       // at Google) produces a Google ID token, exchanged here for a Supabase
       // session. Requires the Google provider enabled with this client's ID.
-      async signInWithIdToken(provider: 'google', idToken: string) {
+      async signInWithIdToken(provider: 'google', idToken: string, nonce?: string) {
         const config = supabaseConfig();
         if (!config || !idToken) return { data: { session: null }, error: UNAVAILABLE };
-        const result = await gotrue(config, '/token?grant_type=id_token', { body: { provider, id_token: idToken } });
+        // The raw nonce goes to the auth server, which hashes it and compares
+        // with the nonce claim Google embedded in the ID token, binding the
+        // token to this browser's authorize request.
+        const result = await gotrue(config, '/token?grant_type=id_token', { body: nonce ? { provider, id_token: idToken, nonce } : { provider, id_token: idToken } });
         if (!result.ok) {
           logAuthDiagnostic('id-token-sign-in', result.status, result.code);
           if (result.status >= 500 || result.status === 0) return { data: { session: null }, error: UNAVAILABLE };
@@ -213,7 +218,6 @@ export function supabaseServerAuth(store: CookieStore) {
         const result = await gotrue(config, '/signup' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), {
           body: { email, password, data: { name }, code_challenge: challenge, code_challenge_method: 's256' },
         });
-        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         if (!result.ok) {
           logAuthDiagnostic('sign-up', result.status, result.code);
           if (result.status >= 500 || result.status === 0) return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } };
@@ -222,6 +226,9 @@ export function supabaseServerAuth(store: CookieStore) {
           if (result.code === 'weak_password') return { data: { session: null }, error: { message: 'Password too short', status: 400 } };
           return { data: { session: null }, error: { message: 'Registration failed', status: 400 } };
         }
+        // Only a successful send earns the verifier: a failed request must
+        // not overwrite the cookie of an earlier in-flight link.
+        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         // With email confirmation on, GoTrue sends the verification mail and
         // returns no session; the UI then shows the "confirmation sent" state.
         const session = openSession(store, result.json);
@@ -266,7 +273,6 @@ export function supabaseServerAuth(store: CookieStore) {
         const result = await gotrue(config, '/recover' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), {
           body: { email, code_challenge: challenge, code_challenge_method: 's256' },
         });
-        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         if (!result.ok) {
           // Existence is never revealed: only throttling and provider outages
           // surface; every other failure looks like success.
@@ -278,7 +284,12 @@ export function supabaseServerAuth(store: CookieStore) {
             logAuthDiagnostic('password-reset', result.status, result.code);
             return { error: UNAVAILABLE };
           }
+          // Masked failure (no email sent): return success-shaped without
+          // touching any pending link's verifier.
+          return { error: null };
         }
+        // Only a real send earns the verifier.
+        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         return { error: null };
       },
 
@@ -308,10 +319,10 @@ export function supabaseServerAuth(store: CookieStore) {
         return { data: { user: user.data.user }, error: null };
       },
 
-      // Email confirmation / recovery links. Only explicit supported types are
-      // accepted: 'signup' (and 'email_change') open a normal confirmed
-      // session; 'recovery' opens a session allowed to set a new password even
-      // before the address is confirmed. Anything else is rejected.
+      // Email confirmation / recovery links. Only explicit supported types
+      // are accepted; anything else is rejected. The auth server confirms
+      // the address before granting on recovery, so the normal confirmed
+      // gate applies to every type.
       async verifyEmailToken(tokenHash: string, type: string) {
         const config = supabaseConfig();
         const allowedTypes = new Set(['signup', 'recovery', 'email_change', 'magiclink']);
@@ -321,23 +332,28 @@ export function supabaseServerAuth(store: CookieStore) {
           logAuthDiagnostic('verify-token', result.status, result.code);
           return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
         }
-        const session = openSession(store, result.json, { allowUnconfirmed: type === 'recovery' });
+        const session = openSession(store, result.json);
         if (!session || 'error' in session) return { data: { session: null }, error: session && 'error' in session ? session.error : UNAVAILABLE };
         return { data: { session }, error: null };
       },
 
-      async exchangeCodeForSession(code: string, opts: { allowUnconfirmed?: boolean } = {}) {
+      async exchangeCodeForSession(code: string) {
         const config = supabaseConfig();
-        if (!config || !code || typeof code !== 'string') return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
+        if (!config || !code || typeof code !== 'string') return { data: { session: null }, error: { code: 'pkce_exchange_failed', message: 'Invalid confirmation code', status: 400 } };
+        // No verifier means the link was opened away from the browser that
+        // requested it; the pending flow stays intact and the user is told
+        // to return to that browser.
         const verifier = store.get('gymos_pkce_verifier')?.value;
-        if (!verifier) return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
+        if (!verifier) return { data: { session: null }, error: { code: 'pkce_verifier_missing', message: 'Confirmation link opened away from the requesting browser', status: 400 } };
         const result = await gotrue(config, '/token?grant_type=pkce', { body: { auth_code: code, code_verifier: verifier } });
-        store.delete('gymos_pkce_verifier');
         if (!result.ok) {
+          // Keep the verifier: a bad or replayed callback must not destroy
+          // the pending emailed flow; the user can retry the same link.
           logAuthDiagnostic('exchange-code', result.status, result.code);
-          return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
+          return { data: { session: null }, error: { code: 'pkce_exchange_failed', message: 'Invalid confirmation code', status: 400 } };
         }
-        const session = openSession(store, result.json, { allowUnconfirmed: opts.allowUnconfirmed === true });
+        store.delete('gymos_pkce_verifier');
+        const session = openSession(store, result.json);
         if (!session || 'error' in session) return { data: { session: null }, error: session && 'error' in session ? session.error : UNAVAILABLE };
         return { data: { session }, error: null };
       },

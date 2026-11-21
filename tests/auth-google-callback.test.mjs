@@ -40,7 +40,7 @@ function mockFetch(user) {
 }
 
 function makeStore() {
-  const jar = new Map([['gymos_google_state', 'STATE123.c']]);
+  const jar = new Map([['gymos_google_state', 'STATE123.c'], ['gymos_google_nonce', 'NONCE123']]);
   return {
     jar,
     get: (name) => (jar.has(name) ? { value: jar.get(name) } : undefined),
@@ -73,8 +73,9 @@ test('Google roundtrip: state, code exchange, id_token grant, session cookie, re
   const response = await GET(url('code=authcode&state=STATE123'));
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), 'https://gym.example/clubs');
-  // State cookie consumed.
+  // State and nonce cookies consumed.
   assert.equal(store.jar.has('gymos_google_state'), false);
+  assert.equal(store.jar.has('gymos_google_nonce'), false);
   // Google saw the authorization-code exchange for THIS deployment's callback.
   const google = calls.find(c => c.host === 'oauth2.googleapis.com');
   assert.ok(google.body.includes('code=authcode'));
@@ -83,7 +84,7 @@ test('Google roundtrip: state, code exchange, id_token grant, session cookie, re
   // GoTrue saw the Google ID token on the id_token grant.
   const grant = calls.find(c => c.host === 'ref.supabase.co');
   assert.equal(grant.path, '/auth/v1/token?grant_type=id_token');
-  assert.deepEqual(JSON.parse(grant.body), { provider: 'google', id_token: 'google-id-token' });
+  assert.deepEqual(JSON.parse(grant.body), { provider: 'google', id_token: 'google-id-token', nonce: 'NONCE123' });
   // Session cookie carries the Supabase pair.
   const session = decodeSession(store.jar.get('gymos_session'));
   assert.deepEqual(session, { a: 'supa-acc', r: 'supa-ref' });
@@ -96,11 +97,23 @@ test('platform target in state redirects to /platform', async () => {
   assert.equal(response.headers.get('location'), 'https://gym.example/platform');
 });
 
-test('state mismatch fails before any network call', async () => {
+test('state mismatch fails before any network call and keeps the pending flow', async () => {
   mockFetch(CONFIRMED);
   const response = await GET(url('code=authcode&state=WRONG'));
   assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=google_failed');
   assert.equal(calls.length, 0);
+  // A bogus callback must not destroy the pending sign-in's cookies.
+  assert.equal(store.jar.has('gymos_google_state'), true);
+  assert.equal(store.jar.has('gymos_google_nonce'), true);
+});
+
+test('a callback without the nonce cookie fails before any network call', async () => {
+  store.jar.delete('gymos_google_nonce');
+  mockFetch(CONFIRMED);
+  const response = await GET(url('code=authcode&state=STATE123'));
+  assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=google_failed');
+  assert.equal(calls.length, 0);
+  assert.equal(store.jar.has('gymos_session'), false);
 });
 
 test('unconfirmed Google account surfaces email_not_confirmed, no cookie', async () => {
