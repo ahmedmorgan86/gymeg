@@ -7,6 +7,7 @@
 import {dayAt,days,type GymState,type Member} from './domain.ts';
 import {membershipPeriod,membershipPeriods} from './membership-periods.ts';
 import {debt,receptionPolicy} from './member-console.ts';
+import {invoiceOutstanding} from './member-ledger.ts';
 
 /** [day, periodId|null, units (sessions+1), sameBranchAsMember 0|1] */
 export type UsageTuple=[string,string|null,number,0|1];
@@ -27,6 +28,8 @@ export type StoredSummary={
   last:{id:string;at:string}|null;
   debt:number;
   paid:number;
+  /** Per INVOICE branch: sum of the legacy invoiceOutstanding() over the member's invoices there (all branches) and their count. sum is null when any value is not finite, so readers fall back to the exact scan instead of trusting it. Feeds the Operations dues headline total. */
+  dues:Record<string,{sum:number|null;n:number;odd?:boolean}>;
 };
 type Row=Pick<GymState,'visits'|'payments'|'invoices'>;
 const dayBefore=(iso:string)=>new Date(Date.parse(iso.slice(0,10)+'T00:00:00.000Z')-86400000).toISOString().slice(0,10);
@@ -39,6 +42,13 @@ export function localView(s:GymState,m:Member):GymState{
   return{...s,members:[m],visits:s.visits.filter(v=>v.member===m.id&&v.branch===m.branch),payments:s.payments.filter(p=>p.member===m.id&&p.branch===m.branch),invoices:(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch)} as GymState;
 }
 /** `allBranches` is the member DETAIL view: memberSummary(packetState,m) counts the member's rows at every branch the caller can see (the list uses localView). */
+/** Per invoice-branch outstanding of one member, with the application's own arithmetic over the packet-shaped member rows. */
+export function memberDues(full:GymState,m:Member):StoredSummary['dues']{
+  const st={...full,payments:full.payments.filter(p=>p.member===m.id),invoices:(full.invoices??[]).filter(i=>i.member===m.id)} as GymState;
+  const out:StoredSummary['dues']={};
+  for(const i of st.invoices??[]){const o=invoiceOutstanding(st,i),cur=out[i.branch]??{sum:0,n:0};cur.n++;if(!(i.voided===undefined||typeof i.voided==='boolean')||typeof i.total!=='number'||!Array.isArray(i.allocations)||i.allocations.some(a=>typeof a.minor!=='number'))cur.odd=true;cur.sum=cur.sum===null||!Number.isFinite(o)?null:cur.sum+o;out[i.branch]=cur;}
+  return out;
+}
 export function computeStoredSummary(full:GymState,m:Member,asOf:string=new Date().toISOString(),opts?:{allBranches?:boolean}):StoredSummary{
   const s=opts?.allBranches?{...full,members:[m],visits:full.visits.filter(v=>v.member===m.id),payments:full.payments.filter(p=>p.member===m.id),invoices:(full.invoices??[]).filter(i=>i.member===m.id)} as GymState:localView(full,m);
   const horizon=dayBefore(asOf);
@@ -68,6 +78,7 @@ export function computeStoredSummary(full:GymState,m:Member,asOf:string=new Date
     last:last?{id:last.id,at:last.at}:null,
     debt:debt(s as GymState,m.id),
     paid:s.payments.filter(p=>p.member===m.id&&!p.voided).reduce((n,p)=>n+p.minor,0),
+    dues:memberDues(full,m),
   };
 }
 

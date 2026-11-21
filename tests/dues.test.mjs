@@ -68,3 +68,17 @@ test('writer between pages restarts to the post-write answer; stale not cached',
   assert.equal(out.rows.length,DUES_PAGE*3-1);assert.ok(!out.rows.some(r=>r.invoice.id==='z0'));assert.equal(out.total,(DUES_PAGE*3-1)*1000);
   const o2=await readDues(scope,{owner:'nobody',branch:'a'});assert.ok(o2.status==='ok'||o2.status==='unavailable');
 });
+
+test('odd stored shapes are reported unavailable, never a quiet zero; maintained total equals legacy on clean data',async()=>{
+  const owner='ODD';const s=fixture();await seed(owner,s);await refreshDirtySummaries(scope,owner).catch(()=>{});
+  const br=s.invoices[0].branch;
+  // clean: the maintained headline (when ready) or the scan equals the legacy total
+  const clean=await readDues(scope,{owner,branch:br});assert.equal(clean.status,'ok');
+  const legacy=s.invoices.filter(i=>i.branch===br).reduce((n,i)=>n+outstanding(s,i),0);assert.equal(clean.total,legacy);
+  // odd: missing total, and a truthy non-boolean voided flag
+  await db.query("UPDATE gymos.gym_entities SET payload=payload-'total' WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
+  assert.equal((await readDues(scope,{owner,branch:br})).status,'unavailable');
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{total}','100') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{voided}','\"yes\"') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
+  assert.equal((await readDues(scope,{owner,branch:br})).status,'unavailable');
+});

@@ -14,6 +14,7 @@ export async function GET(request:Request){try{
  const url=new URL(request.url),branch=url.searchParams.get('branch')??'';
  if(!branch)return reply({error:'invalid'},400);
  if(ctx.branches&&!ctx.branches.includes(branch))return reply({error:'forbidden'},403);
+ if(ctx.role==='reception')return reply({error:'forbidden'},403); // owner/admin-only, the same rule the Operations tab applies
  const meta=await readSpaceMeta(ctx.owner);
  const cols=new Set(packetQueries(ctx,meta.state.settings).flatMap(q=>q.collections as string[]));
  if(!cols.has('invoices')||!cols.has('payments')||!cols.has('members'))return reply({error:'forbidden'},403);
