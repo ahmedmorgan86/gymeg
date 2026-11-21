@@ -1,4 +1,4 @@
--- HELD DRAFT, not applied anywhere. Review only. Shared allocation-reference source for Reports payment rows and member-credit reads.
+-- HELD DRAFT, not applied anywhere. Review only. FRESH INSTALL ONLY: no upgrade path from earlier drafts of this migration (they are unreleased); on a database that already holds invoices every owner starts unready and must go through scripts/refs-ready.mjs. Shared allocation-reference source for Reports payment rows and member-credit reads.
 -- Why: the payload GIN probe (20261121250000) and every payload expression (->>, jsonb_array_elements, &&, @>) are not leakproof, so under ENABLE+FORCE RLS (gymos_app) they cannot be Index Cond and the
 -- planner scans every invoice of the owner. Here every probe predicate is a plain column compare (texteq / int ordering, leakproof), so it can be an index condition under the owner policy.
 -- Semantics kept exactly: an element is stored only when it is a JSON object whose `payment` is a JSON string (legacy matches with ===); ord is its position in payload.allocations; has_minor/minor keep
@@ -157,9 +157,8 @@ BEGIN
   -- A restore then either committed before this lock (the generation compare below and the mismatch check, a fresh READ COMMITTED statement, see it) or blocks until this transaction commits and then writes its tombstone AFTER our
   -- ready=true, so a committed tombstone is never overwritten by a stale completion. Refused under a snapshot-fixed isolation level.
   IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'invoice_allocation_refs_complete requires READ COMMITTED'; END IF;
-  -- Bounded: the SHARE lock blocks that owner's saves/restores while the verification scan runs, so the whole call is capped. A timeout aborts the transaction (lock released, readiness untouched, fail closed) and the operator retries
-  -- off-peak or after more rebuild. JUDGMENT numbers, not derived: 2s to acquire the row lock, 15s for the whole call.
-  PERFORM set_config('lock_timeout','2s',true);PERFORM set_config('statement_timeout','15s',true);
+  -- NOT bounded from inside: a timeout set by a statement inside this function does not bound the already-running `SELECT complete(...)`. The caller (scripts/refs-ready.mjs) must run SET LOCAL lock_timeout and
+  -- statement_timeout as a SEPARATE completed command in the same transaction BEFORE invoking this function, bound connect/acquire/cleanup client-side, and ROLLBACK + dispose the connection on any timeout.
   SELECT true INTO have FROM gymos.gym_states g WHERE g.user_id=p_owner FOR SHARE;
   BEGIN SELECT ((g.payload::jsonb)->'generation')::text INTO cur FROM gymos.gym_states g WHERE g.user_id=p_owner; EXCEPTION WHEN data_exception THEN RETURN false; END; -- unparseable metadata: refuse
   IF NOT COALESCE(have,false) THEN RETURN false; END IF;
