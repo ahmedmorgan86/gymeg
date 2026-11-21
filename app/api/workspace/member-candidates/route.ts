@@ -15,7 +15,7 @@ export async function GET(request:Request){try{
  const cols=new Set(packetQueries(ctx,meta.state.settings).flatMap(q=>q.collections as string[]));
  const financial=cols.has('payments')&&cols.has('invoices');
  if(!cols.has('members'))return reply({error:'forbidden'},403);
- const out=await readConsoleCandidates(withScope as unknown as Scope,{owner:ctx.owner,branch,branches:ctx.branches??null,financial,since});
+ const out=await readConsoleCandidates(withScope as unknown as Scope,{owner:ctx.owner,tenantId:ctx.tenantId,branch,branches:ctx.branches??null,financial,since});
  if(out.status==='forbidden')return reply({error:'forbidden'},403);
  return reply(out);
  }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);console.error('[Member Candidates Error]:',e);return reply({status:'fallback',reason:'unavailable'});}}

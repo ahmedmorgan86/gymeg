@@ -38,8 +38,9 @@ const dayBefore=(iso:string)=>new Date(Date.parse(iso.slice(0,10)+'T00:00:00.000
 export function localView(s:GymState,m:Member):GymState{
   return{...s,members:[m],visits:s.visits.filter(v=>v.member===m.id&&v.branch===m.branch),payments:s.payments.filter(p=>p.member===m.id&&p.branch===m.branch),invoices:(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch)} as GymState;
 }
-export function computeStoredSummary(full:GymState,m:Member,asOf:string=new Date().toISOString()):StoredSummary{
-  const s=localView(full,m);
+/** `allBranches` is the member DETAIL view: memberSummary(packetState,m) counts the member's rows at every branch the caller can see (the list uses localView). */
+export function computeStoredSummary(full:GymState,m:Member,asOf:string=new Date().toISOString(),opts?:{allBranches?:boolean}):StoredSummary{
+  const s=opts?.allBranches?{...full,members:[m],visits:full.visits.filter(v=>v.member===m.id),payments:full.payments.filter(p=>p.member===m.id),invoices:(full.invoices??[]).filter(i=>i.member===m.id)} as GymState:localView(full,m);
   const horizon=dayBefore(asOf);
   const visits=s.visits.filter(v=>v.member===m.id);
   const periods=membershipPeriods(m).filter(p=>!p.cancelled);
