@@ -1,6 +1,8 @@
 'use client';
 import {useState,useRef,useMemo} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
+import {dayAt} from './lib/domain';
+import {useLastVisits} from './use-last-visits';
 import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,type ManualWhatsAppTemplate} from './lib/manual-whatsapp';
 
 const labels={
@@ -13,7 +15,7 @@ const labels={
   occasion:['مناسبة أو عيد خاص','Special occasion']
 } as const;
 
-type Props={state:GymState;branch:string;ar:boolean;mutate:(op:Omit<Operation,'branch'>&{type:string})=>Promise<boolean>};
+type Props={state:GymState;owner?:string;branch:string;ar:boolean;mutate:(op:Omit<Operation,'branch'>&{type:string})=>Promise<boolean>};
 
 interface SendModalState {
   member: Member;
@@ -192,7 +194,7 @@ function TemplateEditor({
   </form>;
 }
 
-export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
+export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
   const [search,setSearch]=useState('');
   const [kind,setKind]=useState<ManualWhatsAppTemplate['kind']>('renewal');
   const [activeTab,setActiveTab]=useState<'due'|'direct'|'templates'>('due');
@@ -220,7 +222,8 @@ export default function ManualWhatsApp({state,branch,ar,mutate}:Props){
       };
     });
   },[rawTemplates,ar]);
-  const due=useMemo(()=>manualWhatsAppDue(state,branch,now),[state,branch,now]);
+  const serverLast=useLastVisits(state,owner,branch,dayAt(now,state.settings.timezone));
+  const due=useMemo(()=>manualWhatsAppDue(state,branch,now,serverLast),[state,branch,now,serverLast]);
   const branchName=state.branches.find(b=>b.id===branch)?.name??'';
 
   // Counts per scenario for badges
