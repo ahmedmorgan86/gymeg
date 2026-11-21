@@ -76,5 +76,18 @@ t0=Date.now();r=await readyOwner('postgresql://postgres@127.0.0.1:'+stall.addres
 assert.equal(r.status,'client-timeout',JSON.stringify(r));assert.ok(el5<2000,'stalled connect bounded by total deadline: '+el5+'ms');stall.close();
 // (refused connection is a different case: immediate error)
 r=await readyOwner('postgresql://postgres@127.0.0.1:1/x',O,{...T,deadlineMs:800});assert.ok(['client-timeout','error'].includes(r.status));
+// 8) supported trigger-bypass import runbook: tombstone BEFORE, bypass import, ENABLE ALWAYS, then complete; readers refuse until complete
+{const {invalidateOwner}=await import('../scripts/refs-ready.mjs');
+ await seed(30);await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g1\"}',revision=2 WHERE user_id=$1",[O]);r=await readyOwner(url,O,T);assert.equal(r.status,'ready');assert.equal(await ready(),true);
+ const inv=await invalidateOwner(url,O,T);assert.equal(inv.status,'invalidated');assert.equal(await ready(),false,'tombstone is in place before the import');
+ for(const [t2,n] of [['gym_entities','invoice_allocation_refs_ins'],['gym_entities','invoice_allocation_refs_upd'],['gym_entities','invoice_allocation_refs_del']])await q(`ALTER TABLE gymos.${t2} DISABLE TRIGGER ${n}`);
+ await q("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,'invoices','imp1',9001,'a','{\"id\":\"imp1\",\"allocations\":[{\"payment\":\"pz\",\"minor\":3}]}')",[O]);
+ await q("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{allocations}','[]') WHERE owner_id=$1 AND entity_id='i1'",[O]);
+ for(const [t2,n] of [['gym_entities','invoice_allocation_refs_ins'],['gym_entities','invoice_allocation_refs_upd'],['gym_entities','invoice_allocation_refs_del']])await q(`ALTER TABLE gymos.${t2} ENABLE ALWAYS TRIGGER ${n}`);
+ const mm=Number((await q("SELECT gymos.invoice_allocation_refs_mismatches($1) n",[O])).rows[0].n);assert.ok(mm>0,'the bypass import left the refs stale: '+mm);
+ assert.equal(await ready(),false,'still unready: no reader may use the stale refs');
+ const cmp=await q("SELECT gymos.invoice_allocation_refs_complete($1,'\"g1\"') x",[O]);assert.equal(cmp.rows[0].x,false,'complete refuses while refs are stale');assert.equal(await ready(),false);
+ r=await readyOwner(url,O,T);assert.equal(r.status,'ready',JSON.stringify(r));assert.equal(Number((await q("SELECT gymos.invoice_allocation_refs_mismatches($1) n",[O])).rows[0].n),0);assert.equal(await ready(),true);
+ console.log('runbook: tombstone -> bypass import (stale mismatches '+mm+') -> complete refused -> rebuild+complete ready, mismatches 0');}
 await q("DELETE FROM gymos.gym_entities WHERE owner_id=$1",[O]);await q("DELETE FROM gymos.gym_states WHERE user_id=$1",[O]);await q("DELETE FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1",[O]);await S.end();
 console.log('READY WORKFLOW PASS');

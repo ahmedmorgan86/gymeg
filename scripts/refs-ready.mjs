@@ -68,6 +68,11 @@ export async function readyOwner(url,owner,opts={}){
   }catch(e){if(e.commitUnknown){const rec=await reconcile(url,owner,o);return{status:'outcome-unknown',owner,generation,cursor:after,reconcile:rec,note:'COMMIT was not acknowledged: the transaction may have committed. Do not claim readiness or assume unchanged. Reconcile (ready flag and generation above, read fresh) before any retry.'};}
     return{status:classify(e),owner,generation,cursor:after,code:code(e)||null,message:String(e.message).slice(0,200),note:'transaction rolled back and connection disposed; readiness unchanged; safe to retry'};}
 }
+// RESTORE RUNBOOK STEP 1 (mandatory BEFORE any supported trigger-bypass import, e.g. pg_restore --disable-triggers or a DISABLE TRIGGER bulk load): write the tombstone for the owner(s) so every reader refuses from that moment.
+// One transaction per owner, bounded like every other phase. STEP 3 (after the import and after the triggers are re-enabled as ENABLE ALWAYS) is readyOwner(): rebuild + complete bound to the generation. See docs/refs-restore-runbook.md.
+export async function invalidateOwner(url,owner,opts={}){const o={...DEFAULTS,...opts};o.deadlineAt=Date.now()+o.deadlineMs;
+  try{await tx(url,o,async q=>{await q({text:'INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES($1,false) ON CONFLICT(owner_id) DO UPDATE SET ready=false,set_at=now()',values:[owner]});});return{status:'invalidated',owner};}
+  catch(e){return{status:classify(e),owner,message:String(e.message).slice(0,200),note:'tombstone NOT confirmed; do not start the import'};}}
 // owners that need work: have invoices without a ready row, or are tombstoned. Bounded by `limit`.
 export async function pendingOwners(url,limit=100,opts={}){
   const o={...DEFAULTS,...opts};o.deadlineAt=Date.now()+o.deadlineMs;
@@ -77,6 +82,7 @@ export async function pendingOwners(url,limit=100,opts={}){
 }
 if(import.meta.url===`file://${process.argv[1]}`){
   const url=process.env.REHEARSAL_DATABASE_URL;if(!url){console.error('REHEARSAL_DATABASE_URL (disposable/rehearsal database, migration role) is required');process.exit(2);}
+  if(process.argv[2]==='--invalidate'){const r=[];for(const ow of process.argv.slice(3))r.push(await invalidateOwner(url,ow));console.log(JSON.stringify(r,null,1));process.exit(r.every(x=>x.status==='invalidated')?0:1);}
   const owners=process.argv.slice(2).length?process.argv.slice(2):await pendingOwners(url);
   const out=[];for(const ow of owners)out.push(await readyOwner(url,ow));
   console.log(JSON.stringify(out,null,1));process.exit(out.every(r=>r.status==='ready')?0:1);
