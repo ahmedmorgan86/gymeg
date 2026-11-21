@@ -20,10 +20,11 @@ async function seed(owner,state){
   await db.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),'x']);
   for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
 }
-const read=(owner,b=null)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates(c,owner,b);});
+const read=(owner,b=null,opts={refresh:true})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates(c,owner,b,opts);});
+const via=(owner,hook,opts={refresh:true})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates({query:async(s,v)=>{const r=await hook(c,s,v,'before');const x=r??await c.query(s,v);await hook(c,s,v,'after');return x;}},owner,null,opts);});
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
 async function same(owner,label){
-  const res=await read(owner);assert.ok(typeof res==='object',label+': '+res);const s=await current(owner);let n=0;
+  const res=await read(owner);assert.equal(res.status,'ok',label+': '+res.status);const s=await current(owner);let n=0;
   for(const {member,stored} of res.candidates){
     for(const now of NOWS){const want=memberSummary(s,member,now),got=deriveSummary(strip(stored),member,s.settings,now);
       for(const k of ['period','issue','remaining','debt','status','used','visitsRemaining','paid'])assert.deepEqual(strip(got[k]),strip(want[k]),`${label} ${member.id} @ ${now}: ${k}`);
@@ -34,10 +35,10 @@ async function same(owner,label){
 test('existing owner is unready until backfill; backfill then reads exactly the oracle',async()=>{
   await seed('O1',fixture());
   for(const tb of ['gym_member_summary_ready','gym_member_summaries','gym_member_summary_dirty'])await db.query(`DELETE FROM gymos.${tb} WHERE owner_id='O1'`); // an owner that predates the migration
-  assert.equal(await read('O1'),'unready');
+  assert.equal((await read('O1')).status,'unready');
   await db.query("SELECT gymos.backfill_member_summaries('O1')");
   const {res,n}=await same('O1','backfilled');assert.equal(res.refreshed,res.candidates.length);assert.ok(n>=50);
-  const again=await read('O1');assert.equal(again.refreshed,0,'second read recomputes nothing');
+  const again=await read('O1');assert.equal((await read('O1',null,{})).status,'ok','read-only read of clean owner');assert.equal(again.refreshed,0,'second read recomputes nothing');
 });
 test('every writer path marks only the affected member dirty, and the refresh is exact afterwards',async()=>{
   const dirty=async o=>(await db.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY 1',[o])).rows.map(r=>r.member_id).filter(m=>m!=='archived'); // archived members are not candidates, so they are never refreshed
@@ -55,6 +56,8 @@ test('every writer path marks only the affected member dirty, and the refresh is
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{expires}','\"2026-03-17\"') WHERE owner_id='O1' AND collection='members' AND entity_id='plain'");assert.deepEqual(await dirty('O1'),['plain']);await same('O1','member changed');
   await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='O1' AND collection='members' AND entity_id='none'");assert.deepEqual(await dirty('O1'),['none']);
   const r=await same('O1','member deleted');assert.ok(!r.res.candidates.some(c=>c.member.id==='none'));
+  assert.deepEqual(await dirty('O1'),['none'],'the reader never writes: the orphan mark of a deleted member stays until the refresher runs');
+  await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O1',true)");return refreshDirtySummaries(c,'O1');});assert.deepEqual(await dirty('O1'),[]);
   // an unrelated collection does not mark anything
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('O1','plans','plx',99,'a','{\"id\":\"plx\"}')");assert.deepEqual(await dirty('O1'),[]);
 });
@@ -67,27 +70,52 @@ test('persistSpace full path (a real write) keeps summaries exact',async()=>{
 });
 test('unready, truncate, beyond-cap and too-many-dirty fail closed without a history read',async()=>{
   await seed('O2',{...fixture(),members:[],visits:[],payments:[],invoices:[]});
-  const r=await read('O2');assert.equal(typeof r,'object','fresh empty owner is ready from creation');assert.equal(r.candidates.length,0);
+  const r=await read('O2');assert.equal(r.status,'ok','fresh empty owner is ready from creation');assert.equal(r.candidates.length,0);
   // too many dirty
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'O2','members','m'||g,g,'a',jsonb_build_object('id','m'||g,'branch','a','joined','2026-01-01','expires','2026-12-31') FROM generate_series(1,$1) g",[REFRESH_MAX+1]);
-  assert.equal(await read('O2'),'too-many-dirty');
+  assert.equal((await read('O2')).status,'too-many-dirty');
   // the bounded refresher drains a mass-dirty owner in waves of at most REFRESH_MAX, then reads work
-  let left=Infinity,waves=0;while(left>0&&waves++<10){const x=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O2',true)");return refreshDirtySummaries(c,'O2');});assert.ok(x.refreshed<=REFRESH_MAX);left=x.remaining;}
+  let left=Infinity,waves=0;while(left>0&&waves++<10){const x=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O2',true)");return refreshDirtySummaries(c,'O2');});assert.equal(x.status,'ok');assert.ok(x.refreshed<=REFRESH_MAX);left=x.remaining;}
   assert.equal(left,0);assert.ok(waves>=2,'needed more than one wave');assert.equal((await read('O2')).candidates.length,REFRESH_MAX+1);
   // beyond the member cap: refused before any visit/payment/invoice read
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'O2','members','x'||g,100000+g,'a',jsonb_build_object('id','x'||g,'branch','a') FROM generate_series(1,$1) g",[MEMBER_CANDIDATE_MAX]);
   const seen=[];const spy={query:(sql,v)=>{seen.push(sql);return db.query(sql,v);}};
   const rr=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O2',true)");return readMemberCandidates({query:(s,v)=>{seen.push(s);return c.query(s,v);}},'O2',null);});
-  assert.equal(rr,'too-many-members');assert.ok(!seen.some(s=>/'visits'|'payments'|'invoices'/.test(s)),'no history query ran');
+  assert.equal(rr.status,'too-many-members');assert.ok(!seen.some(s=>/'visits'|'payments'|'invoices'/.test(s)),'no history query ran');
   // truncate drops readiness for every owner
   await db.query('TRUNCATE gymos.gym_entities');
-  assert.equal(await read('O1'),'unready');assert.equal(await read('O2'),'unready');
+  assert.equal((await read('O1')).status,'unready');assert.equal((await read('O2')).status,'unready');
 });
 test('an owner whose counters are unready or beyond the 20,000,000-byte rule is refused before any history row is read',async()=>{
   await seed('O3',{...fixture(),members:[{id:'a1',branch:'a',joined:'2026-01-01',expires:'2026-12-31'}],visits:[],payments:[],invoices:[]});
-  const probe=async()=>{const seen=[];const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O3',true)");return readMemberCandidates({query:(s,v)=>{seen.push(s);return c.query(s,v);}},'O3',null);});return {r,history:seen.some(s=>/'visits'|'payments'|'invoices'/.test(s)&&/payload->>'member'/.test(s))};};
+  const probe=async()=>{const seen=[];const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O3',true)");return readMemberCandidates({query:(s,v)=>{seen.push(s);return c.query(s,v);}},'O3',null,{refresh:true});});return {r,history:seen.some(s=>/'visits'|'payments'|'invoices'/.test(s)&&/payload->>'member'/.test(s))};};
   await db.query("UPDATE gymos.gym_entity_counters SET payload_bytes=20000001 WHERE owner_id='O3' AND collection='members'");
-  let x=await probe();assert.equal(x.r,'over-state-bound');assert.equal(x.history,false);
+  let x=await probe();assert.equal(x.r.status,'over-state-bound');assert.equal(x.history,false);
   await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='O3' AND collection='_ready'");
-  x=await probe();assert.equal(x.r,'over-state-bound');assert.equal(x.history,false);
+  x=await probe();assert.equal(x.r.status,'over-state-bound');assert.equal(x.history,false);
+});
+
+async function mk(owner,cancel){
+  const mem=x=>JSON.stringify({id:'m1',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'p1',plan:'pl',start:'2026-01-01',end:'2026-12-31',visits:3,cancelled:x}]});
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[owner]);
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,'members','m1',1,'a',$2)",[owner,mem(false)]);
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,'visits','v1',1,'a','{\"id\":\"v1\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-01\",\"at\":\"2026-03-01T10:00:00.000Z\",\"leftAt\":\"2026-03-01T11:00:00.000Z\"}')",[owner]);
+  return mem;
+}
+test('interleave: a member change committed after the caller read the member row is never stored stale with its mark cleared',async()=>{
+  const mem=await mk('R1');let fired=false;
+  const r=await via('R1',async(c,s,v,phase)=>{if(phase==='after'&&!fired&&/collection='members'/.test(s)&&/LIMIT/.test(s)&&/ORDER BY/.test(s)){fired=true;await c.query("UPDATE gymos.gym_entities SET payload=$1 WHERE owner_id='R1' AND collection='members' AND entity_id='m1'",[mem(true)]);}return null;});
+  assert.equal(r.status,'ok');assert.equal(r.candidates[0].member.membershipPeriods[0].cancelled,true,'returned member is the re-read one');
+  const st=(await db.query("SELECT stored->'usage' u FROM gymos.gym_member_summaries WHERE owner_id='R1'")).rows[0].u;assert.deepEqual(st,[],'stored from the re-read member (period cancelled)');
+  assert.equal((await db.query("SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id='R1'")).rows[0].n,0);
+});
+test('stale owner is read-only without refresh:true (no writes), and refresh waits are explicit statuses',async()=>{
+  await mk('R2');
+  const before=(await db.query("SELECT count(*)::int n FROM gymos.gym_member_summaries WHERE owner_id='R2'")).rows[0].n;
+  assert.equal((await read('R2',null,{})).status,'stale');assert.equal((await db.query("SELECT count(*)::int n FROM gymos.gym_member_summaries WHERE owner_id='R2'")).rows[0].n,before,'nothing written');
+  // a lock-timeout from a writer holding a row is reported as busy
+  const b=await via('R2',async(c,s,v,phase)=>{if(phase==='before'&&/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('lock');e.code='55P03';throw e;}return null;});assert.equal(b.status,'busy');
+  // a writer growing a collection after the counters check is detected, not read without bound
+  const rc=await via('R2',async(c,s,v,phase)=>{if(phase==='after'&&/FROM gymos.gym_entity_counters/.test(s)){await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('R2','visits','vgrow',50,'a','{\"id\":\"vgrow\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\"}')");}return null;});
+  assert.equal(rc.status,'raced');
 });
