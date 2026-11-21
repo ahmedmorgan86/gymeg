@@ -1,4 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
+import {registerHooks} from 'node:module';
+registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}}});
 const {pullReportPayments}=await import('../app/use-report-payments.ts');
 const page=(version,n,next)=>({ok:true,json:async()=>({status:'ok',version,rows:Array.from({length:n},(_,i)=>({payment:{id:'p'+i}})),next})});
 test('pull: same version answers same after one page; deadline answers tooLarge, never a truncated list',async()=>{
