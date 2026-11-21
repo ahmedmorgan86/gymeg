@@ -1,5 +1,5 @@
 // Portal occupancy only: no complete history of other present members.
-// Requires held canonical_visit_clock + reverse clock index. Conservative
+// Requires held canonical_visit_clock + ordinary generated strict keys. Conservative
 // refusal leaves the existing exact memberView hydration path in place.
 import type {Scope} from './member-console-source.ts';
 import {readOwnerVersion} from './member-summary-store.ts';
@@ -18,7 +18,10 @@ export async function readPortalOccupancy(scope:Scope,q:{owner:string;branch:str
   if(open.length>PORTAL_OPEN_CAP)return{status:'unavailable',reason:'open-cap'} as const;
   if(open.some(r=>typeof r.member!=='string'||r.id!==r.member||r.branch!==q.branch))return{status:'unavailable',reason:'member-shape'} as const;
   const ids=[...new Set(open.filter(r=>!r.demo&&!r.archived).map(r=>r.member as string))];
-  const latest=ids.length?(await c.query(`SELECT selected.member,v.payload,v.position FROM unnest($3::text[]) selected(member) CROSS JOIN LATERAL (SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND md5(payload->>'member')=md5(selected.member) AND payload->>'member'=selected.member AND jsonb_typeof(payload->'member')='string' AND gymos.canonical_visit_clock(payload) AND (COALESCE(payload->>'activeAt',payload->>'at')) COLLATE "C" <= ($4::text COLLATE "C") ORDER BY (COALESCE(payload->>'activeAt',payload->>'at')) COLLATE "C" DESC,position,entity_id LIMIT 2) v ORDER BY selected.member,(COALESCE(v.payload->>'activeAt',v.payload->>'at')) COLLATE "C" DESC,v.position,v.entity_id`,[q.owner,q.branch,ids,now])).rows as {member:string;payload:{at:string;activeAt?:string;leftAt?:unknown};position:number}[]:[];
+  // Do not order the inner probe by entity_id. The index already gives clock +
+  // position; equal first-two clock/positions are refused below regardless of
+  // their id order, avoiding an unbounded sort of malformed duplicate ties.
+  const latest=ids.length?(await c.query(`SELECT selected.member,v.payload,v.position FROM unnest($3::text[]) selected(member) CROSS JOIN LATERAL (SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND demand_member_hash=md5(selected.member) AND payload->>'member'=selected.member AND jsonb_typeof(payload->'member')='string' AND demand_visit_clock IS NOT NULL AND demand_visit_clock <= ($4::text COLLATE "C") ORDER BY demand_visit_clock DESC,position LIMIT 2) v ORDER BY selected.member,(COALESCE(v.payload->>'activeAt',v.payload->>'at')) COLLATE "C" DESC,v.position,v.entity_id`,[q.owner,q.branch,ids,now])).rows as {member:string;payload:{at:string;activeAt?:string;leftAt?:unknown};position:number}[]:[];
   let occupancy=0;const groups=new Map<string,typeof latest>();for(const r of latest){const group=groups.get(r.member)??[];group.push(r);groups.set(r.member,group);}
   for(const rows of groups.values()){
    const first=rows[0],second=rows[1],clock=first.payload.activeAt??first.payload.at;

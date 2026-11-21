@@ -1,7 +1,7 @@
 -- HELD DRAFT. Exact canonical UTC visit-clock detection, conservative for old
 -- malformed timestamps. Invalid dates return false rather than block a write.
 CREATE OR REPLACE FUNCTION gymos.canonical_visit_clock(p jsonb) RETURNS boolean
-LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE AS $$
+LANGUAGE plpgsql IMMUTABLE PARALLEL UNSAFE AS $$
 DECLARE t text;
 BEGIN
  IF jsonb_typeof(COALESCE(NULLIF(p->'activeAt','null'::jsonb),p->'at')) IS DISTINCT FROM 'string' THEN RETURN false; END IF;

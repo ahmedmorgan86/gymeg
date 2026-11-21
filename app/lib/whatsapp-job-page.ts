@@ -34,13 +34,13 @@ export async function readWhatsAppJobPage(scope:Scope,q:{owner:string;rule:Whats
    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.rule.branch]))).rows[0] as {x:boolean};
    if(odd.x)return{status:'fallback',reason:'visit-day'};
    // At most one indexed reverse-day probe per selected member. Requires held
-   // 20261121230000 index; actual hash collisions still receive exact equality.
+   // 20261122020000 generated strict keys and index; actual hash collisions still receive exact equality.
    const grouped=(await c.query(`SELECT selected.member,h.day FROM unnest($3::text[]) AS selected(member) CROSS JOIN LATERAL (
-    SELECT (payload->>'day') COLLATE "C" AS day FROM gymos.gym_entities
+    SELECT demand_visit_day AS day FROM gymos.gym_entities
     WHERE owner_id=$1 AND collection='visits' AND branch=$2
-     AND md5(payload->>'member')=md5(selected.member) AND payload->>'member'=selected.member AND jsonb_typeof(payload->'member')='string'
-     AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND (payload->>'day') COLLATE "C" <= ($4::text COLLATE "C")
-    ORDER BY (payload->>'day') COLLATE "C" DESC LIMIT 1
+     AND demand_member_hash=md5(selected.member) AND payload->>'member'=selected.member AND jsonb_typeof(payload->'member')='string'
+     AND demand_visit_day IS NOT NULL AND demand_visit_day <= ($4::text COLLATE "C")
+    ORDER BY demand_visit_day DESC LIMIT 1
    ) h`,[q.owner,q.rule.branch,ids,today])).rows as {member:string;day:string|null}[];
    for(const r of grouped)if(r.day!==null)last.set(r.member,r.day);
   }
