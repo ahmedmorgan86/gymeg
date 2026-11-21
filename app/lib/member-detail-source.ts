@@ -20,7 +20,7 @@ export async function readMemberDetail(scope:Scope,q:Q):Promise<DetailResponse>{
     const br=q.branches?' AND branch=ANY($3::text[])':'';
     const rows=async(coll:string,limit:number,member?:boolean)=>{
       const args:unknown[]=member?[q.owner,q.member]:[q.owner,q.member];if(q.branches)args.push(q.branches);
-      return (await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='${coll}' AND ${coll==='members'?'entity_id':"payload->>'member'"}=$2${br} ORDER BY position,entity_id LIMIT ${limit+1}`,args)).rows.map(r=>(r as {payload:unknown}).payload);
+      return (await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='${coll}' AND ${coll==='members'?"entity_id=$2":"md5(payload->>'member')=md5($2) AND payload->>'member'=$2"}${br} ORDER BY position,entity_id LIMIT ${limit+1}`,args)).rows.map(r=>(r as {payload:unknown}).payload);
     };
     const m=(await rows('members',1))[0] as Member|undefined;
     if(!m)return{status:'notFound'} as const;

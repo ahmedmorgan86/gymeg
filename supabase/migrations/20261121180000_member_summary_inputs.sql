@@ -21,18 +21,23 @@ GRANT SELECT,INSERT,UPDATE,DELETE ON gymos.gym_member_summaries TO gymos_app;
 GRANT SELECT,DELETE ON gymos.gym_member_summary_dirty TO gymos_app;
 GRANT SELECT ON gymos.gym_member_summary_ready TO gymos_app;
 
+-- Member keys longer than 1024 bytes cannot be keys of the summary tables (btree row limit; the legacy state rules accept any length). Such a write is NEVER rejected: the owner simply loses readiness
+-- (readers use the exact legacy paths) and the oversized key is not queued. 1024 bytes is an index-eligibility threshold chosen under the ~2.7 KB btree key limit, not a product limit.
+CREATE OR REPLACE FUNCTION gymos.msum_oversize(k text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT octet_length(k)>1024 $$;
 -- One trigger function per operation because the transition tables differ. Members: entity id = member id; others: payload.member (old and new rows both count).
 CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_ins() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
 BEGIN
+ DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM newrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));
  INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen)
-  SELECT owner_id,member_id,nextval('gymos.member_summary_gen') FROM (SELECT DISTINCT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS member_id FROM newrows WHERE collection IN ('members','visits','payments','invoices')) d WHERE member_id IS NOT NULL
+  SELECT owner_id,member_id,nextval('gymos.member_summary_gen') FROM (SELECT DISTINCT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS member_id FROM newrows WHERE collection IN ('members','visits','payments','invoices')) d WHERE member_id IS NOT NULL AND NOT gymos.msum_oversize(member_id)
   ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen;
  RETURN NULL;
 END $$;
 CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_del() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
 BEGIN
+ DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM oldrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));
  INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen)
-  SELECT owner_id,member_id,nextval('gymos.member_summary_gen') FROM (SELECT DISTINCT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS member_id FROM oldrows WHERE collection IN ('members','visits','payments','invoices')) d WHERE member_id IS NOT NULL
+  SELECT owner_id,member_id,nextval('gymos.member_summary_gen') FROM (SELECT DISTINCT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS member_id FROM oldrows WHERE collection IN ('members','visits','payments','invoices')) d WHERE member_id IS NOT NULL AND NOT gymos.msum_oversize(member_id)
   ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen;
  RETURN NULL;
 END $$;
@@ -40,13 +45,14 @@ REVOKE ALL ON FUNCTION gymos.mark_member_summary_dirty_ins() FROM PUBLIC;
 REVOKE ALL ON FUNCTION gymos.mark_member_summary_dirty_del() FROM PUBLIC;
 CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_upd() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
 BEGIN
+ DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM newrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));
  INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen)
   SELECT owner_id,member_id,nextval('gymos.member_summary_gen') FROM (
    SELECT DISTINCT owner_id,member_id FROM (
     SELECT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS member_id FROM newrows WHERE collection IN ('members','visits','payments','invoices')
     UNION ALL
     SELECT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END FROM oldrows WHERE collection IN ('members','visits','payments','invoices')) x
-   WHERE member_id IS NOT NULL) d
+   WHERE member_id IS NOT NULL AND NOT gymos.msum_oversize(member_id)) d
   ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen;
  RETURN NULL;
 END $$;
@@ -74,8 +80,9 @@ CREATE OR REPLACE FUNCTION gymos.backfill_member_summaries(target text) RETURNS 
 BEGIN
  PERFORM 1 FROM gymos.gym_states WHERE user_id=target FOR UPDATE;
  DELETE FROM gymos.gym_member_summaries WHERE owner_id=target;DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=target;
- INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen') FROM gymos.gym_entities WHERE owner_id=target AND collection='members';
- INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES(target) ON CONFLICT DO NOTHING;
+ INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen') FROM gymos.gym_entities WHERE owner_id=target AND collection='members' AND NOT gymos.msum_oversize(entity_id);
+ -- ready only when no member key of the owner is oversized; otherwise readers keep the exact legacy paths
+ IF NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=target AND collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END)) THEN INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES(target) ON CONFLICT DO NOTHING; END IF;
 END $$;
 REVOKE ALL ON FUNCTION gymos.backfill_member_summaries(text) FROM PUBLIC;
 

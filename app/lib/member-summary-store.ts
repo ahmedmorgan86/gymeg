@@ -56,7 +56,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     // Members that no longer exist (deleted, or invoices/payments naming an unknown member) keep a dues-only row (v:0) while they still own invoices, so the branch
     // dues total stays exact without a historical scan. v:0 rows are never candidates (candidates join the member rows). No invoices left: row and mark are dropped.
     for(const id of need){if(members.has(id))continue;
-      const own=async(coll:string)=>(await c.query("SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=$3 ORDER BY position,entity_id LIMIT "+lim(coll),[owner,coll,id])).rows.map(r=>(r as {payload:unknown}).payload);
+      const own=async(coll:string)=>(await c.query("SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND md5(payload->>'member')=md5($3) AND payload->>'member'=$3 ORDER BY position,entity_id LIMIT "+lim(coll),[owner,coll,id])).rows.map(r=>(r as {payload:unknown}).payload);
       const inv=await own('invoices'),pay=await own('payments');
       if(inv.length>lim('invoices')-1||pay.length>lim('payments')-1){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
       if(inv.length)await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify({v:0,dues:memberDues({payments:pay,invoices:inv} as unknown as GymState,{id} as Member)})]);
@@ -70,7 +70,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     const rowsOf=async(coll:string):Promise<Rows|'raced'>=>{
       const all:Rows=[];
       for(let i=0;i<todo.length;i+=CHUNK){
-        const rows=(await c.query("SELECT m.id AS member_id,x.payload FROM unnest($3::text[]) AS m(id) CROSS JOIN LATERAL (SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=m.id ORDER BY position,entity_id) x LIMIT "+lim(coll),[owner,coll,todo.slice(i,i+CHUNK)])).rows as Rows;
+        const rows=(await c.query("SELECT m.id AS member_id,x.payload FROM unnest($3::text[]) AS m(id) CROSS JOIN LATERAL (SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND md5(payload->>'member')=md5(m.id) AND payload->>'member'=m.id ORDER BY position,entity_id) x LIMIT "+lim(coll),[owner,coll,todo.slice(i,i+CHUNK)])).rows as Rows;
         all.push(...rows);if(all.length>lim(coll)-1)return 'raced'; // more rows than the counters said: a writer grew it
       }
       return all;
