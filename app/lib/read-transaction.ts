@@ -3,6 +3,7 @@
 // identity, license and financial reads. It is not a CPU/network response bound.
 import {getPool} from './database.ts';
 export class ReadDatabaseDeadline extends Error{constructor(){super('read database deadline');this.name='ReadDatabaseDeadline';}}
+export class ReadTransactionClosed extends Error{constructor(){super('read transaction closed');this.name='ReadTransactionClosed';}}
 export class ReadDatabaseBusy extends Error{constructor(){super('read database busy');this.name='ReadDatabaseBusy';}}
 type Client={query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>;release(destroy?:boolean):void};
 type Pool={connect():Promise<Client>};
@@ -24,26 +25,30 @@ export async function readTransaction<T>(pool:Pool,deadline:number,work:(client:
   // that lease immediately, without BEGIN, scope setup or callback execution.
   client=await until(connecting,deadline,c=>c.release());
  }catch(error){throw error;}
- let destroy=false,transaction=false;
+ let destroy=false,transaction=false,active=true;
  const raw=(sql:string,values?:unknown[])=>{msLeft(deadline);return until(client.query(sql,values),deadline);};
  const query=async(sql:string,values?:unknown[])=>{
+  if(!active)throw new ReadTransactionClosed();
   const timeout=Math.min(2000,msLeft(deadline));
   await raw("SELECT set_config('statement_timeout',$1,true)",[String(timeout)]);
+  if(!active)throw new ReadTransactionClosed();
   return raw(sql,values);
  };
  try{
   await raw('BEGIN READ ONLY');transaction=true;
   if(owner!==undefined)await query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
   const out=await until(Promise.resolve().then(()=>work({query})),deadline);
+  active=false;
   await raw('COMMIT');transaction=false;return out;
  }catch(error){
+  active=false;
   // Never put an expired/unknown transaction back into the pool. Destroying
   // the connection also cancels in-flight SQL instead of hiding late work.
   if(error instanceof ReadDatabaseDeadline||Date.now()>=deadline)destroy=true;
   else if(transaction){try{await raw('ROLLBACK');transaction=false;}catch{destroy=true;}}
   else destroy=true; // failed BEGIN leaves connection state unproved
   throw error;
- }finally{client.release(destroy);}
+ }finally{active=false;client.release(destroy);}
 }
 export const withReadTransaction=<T>(deadline:number,work:(client:Pick<Client,'query'>)=>Promise<T>,owner?:string)=>readTransaction(getPool(),deadline,work,owner);
 export const readDeadlineScope=(deadline:number)=><T>(owner:string,work:(client:Pick<Client,'query'>)=>Promise<T>)=>withReadTransaction(deadline,work,owner);
