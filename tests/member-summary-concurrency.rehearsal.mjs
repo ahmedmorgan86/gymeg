@@ -11,7 +11,7 @@
 import {registerHooks} from 'node:module';
 import pg from 'pg';
 const url=process.env.REHEARSAL_DATABASE_URL??'';
-const name=url.split('/').pop()?.split('?')[0]??'';
+let name='';try{name=decodeURIComponent(new URL(url).pathname.replace(/^\//,''));}catch{}
 if(!/^rehearsal_/.test(name)){console.error('refusing: REHEARSAL_DATABASE_URL must name a database starting with "rehearsal_"');process.exit(2);}
 registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}},load(u,x,n){if(u.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:'export const getPool=()=>globalThis.__rhPool;export const isFirebaseConfigured=()=>false;'};return n(u,x);}});
 const pool=globalThis.__rhPool=new pg.Pool({connectionString:url,max:6});
@@ -43,12 +43,15 @@ try{
   // 3
   await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
   const lt0=(await pool.query('SHOW lock_timeout')).rows[0].lock_timeout;
+  // deterministic: the writer takes the summary row FIRST and holds it uncommitted; the refresher starts while it is held and reaches its upsert,
+  // then the writer commits. A refresher that finishes before the writer would make this a no-op, so the writer must hold the row while it runs.
   const w=await pool.connect();await w.query('BEGIN');await w.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
+  await w.query("INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'m1','{}') ON CONFLICT(owner_id,member_id) DO UPDATE SET stored='{}'",[owner]);
   const r3p=withSnapshotScope(owner,async c=>{const x=await refreshDirtySummaries(c,owner);const ok=(await c.query('SELECT 1 AS one')).rows[0].one===1;return{x,ok};});
-  await new Promise(r=>setTimeout(r,50));await w.query("INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'m1','{}') ON CONFLICT(owner_id,member_id) DO UPDATE SET stored='{}'",[owner]);await w.query('COMMIT');w.release();
-  const r3=await r3p;check('3 snapshot refresher vs same-row writer',['ok','busy'].includes(r3.x.status)&&r3.ok,`status=${r3.x.status} usable=${r3.ok} (busy expected when the writer commits first; both are acceptable, a stale row is not)`);
+  await new Promise(r=>setTimeout(r,300));await w.query('COMMIT');w.release();
+  const r3=await r3p;check('3 snapshot refresher vs same-row writer: busy (55P03 or 40001) and the transaction stays usable',r3.x.status==='busy'&&r3.ok,`status=${r3.x.status} usable=${r3.ok}`);
   const after=(await pool.query("SELECT stored,(SELECT count(*)::int FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1) AS dirty FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0];
-  check('3b no stale row with a cleared mark',!after||after.dirty>0||after.stored.visitCount!==undefined,JSON.stringify(after).slice(0,120));
+  check('3b busy rolled back: the mark is still present (the writer row is not a computed summary)',after&&after.dirty>0,JSON.stringify(after).slice(0,120));
   check('3c lock_timeout not leaked',(await pool.query('SHOW lock_timeout')).rows[0].lock_timeout===lt0);
   // 4 runtime role: own owner works, other owner sees/changes nothing
   const other=owner+'-x';await seed(other);await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);await pool.query('SELECT gymos.backfill_member_summaries($1)',[other]);
