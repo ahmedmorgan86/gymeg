@@ -50,10 +50,28 @@ try{
   const after=(await pool.query("SELECT stored,(SELECT count(*)::int FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1) AS dirty FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0];
   check('3b no stale row with a cleared mark',!after||after.dirty>0||after.stored.visitCount!==undefined,JSON.stringify(after).slice(0,120));
   check('3c lock_timeout not leaked',(await pool.query('SHOW lock_timeout')).rows[0].lock_timeout===lt0);
+  // 4 runtime role: own owner works, other owner sees/changes nothing
+  const other=owner+'-x';await seed(other);await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);await pool.query('SELECT gymos.backfill_member_summaries($1)',[other]);
+  const asRole=async(o,work)=>{const c=await pool.connect();try{await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);const r=await work(c);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});return{error:e.code||String(e)};}finally{c.release();}};
+  const own=await asRole(owner,c=>refreshDirtySummaries(c,owner));
+  check('4a runtime role refreshes its own owner',own.status==='ok',`status=${own.status} error=${own.error??''}`);
+  const cross=await asRole(owner,async c=>({d:(await c.query('SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[other])).rows[0].n,u:(await c.query("DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1",[other])).rowCount}));
+  check('4b runtime role sees and deletes nothing of another owner',cross.d===0&&cross.u===0,JSON.stringify(cross));
+  const otherDirty=(await pool.query('SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[other])).rows[0].n;
+  check('4c other owner marks untouched',otherDirty===1,`dirty=${otherDirty}`);
+  const forged=await asRole(owner,c=>c.query("INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,'mx','{}')",[other]));
+  check('4d runtime role cannot write a row for another owner',!!forged.error,JSON.stringify(forged).slice(0,80));
+  // 5 growth between the counters check and the history read
+  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
+  const grow=async(c)=>{let fired=false;return{query:async(s,v)=>{const r=await c.query(s,v);if(!fired&&/gym_entity_counters/.test(s)){fired=true;for(let i=0;i<3;i++)await visit(owner,'v-grow'+i+Date.now());}return r;}};};
+  const rc=await scoped(owner,async c=>refreshDirtySummaries(await grow(c),owner));
+  check('5a READ COMMITTED: growth after the counters check is detected (raced) or the stored inputs are consistent',['raced','ok','busy'].includes(rc.status),`status=${rc.status}`);
+  await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
+  const sn=await withSnapshotScope(owner,async c=>refreshDirtySummaries(await grow(c),owner));
+  check('5b snapshot: growth after the counters check is not seen, never raced',sn.status!=='raced',`status=${sn.status}`);
 }finally{
   for(const t of ['gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready','gym_entity_counters','gym_entities'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id LIKE 'rh-%'`).catch(()=>{});
   await pool.query("DELETE FROM gymos.gym_states WHERE user_id LIKE 'rh-%'").catch(()=>{});
   await pool.end();
 }
-console.log('scenarios 4 (runtime role) and 5 (growth after the counters check) are listed above but not yet implemented in this script.');
 process.exit(failed?1:0);

@@ -7,7 +7,7 @@ registerHooks({
   load(url,ctx,next){if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__hotDb.query(sql,v),release(){}})});export const isFirebaseConfigured=()=>false;`};return next(url,ctx);}
 });
 const {persistSpace}=await import('../app/lib/entity-store.ts');
-const {useGrouped,refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
+const {groupedInFlightNow,GROUPED_CONCURRENCY,useGrouped,refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
 const {deriveSummary}=await import('../app/lib/member-summary-model.ts');
 const {memberSummary}=await import('../app/lib/member-console.ts');
 const {splitState}=await import('../app/lib/entity-state.ts');
@@ -75,6 +75,7 @@ test('grouped bulk path and per-member lookups store identical summaries; the sn
     return (await db.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id='G1' ORDER BY 1")).rows;};
   const a=await drain('lookup'),b=await drain('grouped'),c=await drain('auto');
   assert.ok(a.length>=10);assert.deepEqual(strip(b),strip(a),'grouped == lookup');assert.deepEqual(strip(c),strip(a),'auto == lookup');
+  assert.equal(groupedInFlightNow(),0,'grouped admission counter released after success');assert.equal(GROUPED_CONCURRENCY,1);
   // grouped path stays exact for every member against the oracle too
   await db.query("SELECT gymos.backfill_member_summaries('G1')");
   const r=await withSnapshotScope('G1',c=>readMemberCandidates(c,'G1',null,{refresh:true,mode:'grouped'}));assert.equal(r.status,'ok');

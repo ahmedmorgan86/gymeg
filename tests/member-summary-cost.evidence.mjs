@@ -7,9 +7,9 @@ registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODUL
 const {readMemberCandidates,refreshDirtySummaries,CHUNK}=await import('../app/lib/member-summary-store.ts');
 const M=Number(process.argv[2]??10000),PER=Number(process.argv[3]??8),HEAVY=Number(process.argv[4]??20000);
 await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('E','{\"_entityStorage\":1}',1,'x')");
-await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','members','m'||g,g,'a',jsonb_build_object('id','m'||g,'branch','a','joined','2026-01-01','expires','2026-12-31') FROM generate_series(1,$1) g",[M]);
-await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','v'||g||'_'||d,g*1000+d,'a',jsonb_build_object('id','v'||g||'_'||d,'member','m'||g,'branch','a','day','d'||d,'at','2026-03-01T10:00:00.000Z','leftAt','2026-03-01T11:00:00.000Z') FROM generate_series(2,$1) g, generate_series(1,$2) d",[M,PER]);
-await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','h'||g,50000000+g,'a',jsonb_build_object('id','h'||g,'member','m1','branch','a','day','d'||g,'at','2025-01-01T10:00:00.000Z','leftAt','2025-01-01T11:00:00.000Z') FROM generate_series(1,$1) g",[HEAVY]);
+await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','members','m'||g,g,'a',jsonb_build_object('id','m'||g,'branch','a','joined','2025-01-01','expires','2026-12-31','membershipPeriods',jsonb_build_array(jsonb_build_object('id','p'||g,'plan','pl','start','2025-01-01','end','2026-12-31','visits',null))) FROM generate_series(1,$1) g",[M]);
+await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','v'||g||'_'||d,g*1000+d,'a',jsonb_build_object('id','v'||g||'_'||d,'member','m'||g,'branch','a','day','2026-03-0'||d,'at','2026-03-01T10:00:00.000Z','leftAt','2026-03-01T11:00:00.000Z') FROM generate_series(2,$1) g, generate_series(1,$2) d",[M,PER]);
+await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E','visits','h'||g,50000000+g,'a',jsonb_build_object('id','h'||g,'member','m1','branch','a','day','2025-06-01','at','2025-01-01T10:00:00.000Z','leftAt','2025-01-01T11:00:00.000Z') FROM generate_series(1,$1) g",[HEAVY]);
 for(const c of ['payments','invoices'])await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'E',$2,$2||g||'_'||d,g*10+d,'a',jsonb_build_object('id',$2||g||'_'||d,'member','m'||g,'branch','a','minor',1,'total',1,'voided',false,'allocations','[]'::jsonb) FROM generate_series(1,$1) g, generate_series(1,2) d",[M,c]);
 await db.query("ANALYZE gymos.gym_entities");
 const bufs=t=>[...t.matchAll(/(?:hit|read)=(\d+)/g)].map(m=>+m[1]).reduce((a,b)=>a+b,0);
@@ -32,3 +32,7 @@ t0=performance.now();const r=await db.transaction(async c=>{await c.query("SELEC
 console.log('read with 2 dirty members:',{status:r.status,refreshed:r.refreshed,ms:Math.round(performance.now()-t0)});
 t0=performance.now();const r2=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','E',true)");return readMemberCandidates(c,'E',null,{});});
 console.log('read, clean, read-only:',{status:r2.status,candidates:r2.candidates?.length,ms:Math.round(performance.now()-t0)});
+
+const tr=(await db.query("SELECT count(*)::int n,sum(octet_length(stored::text))::bigint total,max(octet_length(stored::text))::int biggest FROM gymos.gym_member_summaries WHERE owner_id='E'")).rows[0];
+const mp=(await db.query("SELECT sum(octet_length(payload::text))::bigint total FROM gymos.gym_entities WHERE owner_id='E' AND collection='members'")).rows[0];
+console.log('all-member candidate transfer DB->server (what readMemberCandidates selects):',{members:tr.n,memberPayloadBytes:Number(mp.total),storedInputsBytes:Number(tr.total),biggestStoredRow:tr.biggest,totalBytes:Number(mp.total)+Number(tr.total)});

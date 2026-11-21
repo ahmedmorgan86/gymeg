@@ -42,6 +42,11 @@ export function useGrouped(n:number,k:{counts:Record<string,number>;bytes:number
 
 /** Recompute the listed members under the owner refresh lock. Re-reads everything the computation depends on (marks, stored rows and the MEMBER rows themselves)
  * after the lock, so a period or profile change committed since the caller's read can never be stored stale with its mark cleared. */
+/** Process admission for the grouped pass: it holds a whole collection (raw + parsed + sorted copies) in memory, so one runs at a time per process and a second
+ * concurrent request is refused with 'busy' instead of queueing memory. Per-owner locking already serializes one owner; this bounds the process across owners. */
+export const GROUPED_CONCURRENCY=1;
+let groupedInFlight=0;
+export const groupedInFlightNow=()=>groupedInFlight;
 export type Mode='auto'|'grouped'|'lookup'; // auto is the derived rule; the others exist for differential tests and evidence
 async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candidate>,mode:Mode='auto'):Promise<Refusal|null>{
   if(!need.length)return null;
@@ -67,6 +72,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     if(!todo.length){await c.query('RELEASE SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return null;}
     const total=Number((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members'",[owner])).rows[0]?.['n' as never]??0);
     const grouped=mode==='auto'?useGrouped(todo.length,k,total):mode==='grouped';
+    if(grouped){if(groupedInFlight>=GROUPED_CONCURRENCY){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}groupedInFlight++;}
     const rowsOf=async(coll:string):Promise<Rows|'raced'>=>{
       if(grouped)return readGrouped(c,owner,coll,new Set(todo),lim(coll)-1);
       const all:Rows=[];
@@ -76,7 +82,8 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
       }
       return all;
     };
-    const visits=await rowsOf('visits'),payments=await rowsOf('payments'),invoices=await rowsOf('invoices');
+    let visits:Rows|'raced',payments:Rows|'raced',invoices:Rows|'raced';
+    try{visits=await rowsOf('visits');payments=await rowsOf('payments');invoices=await rowsOf('invoices');}finally{if(grouped)groupedInFlight--;} // rows are held only until the summaries are computed below
     if(visits==='raced'||payments==='raced'||invoices==='raced'){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
     const by=(rows:Rows)=>{const m=new Map<string,unknown[]>();for(const r of rows){const l=m.get(r.member_id)??[];l.push(r.payload);m.set(r.member_id,l);}return m;};
     const V=by(visits),P=by(payments),I=by(invoices);
@@ -138,4 +145,10 @@ export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,m
   const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out,resolved);if(why)return refuse(why);
   const left=Number((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0]?.['n' as never]??0);
   return{status:'ok',refreshed:ids.length,remaining:left};
+}
+
+/** Convenience for the (future, not yet wired) route: one consistent REPEATABLE READ snapshot for the whole candidate read and refresh. */
+export async function readMemberCandidatesSnapshot(owner:string,branches:string[]|null,opts:{refresh?:boolean;mode?:Mode}={}):Promise<CandidateResult>{
+  const {withSnapshotScope}=await import('./member-summary-scope.ts');
+  return withSnapshotScope(owner,c=>readMemberCandidates(c,owner,branches,opts));
 }
