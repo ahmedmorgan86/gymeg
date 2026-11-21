@@ -29,3 +29,11 @@ test('unknown rollback state is destroyed, never returned as a usable transactio
 test('failed BEGIN has unknown state and is destroyed without callback execution',async()=>{
  let worked=false;const c=client(async()=>{throw Error('begin connection failed');});await assert.rejects(readTransaction({connect:async()=>c},Date.now()+200,async()=>{worked=true;}),/begin connection failed/);assert.equal(worked,false);assert.deepEqual(c.released,[true]);
 });
+test('retained handle refuses after successful commit and ordinary failure without touching released lease',async()=>{
+ for(const fails of [false,true]){const c=client();let retained;const run=readTransaction({connect:async()=>c},Date.now()+500,async q=>{retained=q;if(fails)throw Error('ordinary');return 3;});if(fails)await assert.rejects(run,/ordinary/);else assert.equal(await run,3);const before=c.log.length;await assert.rejects(retained.query('SELECT retained'),{name:'ReadTransactionClosed'});assert.equal(c.log.length,before);assert.equal(c.released.length,1);}
+});
+test('detached query cannot pass timeout setup after callback closes transaction',async()=>{
+ let setupResolve;const c=client(sql=>sql.startsWith('SELECT set_config')?new Promise(r=>setupResolve=r):Promise.resolve({rows:[]}));let detached;
+ await readTransaction({connect:async()=>c},Date.now()+500,async q=>{detached=q.query('SELECT detached').catch(e=>e.name);return 1;});
+ setupResolve({rows:[]});assert.equal(await detached,'ReadTransactionClosed');assert.ok(!c.log.includes('SELECT detached'));assert.deepEqual(c.released,[false]);
+});
