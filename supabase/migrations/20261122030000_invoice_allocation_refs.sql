@@ -192,16 +192,18 @@ REVOKE ALL ON FUNCTION gymos.invoice_allocation_refs_rebuild(text,text,integer),
 
 -- Ordinary payment day key (plain columns, so a day range is an Index Cond under RLS instead of a payload-expression Filter). pay_day holds the day only when it is the canonical string; pay_day_odd marks every other payments row
 -- (non-string or non-canonical day) so readers can still refuse them exactly. Held: adding stored generated columns rewrites gym_entities (do it in the cutover window or on the fresh rebuild).
-ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS pay_day text COLLATE "C" GENERATED ALWAYS AS (CASE WHEN collection='payments' AND jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$' THEN payload->>'day' END) STORED;
-ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS pay_day_odd boolean GENERATED ALWAYS AS (collection='payments' AND NOT COALESCE(jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$',false)) STORED;
+-- ONE statement for all four stored generated columns: one table rewrite and one ACCESS EXCLUSIVE lock for this migration (not four). Hosted execution plan: docs/hosted-schema-plan.md.
+ALTER TABLE gymos.gym_entities
+  ADD COLUMN IF NOT EXISTS pay_day text COLLATE "C" GENERATED ALWAYS AS (CASE WHEN collection='payments' AND jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$' THEN payload->>'day' END) STORED,
+  ADD COLUMN IF NOT EXISTS pay_day_odd boolean GENERATED ALWAYS AS (collection='payments' AND NOT COALESCE(jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$',false)) STORED,
+  ADD COLUMN IF NOT EXISTS visit_at text COLLATE "C" GENERATED ALWAYS AS (CASE WHEN collection='visits' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$' THEN payload->>'at' END) STORED,
+  ADD COLUMN IF NOT EXISTS visit_odd boolean GENERATED ALWAYS AS (collection='visits' AND NOT COALESCE(jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$',false)) STORED;
 CREATE INDEX IF NOT EXISTS gym_entities_pay_day ON gymos.gym_entities(owner_id,branch,pay_day,position,entity_id) WHERE collection='payments' AND pay_day IS NOT NULL;
 CREATE INDEX IF NOT EXISTS gym_entities_pay_day_odd ON gymos.gym_entities(owner_id,branch) WHERE pay_day_odd;
 
 -- Visit page keys (plain columns for the same RLS reason). visit_at holds `at` only when it is the canonical UTC millisecond string; visit_odd marks every visits row whose day or `at` is non-canonical (exactly the legacy
 -- readers' irregular predicate: demand_visit_day (020000) is non-null exactly when the day is a canonical string). Readers use the odd probe as an exact guard and repeat the partial-index predicates verbatim.
 -- Same held-rewrite caveat as pay_day. The member-odd probe uses the 020000 demand_member_hash IS NULL (non-string member) through its own partial index.
-ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS visit_at text COLLATE "C" GENERATED ALWAYS AS (CASE WHEN collection='visits' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$' THEN payload->>'at' END) STORED;
-ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS visit_odd boolean GENERATED ALWAYS AS (collection='visits' AND NOT COALESCE(jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$',false)) STORED;
 CREATE INDEX IF NOT EXISTS gym_entities_visit_odd ON gymos.gym_entities(owner_id,branch,position,entity_id) WHERE visit_odd;
 CREATE INDEX IF NOT EXISTS gym_entities_visit_member_odd ON gymos.gym_entities(owner_id,branch) WHERE collection='visits' AND demand_member_hash IS NULL;
 CREATE INDEX IF NOT EXISTS gym_entities_visit_day_count ON gymos.gym_entities(owner_id,branch,demand_visit_day) WHERE collection='visits' AND demand_visit_day IS NOT NULL;

@@ -24,7 +24,7 @@ export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:str
   const days=Array.from({length:q.period},(_,i)=>addDays(q.today,i-q.period+1)),month=q.today.slice(0,7);
   return scope(q.owner,c=>boundedRead(c,q.owner,'paysum\u0000'+q.branch+'\u0000'+q.today+'\u0000'+q.period,async()=>{
     const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable',reason:'no-version'} as const;
-    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ ${DAY_RE})) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
+    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND branch=$2 AND pay_day_odd) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
     if(odd.x)return{status:'unavailable',reason:'non-canonical-day'} as const;
     const lo=days.reduce((a,b)=>a<b?a:b,month+'-00'),hi=days.reduce((a,b)=>a>b?a:b,month+'-99');
     // Streamed in keyset chunks of SUMMARY_CHUNK rows ordered (day, position, entity_id) = the index order, so memory is O(chunk + period) however many payments the window holds.

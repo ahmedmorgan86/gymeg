@@ -23,7 +23,7 @@ const run=async(label,owner,fn)=>{
   for(const [sql,v] of log){let lines;try{lines=(await cl.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v)).rows.map(x=>x['QUERY PLAN']);}catch(e){lines=['EXPLAIN failed: '+e.message.slice(0,100)];}
     for(const l of lines){if(/Seq Scan on (gym_entities|invoice_allocation_refs|gym_states)\b/.test(l)&&!/never executed/.test(l))seq.push(l.trim().slice(0,100));const m=l.match(/Execution Time: ([\d.]+)/);if(m)maxEx=Math.max(maxEx,+m[1]);}
     txt+='-- '+sql.replace(/\s+/g,' ').slice(0,160)+' | bound '+JSON.stringify(v??[]).slice(0,100)+'\n'+lines.join('\n')+'\n';}
-  txt+='\n';summary.push({label,status:out.status,reason:out.reason,ms,statements:log.length,maxStatementMs:maxEx,seq});};
+  txt+='\n';summary.push({label,status:out.status,keys:Object.keys(out).join(','),reason:out.reason,ms,statements:log.length,maxStatementMs:maxEx,seq});};
 const day='2026-06-15',B={owner:'R',branch:'a'};
 await run('attendance day (first page)','R',s=>mods.att.readAttendance(s,{...B,day}));
 await run('attendance, small owner','S50',s=>mods.att.readAttendance(s,{owner:'S50',branch:'a',day}));
@@ -34,6 +34,6 @@ await run('dues first page, active branch a','R',s=>mods.dues.readDues(s,{...B,b
 await run('dues restricted to branch b','R',s=>mods.dues.readDues(s,{owner:'R',branch:'b',branches:['b']}));
 await run('payments summary (period 30)','R',s=>mods.pay.readPaymentsSummary(s,{...B,today:day,period:30}));
 await run('payments export first page','R',s=>mods.pay.readPaymentsExport(s,B));
-fs.writeFileSync('/downloads/slices-driver-plans.txt',txt);
+fs.writeFileSync('/downloads/slices-driver-plans-v3.txt',txt);
 console.log(JSON.stringify(summary,null,1));
 await cl.query('RESET ROLE');await cl.end();await S(clean);await sup.end();
