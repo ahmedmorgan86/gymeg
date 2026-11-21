@@ -1,6 +1,9 @@
-// Private exact fallback. Admission limits are refusal bounds, not capacity acceptance.
+// Private exact credit. Fast path (GYMOS_CREDIT_REFS=1, default OFF): the allocation refs return only the invoices naming the member's creditable payments (index-driven, no whole-owner scan, no invoice/byte cap) and the unchanged
+// memberCredit folds them. The helper refuses anything the refs cannot represent exactly (not ready, odd shapes, string/object minor, tied positions, >500 payment ids, disabled triggers, version change); every refusal falls through
+// to the exact whole-owner fold below with its admission bounds (refusal bounds, not capacity acceptance). Do not call this per member in a list (Gather amplification).
 import type {GymState} from './domain.ts';
 import {memberCredit} from './member-ledger.ts';
+import {allocatingInvoicesFromRefs} from './member-credit-refs.ts';
 type Q={query(sql:string,v?:unknown[]):Promise<{rows:unknown[]}>};
 export const PRIVATE_CREDIT_INVOICE_CAP=10000;
 export const PRIVATE_CREDIT_BYTES=2*1024*1024;
@@ -9,6 +12,10 @@ export const PRIVATE_CREDIT_FOLD_BYTES=8*1024*1024;
 export async function exactPrivateCredit(c:Q,owner:string,payments:GymState['payments'],member:string,branch:string){
  const selected=payments.filter(p=>p.member===member&&p.branch===branch&&p.creditable&&!p.voided);
  if(!selected.length)return{status:'ok',credit:0} as const;
+ if(process.env.GYMOS_CREDIT_REFS==='1'){
+  const r=await allocatingInvoicesFromRefs(c,owner,selected.map(p=>p.id));
+  if(r.status==='ok'){const credit=memberCredit({payments,invoices:r.invoices} as unknown as GymState,member,branch);if(!Number.isFinite(credit))return{status:'unavailable',reason:'credit-nonfinite'} as const;return{status:'ok',credit} as const;}
+ }
  // One statement/snapshot: never check bytes then fetch a changed larger projection.
  // A refused budget emits only metadata, not the oversized allocation payload.
  const rows=(await c.query(`WITH projected AS MATERIALIZED (

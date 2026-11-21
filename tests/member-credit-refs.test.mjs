@@ -102,3 +102,17 @@ test('a replica-role session is refused (its writes would skip the refs and the 
   try{assert.deepEqual(await allocatingInvoicesFromRefs(db,'C6',['p1']),{status:'unavailable',reason:'refs-triggers-disabled'});}finally{await db.query("SET session_replication_role=origin");}
   assert.equal((await allocatingInvoicesFromRefs(db,'C6',['p1'])).status,'ok');
 });
+test('exactPrivateCredit: flag ON (refs) == flag OFF (whole-owner fold) per member, refusals fall back to the fold',async()=>{
+  const {exactPrivateCredit}=await import('../app/lib/member-private-credit.ts');
+  const s=fixture();s.visits=[];const m=s.members[0],o=s.members[1];
+  s.payments=[{id:'pa',member:m.id,branch:m.branch,minor:5000,day:'2026-03-05',method:'cash',creditable:true},{id:'pb',member:m.id,branch:m.branch,minor:700,day:'2026-03-05',method:'cash',creditable:true}];
+  const inv=(id,mem,br,allocations,extra={})=>({id,member:mem,title:'T',total:5,due:'2026-03-20',branch:br,allocations,...extra});
+  s.invoices=[inv('i1',o.id,'zzz',[{payment:'pa',minor:100}]),inv('i2',m.id,m.branch,[{payment:'pa',minor:250},{payment:'pb',minor:50}]),inv('i3',o.id,o.branch,[{payment:'nope',minor:9}],{voided:true})];
+  await seed('XQ5',s);
+  const run=async(flag)=>{if(flag)process.env.GYMOS_CREDIT_REFS='1';else delete process.env.GYMOS_CREDIT_REFS;try{return await exactPrivateCredit(db,'XQ5',s.payments,m.id,m.branch);}finally{delete process.env.GYMOS_CREDIT_REFS;}};
+  const off=await run(false),on=await run(true);assert.equal(off.status,'ok');assert.deepEqual(on,off);assert.equal(on.credit,memberCredit(s,m.id,m.branch));
+  // string minor: refs refuse, fallback fold still exact
+  const s2=structuredClone(s);s2.invoices.push(inv('i4',o.id,o.branch,[{payment:'pa',minor:'5'}]));await seed('XQ6',s2);
+  process.env.GYMOS_CREDIT_REFS='1';const a=await exactPrivateCredit(db,'XQ6',s2.payments,m.id,m.branch);delete process.env.GYMOS_CREDIT_REFS;const b=await exactPrivateCredit(db,'XQ6',s2.payments,m.id,m.branch);
+  assert.deepEqual(a,b);
+});
