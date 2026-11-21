@@ -36,29 +36,41 @@ const slow=async()=>q(`CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_r
  RETURN QUERY SELECT p_owner,p_invoice,(a.ord-1)::integer,a.v->>'payment',md5(a.v->>'payment'),(a.v ? 'minor'),a.v->'minor',p_position,p_branch FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'allocations')='array' THEN p_payload->'allocations' ELSE '[]'::jsonb END) WITH ORDINALITY a(v,ord) WHERE jsonb_typeof(a.v)='object' AND jsonb_typeof(a.v->'payment')='string'; END $$`);
 const running=async()=>(await q("SELECT pid,state,wait_event FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active' AND query ILIKE '%invoice_allocation_refs_complete%' AND query NOT ILIKE '%pg_stat_activity%'")).rows;
 const rowShared=async()=>!(await free()); // FOR UPDATE NOWAIT fails while SHARE is held
-let seen=null;
+// every case: restore the real function, reseed, rebuild at full speed; inject slow ONLY in beforeComplete; assert complete() active with SHARE before the stop, then release/no backend/retry
+const reset=async()=>{await q(orig);await seed(400);await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g1\"}',revision=2 WHERE user_id=$1",[O]);};
+const caseRun=async(label,opts,expect)=>{await reset();let seenC=null;const t=Date.now();
+  const pr=readyOwner(url,O,{...T,...opts,hooks:{beforeComplete:slow}});
+  for(let i=0;i<80&&!seenC;i++){await new Promise(r=>setTimeout(r,25));const rr=await running();if(rr.length&&await rowShared())seenC=rr[0];}
+  const res=await pr;const el=Date.now()-t;
+  assert.ok(seenC,label+': complete() active with owner SHARE before stop');assert.ok(expect.includes(res.status),label+' '+JSON.stringify(res));
+  await new Promise(r=>setTimeout(r,300));
+  assert.equal(await ready(),false);assert.equal((await running()).length,0,label+': no abandoned backend');assert.equal(await locks(),0);assert.ok(await free(),label+': SHARE released');
+  await q(orig);const rt=await readyOwner(url,O,T);assert.equal(rt.status,'ready',label+' retry '+JSON.stringify(rt));
+  console.log(label,'-> active complete pid',seenC.pid,'; stopped as',res.status,'after',el,'ms; released; retry ready');return el;};
 try{
-  t0=Date.now();
-  const pr=readyOwner(url,O,{...T,stmtMs:2500,lockMs:700,hooks:{beforeComplete:slow}});
-  let tries=0;while(!seen&&tries++<60){await new Promise(r=>setTimeout(r,50));const rr=await running();if(rr.length&&await rowShared())seen=rr[0];}
-  assert.ok(seen,'complete() was executing with the owner SHARE lock before the timeout');
-  r=await pr;const el2=Date.now()-t0;
-  assert.equal(r.status,'statement-timeout',JSON.stringify(r));assert.ok(el2<7000,'bounded: '+el2+'ms');
-  assert.equal(await ready(),false);assert.equal((await running()).length,0,'no abandoned backend running complete');assert.equal(await locks(),0);assert.ok(await free(),'completion SHARE lock released');
-  console.log('complete() observed executing with SHARE (pid',seen.pid,') ; stopped as',r.status,'after',el2,'ms');
-  // absolute deadline: 100ms total must not enter a 15s query; returns promptly, nothing left
-  t0=Date.now();r=await readyOwner(url,O,{...T,stmtMs:15000,deadlineMs:100,hooks:{beforeComplete:slow}});const el3=Date.now()-t0;
-  assert.ok(el3<1500,'100ms deadline returned in '+el3+'ms');assert.ok(['client-timeout','statement-timeout','lock-timeout'].includes(r.status),JSON.stringify(r));console.log('100ms deadline ->',r.status,el3,'ms');assert.equal(await ready(),false);
-  await new Promise(r=>setTimeout(r,300));assert.equal((await running()).length,0);assert.ok(await free());
-  // deadline that expires DURING complete (rebuild done, ~600ms budget left): stops by the deadline, not by the 15s statement bound
-  t0=Date.now();r=await readyOwner(url,O,{...T,stmtMs:15000,lockMs:700,deadlineMs:1500,hooks:{beforeComplete:slow}});const el4=Date.now()-t0;
-  assert.ok(el4<3500,'deadline during complete: '+el4+'ms');assert.ok(['client-timeout','statement-timeout'].includes(r.status),JSON.stringify(r));
-  await new Promise(r=>setTimeout(r,400));assert.equal((await running()).length,0);assert.ok(await free());assert.equal(await ready(),false);
+  let el=await caseRun('stmt-bound 2.5s',{stmtMs:2500},['statement-timeout']);assert.ok(el<7000);
+  el=await caseRun('deadline 1500ms (15s stmt bound)',{stmtMs:15000,deadlineMs:1500},['client-timeout','statement-timeout']);assert.ok(el<4000,'el '+el);
 }finally{await q(orig);}
+// 100ms deadline cannot enter a 15s query: expires before any work starts or immediately after; measured, nothing left
+{await reset();const t=Date.now();let tc=0;const res=await readyOwner(url,O,{...T,stmtMs:15000,deadlineMs:600000,hooks:{beforeComplete:async o=>{await slow();o.deadlineAt=Date.now()+100;tc=Date.now();}}});const e3=Date.now()-tc;await q(orig);
+ assert.ok(e3<1500,'100ms remaining at complete -> '+e3);assert.ok(['client-timeout','statement-timeout','lock-timeout'].includes(res.status),JSON.stringify(res));console.log('rebuild done, 100ms left at complete(), 15s stmt bound ->',res.status,e3,'ms');
+ await new Promise(r=>setTimeout(r,300));assert.equal((await running()).length,0);assert.ok(await free());assert.equal(await ready(),false);}
+// expired deadline: zero connections attempted, no SQL, nothing changed
+import net from 'node:net';
+{let conns=0;const sv=net.createServer(sk=>{conns++;sk.on('error',()=>{});});await new Promise(r=>sv.listen(0,'127.0.0.1',r));
+ const before=await ready();const res=await readyOwner('postgresql://postgres@127.0.0.1:'+sv.address().port+'/x',O,{...T,deadlineMs:0});
+ assert.equal(res.status,'client-timeout',JSON.stringify(res));assert.equal(conns,0,'zero connects with an expired deadline');assert.equal(await ready(),before);sv.close();console.log('expired deadline -> 0 connects, status',res.status);}
+// COMMIT acknowledgement lost: a proxy forwards the completion COMMIT then drops both sockets without relaying the reply
+{await reset();let drop=false,dropped=0;
+ const px=net.createServer(cl=>{let cut=false;const up=net.connect('/tmp/pgdata/.s.PGSQL.5432');cl.on('error',()=>{});up.on('error',()=>{});
+  cl.on('data',d=>{if(drop&&d.toString('latin1').includes('COMMIT')){drop=false;cut=true;dropped++;up.write(d);setTimeout(()=>{cl.destroy();up.destroy();},150);return;}up.write(d);});up.on('data',d=>{if(!cut&&!cl.destroyed)cl.write(d);});cl.on('close',()=>up.destroy());up.on('close',()=>cl.destroy());});
+ await new Promise(r=>px.listen(0,'127.0.0.1',r));const purl='postgresql://postgres@127.0.0.1:'+px.address().port+'/rehearsal_w';
+ const res=await readyOwner(purl,O,{...T,hooks:{beforeComplete:async()=>{drop=true;}}});
+ await new Promise(r=>setTimeout(r,500));if(process.env.DBG)console.error('LATE ready',await ready(),JSON.stringify(res));assert.equal(dropped,1);assert.equal(res.status,'outcome-unknown',JSON.stringify(res));assert.equal(res.reconcile.ready,true,'the server DID commit; reported only through reconcile');assert.equal(res.reconcile.generation,'"g1"');
+ console.log('lost COMMIT ack -> outcome-unknown; reconcile',JSON.stringify(res.reconcile));px.close();}
 // 6) after the slow function is restored the same owner can complete (retry)
 r=await readyOwner(url,O,T);assert.equal(r.status,'ready',JSON.stringify(r));
 // 7) controlled STALLED connection: a TCP server that accepts and never answers; a short total deadline bounds connect
-import net from 'node:net';
 const stall=net.createServer(sk=>{sk.on('error',()=>{});});await new Promise(r=>stall.listen(0,'127.0.0.1',r));
 t0=Date.now();r=await readyOwner('postgresql://postgres@127.0.0.1:'+stall.address().port+'/x',O,{...T,connectMs:30000,deadlineMs:700});const el5=Date.now()-t0;
 assert.equal(r.status,'client-timeout',JSON.stringify(r));assert.ok(el5<2000,'stalled connect bounded by total deadline: '+el5+'ms');stall.close();
