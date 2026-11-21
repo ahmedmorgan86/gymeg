@@ -78,11 +78,14 @@ try{
   const total=await visitsNow();
   check('5a READ COMMITTED growth: raced (nothing stored from partial rows), or stored inputs include ALL visits, or member stays dirty',rc.status==='raced'||(rc.status==='ok'&&rcStored?.visitCount===total)||rcDirty===1,`status=${rc.status} visitCount=${rcStored?.visitCount} actual=${total} dirty=${rcDirty}`);
   await pool.query('SELECT gymos.backfill_member_summaries($1)',[owner]);
+  const preStored=JSON.stringify((await pool.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0]?.stored??null);
   const sn=await withSnapshotScope(owner,async c=>refreshDirtySummaries(await grow(c),owner));
   const snStored=(await pool.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0]?.stored;
   const snDirty=(await pool.query("SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m1'",[owner])).rows[0].n;
   const total2=await visitsNow();
-  check('5b snapshot: never raced; the 3 rows added after the check are not in the stored inputs AND the member stays dirty (the writer trigger marked it)',sn.status==='ok'&&snStored?.visitCount===total2-3&&snDirty===1,`status=${sn.status} visitCount=${snStored?.visitCount} actual=${total2} dirty=${snDirty}`);
+  check('5b snapshot: never raced. busy (40001 from deleting a concurrently re-marked dirty mark) must roll back: stored inputs unchanged and mark present. ok must show a snapshot-consistent count (total minus the 3 later rows) and the newer mark retained',
+    sn.status!=='raced'&&((sn.status==='busy'&&JSON.stringify(snStored??null)===preStored&&snDirty===1)||(sn.status==='ok'&&snStored?.visitCount===total2-3&&snDirty===1)),
+    `status=${sn.status} visitCount=${snStored?.visitCount} actual=${total2} dirty=${snDirty} unchanged=${JSON.stringify(snStored??null)===preStored} (UNRUN hypothesis)`);
 }finally{
   for(const t of ['gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready','gym_entity_counters','gym_entities'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id LIKE 'rh-%'`).catch(()=>{});
   await pool.query("DELETE FROM gymos.gym_states WHERE user_id LIKE 'rh-%'").catch(()=>{});

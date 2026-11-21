@@ -152,7 +152,7 @@ test('grouped admission is held through retention, computation and every upsert,
     if(nested===undefined){nested='pending';nested=await refreshDirtySummaries(c,'A1',500,'grouped').catch(e=>'threw:'+(e.code??e.message));}}});
   assert.equal(r.status,'ok');assert.ok(seen.length>=10);assert.deepEqual([...new Set(seen)],[1],'counter is 1 during every upsert');
   assert.equal(groupedInFlightNow(),0,'0 after return');
-  assert.ok(nested&&nested!=='pending'&&(nested.status==='busy'||String(nested).startsWith('threw:')),'a second grouped pass during the first is refused or blocked: '+JSON.stringify(nested));
+  assert.ok(nested&&nested!=='pending'&&nested.status==='busy','a second grouped pass during the first is refused or blocked: '+JSON.stringify(nested));
   // error path
   await db.query("SELECT gymos.backfill_member_summaries('A1')");
   await assert.rejects(run(async s=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s))throw new Error('boom');}),/boom/);
