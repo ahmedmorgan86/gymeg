@@ -157,7 +157,13 @@ export async function consumeAuthRateLimit(scope: string, request: Request, emai
   const perIp = consume(`${scope}|ip:${ip}`, IP_LIMIT, WINDOW_MS, now);
   const [emailDecision, ipDecision] = await Promise.all([perEmail, perIp]);
   if (!emailDecision.allowed || !ipDecision.allowed) {
-    return { allowed: false, retryAfter: Math.max(emailDecision.retryAfter, ipDecision.retryAfter) };
+    // Preserve outage metadata through aggregation: routes answer 503 for a
+    // store outage, 429 only for a genuine over-limit decision.
+    return {
+      allowed: false,
+      retryAfter: Math.max(emailDecision.retryAfter, ipDecision.retryAfter),
+      ...(emailDecision.outage || ipDecision.outage ? { outage: true } : {}),
+    };
   }
   return { allowed: true, retryAfter: 0 };
 }

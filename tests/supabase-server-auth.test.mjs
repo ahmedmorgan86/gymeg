@@ -72,7 +72,7 @@ test('authBackend selector: legacy default, explicit supabase, fail closed on ty
 });
 
 test('getUser verifies at the auth server and shapes the confirmed user', async () => {
-  mockFetch({ 'GET /user': { status: 200, json: { user: CONFIRMED } } });
+  mockFetch({ 'GET /user': { status: 200, json: CONFIRMED } });
   const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
   const { auth } = supabaseServerAuth(store);
   const { data } = await auth.getUser();
@@ -94,7 +94,7 @@ test('getUser rotates an expired access token and rewrites the cookie', async ()
   mockFetch({
     'GET /user': () => (++userCalls === 1
       ? { status: 401, json: { error_code: 'bad_jwt' } }
-      : { status: 200, json: { user: CONFIRMED } }),
+      : { status: 200, json: CONFIRMED }),
     'POST /token?grant_type=refresh_token': { status: 200, json: { access_token: 'acc2', refresh_token: 'ref2', user: CONFIRMED } },
   });
   const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
@@ -177,6 +177,22 @@ test('signOut revokes globally at the auth server and clears both cookies', asyn
   assert.equal(store.jar.size, 0);
 });
 
+test('signOut and updateUser surface server revocation failures', async () => {
+  mockFetch({ 'POST /logout?scope=global': { status: 500, json: {} } });
+  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
+  const { error } = await supabaseServerAuth(store).auth.signOut({ scope: 'global' });
+  assert.equal(error.status, 503);
+  assert.equal(store.jar.size, 0); // local cookies still cleared
+
+  mockFetch({
+    'GET /user': { status: 200, json: CONFIRMED },
+    'PUT /user': { status: 200, json: { user: CONFIRMED } },
+    'POST /logout?scope=global': { status: 500, json: {} },
+  });
+  const result = await supabaseServerAuth(fakeStore({ gymos_session: encodeSession('acc', 'ref') })).auth.updateUser({ password: 'y'.repeat(12) });
+  assert.equal(result.error.status, 503);
+});
+
 test('resetPasswordForEmail never reveals account existence', async () => {
   // Unknown address (provider 200/400 both) -> no error surfaced.
   for (const status of [200, 400, 422]) {
@@ -216,6 +232,68 @@ test('signInWithIdToken exchanges a Google ID token for a session', async () => 
   assert.equal(bad.error.status, 401);
 });
 
+test('read-only cookie store (Server Component) never consumes a refresh token', async () => {
+  let refreshCalls = 0;
+  mockFetch({
+    'GET /user': { status: 401, json: { error_code: 'bad_jwt' } },
+    'POST /token?grant_type=refresh_token': () => { refreshCalls++; return { status: 200, json: {} }; },
+  });
+  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
+  store.set = () => { throw new Error('Cookies can only be modified in a Server Action or Route Handler'); };
+  store.delete = () => { throw new Error('Cookies can only be modified in a Server Action or Route Handler'); };
+  const { auth } = supabaseServerAuth(store);
+  const { data } = await auth.getUser();
+  assert.equal(data.user, null);
+  assert.equal(refreshCalls, 0);
+  assert.equal(store.jar.get('gymos_session'), encodeSession('acc', 'ref'));
+});
+
+test('a rotated cookie is used by the next getUser on the same object', async () => {
+  let userCalls = 0;
+  mockFetch({
+    'GET /user': (opts) => (++userCalls === 1
+      ? { status: 401, json: { error_code: 'bad_jwt' } }
+      : { status: 200, json: CONFIRMED }),
+    'POST /token?grant_type=refresh_token': { status: 200, json: { access_token: 'acc2', refresh_token: 'ref2', user: CONFIRMED } },
+  });
+  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
+  const { auth } = supabaseServerAuth(store);
+  await auth.getUser();
+  await auth.getUser();
+  assert.equal(calls.at(-1).auth, 'Bearer acc2');
+});
+
+test('an oversized token pair fails loudly instead of truncating the cookie', async () => {
+  const huge = 'x'.repeat(3000);
+  mockFetch({ 'POST /token?grant_type=password': { status: 200, json: { access_token: huge, refresh_token: huge, user: CONFIRMED } } });
+  const store = fakeStore();
+  const result = await supabaseServerAuth(store).auth.signInWithPassword({ email: 'user@example.com', password: 'x'.repeat(12) });
+  assert.equal(result.data.session, null);
+  assert.equal(result.error.status, 503);
+  assert.equal(store.jar.has('gymos_session'), false);
+});
+
+test('session-opening methods reject unconfirmed users; recovery is the exception', async () => {
+  mockFetch({ 'POST /token?grant_type=id_token': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
+  let store = fakeStore();
+  let result = await supabaseServerAuth(store).auth.signInWithIdToken('google', 'tok');
+  assert.equal(result.error.status, 403);
+  assert.equal(result.error.code, 'email_not_confirmed');
+  assert.equal(store.jar.has('gymos_session'), false);
+  // Recovery sessions may precede confirmation.
+  mockFetch({ 'POST /verify': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
+  store = fakeStore();
+  result = await supabaseServerAuth(store).auth.verifyEmailToken('hash', 'recovery');
+  assert.equal(result.error, null);
+  assert.equal(result.data.session.access_token, 'a');
+  // Unsupported token types never reach the provider.
+  let fetchCalled = false;
+  global.fetch = async () => { fetchCalled = true; throw new Error('nope'); };
+  result = await supabaseServerAuth(fakeStore()).auth.verifyEmailToken('hash', 'invite');
+  assert.equal(result.error.status, 400);
+  assert.equal(fetchCalled, false);
+});
+
 test('updateUser requires a session, rotates it, and signs out everywhere', async () => {
   // Not signed in.
   let result = await supabaseServerAuth(fakeStore()).auth.updateUser({ password: 'x'.repeat(12) });
@@ -225,14 +303,15 @@ test('updateUser requires a session, rotates it, and signs out everywhere', asyn
   assert.equal(result.error.status, 400);
   // Signed in: password update then global revoke, local cookie dropped.
   mockFetch({
-    'GET /user': { status: 200, json: { user: CONFIRMED } },
+    'GET /user': { status: 200, json: CONFIRMED },
     'PUT /user': { status: 200, json: { user: CONFIRMED } },
     'POST /logout?scope=global': { status: 204, json: null },
   });
-  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref') });
+  const store = fakeStore({ gymos_session: encodeSession('acc', 'ref'), 'sb-token': 'mob' });
   result = await supabaseServerAuth(store).auth.updateUser({ password: 'y'.repeat(12) });
   assert.equal(result.error, null);
   assert.equal(result.data.user.id, 'u1');
   assert.equal(store.jar.has('gymos_session'), false);
+  assert.equal(store.jar.has('sb-token'), false);
   assert.equal(calls.at(-1).key, 'POST /logout?scope=global');
 });

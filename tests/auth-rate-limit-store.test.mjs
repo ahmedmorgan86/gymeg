@@ -111,3 +111,20 @@ test('consumePostgres runs against a real database: first window, rollover, and 
     await db.close();
   }
 });
+
+test('consumeAuthRateLimit aggregation preserves outage for route 503 mapping', async () => {
+  process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT = '{}';
+  try {
+    const { consumeAuthRateLimit } = await import('../app/lib/auth-rate-limit.ts');
+    // Firestore store selected but no Firebase app exists in this process, so
+    // the shared store throws inside real aggregation — exactly what a route
+    // sees during a counter-store outage.
+    const request = new Request('https://app.test/api/session', { headers: { 'x-forwarded-for': '203.0.113.9' } });
+    const decision = await consumeAuthRateLimit('session:login', request, 'user@example.com', 10);
+    assert.equal(decision.allowed, false);
+    assert.equal(decision.outage, true);
+    assert.ok(decision.retryAfter >= 1);
+  } finally {
+    delete process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT;
+  }
+});
