@@ -1,16 +1,32 @@
-// Exact, private fallback. No allocation refs or derived readiness invariant.
-// The unchanged ledger folds EVERY owner invoice, including non-matching rows:
-// dropping those changes JS string/NaN arithmetic on legacy payloads.
+// Private exact fallback. Admission limits are refusal bounds, not capacity acceptance.
 import type {GymState} from './domain.ts';
 import {memberCredit} from './member-ledger.ts';
 type Q={query(sql:string,v?:unknown[]):Promise<{rows:unknown[]}>};
 export const PRIVATE_CREDIT_INVOICE_CAP=10000;
+export const PRIVATE_CREDIT_BYTES=2*1024*1024;
+export const PRIVATE_CREDIT_FOLD_UNITS=2000000;
+export const PRIVATE_CREDIT_FOLD_BYTES=8*1024*1024;
 export async function exactPrivateCredit(c:Q,owner:string,payments:GymState['payments'],member:string,branch:string){
- if(!payments.some(p=>p.member===member&&p.branch===branch&&p.creditable&&!p.voided))return{status:'ok',credit:0} as const;
- const rows=(await c.query(`SELECT position,payload->'allocations' AS allocations,payload->'voided' AS voided FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices' ORDER BY position,entity_id LIMIT ${PRIVATE_CREDIT_INVOICE_CAP+1}`,[owner])).rows;
- if(rows.length>PRIVATE_CREDIT_INVOICE_CAP)return{status:'unavailable',reason:'credit-invoice-cap'} as const;
- const positions=new Set<unknown>();for(const row of rows){const p=(row as {position:unknown}).position;if(positions.has(p))return{status:'unavailable',reason:'credit-order-ambiguous'} as const;positions.add(p);}
- const credit=memberCredit({payments,invoices:rows} as unknown as GymState,member,branch);
+ const selected=payments.filter(p=>p.member===member&&p.branch===branch&&p.creditable&&!p.voided);
+ if(!selected.length)return{status:'ok',credit:0} as const;
+ // One statement/snapshot: never check bytes then fetch a changed larger projection.
+ // A refused budget emits only metadata, not the oversized allocation payload.
+ const rows=(await c.query(`WITH projected AS MATERIALIZED (
+ SELECT position,entity_id,payload->'allocations' AS allocations,payload->'voided' AS voided
+ FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'
+ ORDER BY position,entity_id LIMIT ${PRIVATE_CREDIT_INVOICE_CAP+1}
+ ), budget AS (SELECT count(*) AS budget_rows,coalesce(sum(octet_length(coalesce(allocations::text,''))+octet_length(coalesce(voided::text,''))+64),0) AS budget_bytes FROM projected)
+ SELECT budget.budget_rows,budget.budget_bytes,p.position,p.allocations,p.voided
+ FROM budget LEFT JOIN projected p ON budget.budget_rows<=${PRIVATE_CREDIT_INVOICE_CAP} AND budget.budget_bytes<=${PRIVATE_CREDIT_BYTES}
+ ORDER BY p.position,p.entity_id`,[owner])).rows as Array<{budget_rows:string|number;budget_bytes:string|number;position:unknown;allocations:unknown;voided:unknown}>;
+ if(!rows.length)return{status:'unavailable',reason:'credit-budget-missing'} as const;
+ if(Number(rows[0].budget_rows)>PRIVATE_CREDIT_INVOICE_CAP)return{status:'unavailable',reason:'credit-invoice-cap'} as const;
+ if(!Number.isFinite(Number(rows[0].budget_bytes))||Number(rows[0].budget_bytes)>PRIVATE_CREDIT_BYTES)return{status:'unavailable',reason:'credit-byte-cap'} as const;
+ if(Number(rows[0].budget_bytes)*selected.length>PRIVATE_CREDIT_FOLD_BYTES)return{status:'unavailable',reason:'credit-fold-byte-cap'} as const;
+ const invoices=Number(rows[0].budget_rows)===0?[]:rows;
+ let units=invoices.length;const positions=new Set<unknown>();for(const row of invoices){if(positions.has(row.position))return{status:'unavailable',reason:'credit-order-ambiguous'} as const;positions.add(row.position);if(!row.voided){if(!Array.isArray(row.allocations))return{status:'unavailable',reason:'credit-allocation-shape'} as const;units+=row.allocations.length;}}
+ if(units*selected.length>PRIVATE_CREDIT_FOLD_UNITS)return{status:'unavailable',reason:'credit-fold-cap'} as const;
+ const credit=memberCredit({payments,invoices} as unknown as GymState,member,branch);
  if(!Number.isFinite(credit))return{status:'unavailable',reason:'credit-nonfinite'} as const;
  return{status:'ok',credit} as const;
 }
