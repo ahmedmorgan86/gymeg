@@ -1,5 +1,7 @@
 // Byte-bound argument, executable part.
-// Claim: for every value V that JSON.stringify produces from a JS value and that Postgres jsonb accepts,
+// Claim (stored form): for any jsonb value S in the table, however it got there (app write, direct SQL, import, restore),
+//   octet_length(S::text) >= utf8 bytes of JSON.stringify(JSON.parse(S::text)), i.e. of what assembly re-serializes.
+// Claim (JS form): for every value V that JSON.stringify produces from a JS value and that Postgres jsonb accepts,
 //   octet_length(V::jsonb::text) >= utf8 bytes of JSON.stringify(parsed V).
 // Why: (1) jsonb::text adds one space after each ':' and ',' and never removes bytes; key order and duplicate-key
 // collapse do not change size for JS-produced objects. (2) numbers: JS prints the shortest round-trip form; jsonb prints the
@@ -18,6 +20,12 @@ const cases=[0,-0,1,-1,0.1,0.1+0.2,1e21,1e-7,1.5e300,5e-324,Number.MAX_SAFE_INTE
 test('jsonb text size is never below compact JSON bytes',async()=>{
   for(const v of cases){const j=JSON.stringify(v);const r=await db.query('SELECT octet_length($1::jsonb::text) AS n',[j]);
     assert.ok(Number(r.rows[0].n)>=bytes(j),`${j.slice(0,60)}: ${r.rows[0].n} < ${bytes(j)}`);}
+});
+test('stored-form dominance: parse and re-stringify of the stored jsonb text',async()=>{
+  const raw=['{"a":1.0}','{"a":1e400}','{"a":1.50}','[1E2,0.000001e-3]','{"b":1,"a":2,"a":3}','{ "x" : [ 1 , 2 ] }','"\\u00e9\\u2028"','{"n":-0}','{"n":12345678901234567890123}','{"k":"\\ud83d\\ude00"}'];
+  for(const j of raw){const r=await db.query('SELECT $1::jsonb::text AS s',[j]);const s=r.rows[0].s;
+    let reser;try{reser=JSON.stringify(JSON.parse(s));}catch{continue;}
+    assert.ok(bytes(s)>=bytes(reser),`${j}: stored ${bytes(s)} < reserialized ${bytes(reser)}`);}
 });
 test('random fuzz of nested values',async()=>{
   let seed=12345;const rnd=()=>(seed=(seed*1103515245+12345)&0x7fffffff)/0x7fffffff;
