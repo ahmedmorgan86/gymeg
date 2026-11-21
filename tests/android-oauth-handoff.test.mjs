@@ -20,11 +20,19 @@ for (const role of ['members','management']) {
     assert.match(manifest, /android:host="\$\{webHost\}"/);
 
     // The verifier survives activity recreation and process death via
-    // app-private prefs, is single-use, and expires with the server flow.
-    assert.ok(main.includes('takePendingVerifier()'), 'pending verifier recovery');
-    assert.ok(main.includes('remove(PENDING_VERIFIER)'), 'pending verifier is single-use');
+    // app-private prefs, expires with the server flow, and is cleared only
+    // by the matching successful exchange - a malformed or unrelated intent
+    // can never erase it (validated before the proof is even read).
+    assert.ok(main.includes('readPendingVerifier()'), 'pending verifier recovery');
+    assert.ok(main.includes('clearPendingVerifierIfMatches(verifier)'), 'proof cleared only by matching success');
     assert.ok(main.includes('PENDING_TTL_MS=600000L'), 'pending verifier expiry matches flow cookies');
     assert.ok(!main.includes('private String oauthVerifier'), 'no lost-on-recreation in-memory-only verifier');
+    assert.ok(main.indexOf('OAUTH_CLIENT.equals(client)') < main.indexOf('final String verifier=readPendingVerifier()'), 'validation precedes proof read');
+    assert.ok(main.indexOf('setCookie("https://"+HOST,cookie') < main.indexOf('clearPendingVerifierIfMatches(verifier)'), 'clear after bound exchange');
+    assert.ok(!main.includes('takePendingVerifier'), 'no delete-on-read proof');
+    // The proof file is explicitly excluded from backup and device transfer.
+    const rules = readFileSync(new URL('res/xml/data_extraction_rules.xml', base), 'utf8');
+    assert.ok(rules.includes('path="gymeg_oauth.xml"'), 'explicit sharedpref exclusion');
 
     // The flow starts in the system browser, never inside the WebView, and
     // the session arrives only as a Set-Cookie copied into the CookieManager
@@ -35,6 +43,7 @@ for (const role of ['members','management']) {
     // completion callback after the cookie is accepted.
     assert.ok(main.includes('setCookie("https://"+HOST,cookie,new android.webkit.ValueCallback<Boolean>()'), 'cookie handoff with completion callback');
     assert.ok(main.indexOf('onReceiveValue(Boolean accepted)') < main.indexOf('flush();loadHome();'), 'navigation after acceptance');
+    assert.ok(main.indexOf('clearPendingVerifierIfMatches(verifier)') > main.indexOf('Boolean.TRUE.equals(accepted)'), 'proof retained until cookie accepted');
     assert.ok(!/loadUrl\([^)]*code/.test(main), 'no code in WebView URLs');
     assert.ok(!/loadUrl\([^)]*gymos_session/.test(main), 'no session in WebView URLs');
     assert.ok(main.includes('"android-' + role + '"'), 'client tag');

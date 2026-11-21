@@ -2,8 +2,11 @@
 
 Reproducible mapping for the fresh-Supabase rehearsal build. Everything here
 is committed source: `gradle :members:assembleFreshtestDebug` and
-`gradle :manager:assembleFreshtestDebug` rebuild both artifacts byte-for-byte
-from this tree (modulo timestamps). No uncommitted patches are involved.
+`gradle :manager:assembleFreshtestDebug` rebuild both artifacts from this tree with no uncommitted
+patches. Byte-for-byte identity is NOT claimed: the toolchain (JDK 17,
+Gradle 8.13, Android SDK platform/build-tools 36.0.0) and the debug signing
+key are environment properties, not pinned in this repo, so hashes identify
+this build's artifacts rather than a reproducible-build guarantee.
 
 | | Members | Management |
 |---|---|---|
@@ -15,7 +18,7 @@ from this tree (modulo timestamps). No uncommitted patches are involved.
 | google-services.json | src/freshtest/google-services.json | src/freshtest/google-services.json |
 | App label | GymEG أعضاء (تجريبي) | GymEG إدارة (تجريبي) |
 | Signing cert SHA-256 (debug, freshtest scope only) | D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8 | same |
-| APK sha256 (this commit's build) | 8690939ec0be28ae05409ae7486c3b45fbc4a7ae61293eeb59db8b1fd5853d09 | b10a879e94104cee4ea8815f18c36b677301083a8e95b861d689ba452aa25b3d |
+| APK sha256 (this commit's build) | a2426bef2165b207d40b60709662947286c94f72da620a07c82ba3fbcf803ca7 | 49e49dc515bfe0c8122f4478354a8ff72685eb45f672c8a5c7cffe32c8fa53ee |
 
 The debug certificate above is a fresh-test identity only. It is NOT a
 production package identity and must never be registered as one; production
