@@ -49,8 +49,8 @@ export async function readCounters(c:{query(sql:string,values?:unknown[]):Promis
   if(!(await c.query("SELECT to_regclass('gymos.gym_entity_counters') IS NOT NULL AS ok")).rows.some(r=>(r as {ok:boolean}).ok))return null;
   const rows=(await c.query('SELECT collection,row_count,payload_bytes FROM gymos.gym_entity_counters WHERE owner_id=$1',[owner])).rows as {collection:string;row_count:string|number;payload_bytes:string|number}[];
   if(!rows.some(r=>r.collection==='_ready'))return null;
-  const counts:Record<string,number>={};let n=0,bytes=0;for(const r of rows){if(r.collection==='_ready')continue;if(Number(r.row_count)<0||Number(r.payload_bytes)<0)return null; // corrupt or half-applied counters: fail closed
-    counts[r.collection]=Number(r.row_count);n+=Number(r.row_count);bytes+=Number(r.payload_bytes);}
+  const counts:Record<string,number>={};let n=0,bytes=0;for(const r of rows){if(r.collection==='_ready')continue;const rc=Number(r.row_count),pb=Number(r.payload_bytes);if(!Number.isSafeInteger(rc)||!Number.isSafeInteger(pb)||rc<0||pb<0)return null; // corrupt or half-applied counters: fail closed
+    counts[r.collection]=rc;n+=rc;bytes+=pb;if(!Number.isSafeInteger(n)||!Number.isSafeInteger(bytes))return null;}
   return{counts,rows:n,bytes};
 }
 export function checkQuery(q:SliceQuery){

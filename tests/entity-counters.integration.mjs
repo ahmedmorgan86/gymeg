@@ -133,3 +133,13 @@ test('lifecycle: a pre-existing owner never becomes ready by deletes; a deleted 
   assert.equal(await be.counters('P'),null,'negative counter: fail closed');
   await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='P'");
 });
+
+test('counter reads reject unsafe integers and corrupt values',async()=>{
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('U','{}',1,'x')");
+  for(const [rc,pb] of [['9007199254740993','0'],['0','9223372036854775807'],['5','-1']]){
+    await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='U' AND collection='visits'");
+    await db.query("INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) VALUES('U','visits',$1,$2)",[rc,pb]);
+    assert.equal(await be.counters('U'),null,rc+'/'+pb);
+  }
+  await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='U'");
+});
