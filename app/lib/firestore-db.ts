@@ -40,6 +40,11 @@ function cachedSpace(owner: string, revision: number): GymState | null {
   return structuredClone(hit.state);
 }
 
+/** A copy of the cached assembled state for exactly this revision, or null. */
+export function firestoreCachedSpace(owner: string, revision: number): GymState | null {
+  return cachedSpace(owner, revision);
+}
+
 /** Reads only the state document: the cheapest way to learn an owner's revision. */
 export async function firestoreReadRevision(owner: string): Promise<number> {
   const db = getFirestoreDb();

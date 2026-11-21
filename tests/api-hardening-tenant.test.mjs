@@ -19,6 +19,7 @@ registerHooks({
       export const sameOrigin=request=>request.headers.get('origin')===new URL(request.url).origin;
       export const context=async()=>globalThis.__hardeningContext;
       export const readSpace=async()=>({state:{members:[{id:'m1',branch:'main',archived:false,demo:false}],branches:[{id:'main'}]},revision:0});
+      export const readSpaceSlice=readSpace;export const readSpaceMeta=readSpace;export const readMemberSpace=readSpace;export const readRevision=async()=>0;export const readSpaceForPacket=async()=>({current:await readSpace(),photoVersions:undefined});
       export const packet=()=>({ok:true});
       export const hash=async value=>value;
       export const administrator=async()=>true;
@@ -35,6 +36,8 @@ registerHooks({
     if (url.endsWith('/app/lib/firebase-member-auth.ts')) return module('export const memberPortalRef=()=>{throw Error("unexpected Firestore")};export const firebaseMemberLicense=async()=>null;');
     if (url.endsWith('/app/lib/entity-store.ts')) return module('export const persistSpace=async()=>true;');
     if (url.endsWith('/app/lib/domain.ts')) return module('export class RuleError extends Error {} export const applyOperation=()=>({});');
+    // The hot path is default-off and covered at the real POST boundary by workspace-post.integration.mjs; this suite only stubs it out of the import graph.
+    if (url.endsWith('/app/lib/hot-route.ts')) return module('export const tryHotOperation=async()=>null;');
     if (url.endsWith('/app/lib/access.ts')) return module('export const receptionPermitted=()=>true;');
     if (url.endsWith('/app/lib/workspace-error.ts')) return module('export const workspaceUniqueError=()=>null;');
     if (url.endsWith('/app/lib/web-push.ts')) return module('export const sendCommunityPush=async()=>{};');

@@ -27,6 +27,15 @@ const testSuites = [
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
+  { name: 'Entity counters and size bound across every writer, recount, gate (PGlite)', file: 'tests/entity-counters.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'Hot write cannot pass the 20,000,000-byte rule (reopened visit with huge timestamp)', file: 'tests/hot-size.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'Member summary inputs: every writer marks dirty, refresh is exact vs memberSummary, fail-closed bounds', file: 'tests/member-summary-store.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'jsonb byte count is never below compact JSON bytes', file: 'tests/jsonb-byte-bound.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'Hot-operation slice persist parity against the full persist path (PGlite)', file: 'tests/hot-persist.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'GET member-history order=at: keyset parity with the profile sort, ties, scope, fail closed (PGlite)', file: 'tests/member-visits-at.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'GET /api/workspace/member-history flag, scope, paging and legacy layout (PGlite)', file: 'tests/member-history-route.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'POST /api/workspace hot path vs full path over a real entity-layout club (PGlite)', file: 'tests/workspace-post.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'Barcode API over a real entity-layout club (slice backend, no state alias)', file: 'tests/barcode-entity.integration.mjs', loader: './tests/barcode-entity-loader.mjs' },
   { name: 'Report API timezone and scope contract', file: 'tests/report-api.integration.mjs', loader: './tests/report-api-loader.mjs' },
 ];
 

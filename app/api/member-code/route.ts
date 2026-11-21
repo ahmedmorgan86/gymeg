@@ -1,6 +1,6 @@
 import {createHash,randomBytes} from 'node:crypto';
 import {syncMemberAccess} from '../../lib/sync-member-access';
-import {context,readSpace,reply,sameOrigin} from '../../lib/server-workspace';
+import {context,readSpaceSlice,reply,sameOrigin} from '../../lib/server-workspace';
 import {withScope} from '../../lib/database';
 import {assertRequestTenant} from '../../lib/request-tenant';
 import {licenseState,CommercialError} from '../../lib/licensing';
@@ -18,7 +18,7 @@ export async function POST(request:Request){try{
  if(ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);
  const raw=await request.text();
  if(raw.length>2048)return reply({error:'invalid'},413);
- const body=JSON.parse(raw),{state}=await readSpace(ctx.owner);
+ const body=JSON.parse(raw),{state}=await readSpaceSlice(ctx.owner,{collections:['members'],ids:typeof body.member==='string'?[body.member]:[]});
  const hasAccess=['owner','manager'].includes(ctx.role)||
    receptionPermitted(ctx.role,'member.details',state.settings?.receptionGrants?.[ctx.user.userId])||
    receptionPermitted(ctx.role,'member.register',state.settings?.receptionGrants?.[ctx.user.userId]);

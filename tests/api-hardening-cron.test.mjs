@@ -20,7 +20,7 @@ registerHooks({
       });
       export const withScope=async(_owner,fn)=>fn({query:async()=>({rows:[]})});
     ` };
-    if (url.endsWith('/app/lib/server-workspace.ts')) return { format: 'module', shortCircuit: true, source: 'export const reply=(data,status=200)=>Response.json(data,{status});export const readSpace=async()=>({state:{}});' };
+    if (url.endsWith('/app/lib/server-workspace.ts')) return { format: 'module', shortCircuit: true, source: 'export const reply=(data,status=200)=>Response.json(data,{status});export const readSpace=async()=>({state:{}});export const readSpaceSlice=(...a)=>readSpace(...a),readSpaceMeta=(...a)=>readSpace(...a),readMemberSpace=(...a)=>readSpace(...a),readSpaceForPacket=async(...a)=>({current:await readSpace(...a),photoVersions:undefined}),readRevision=async(...a)=>(await readSpace(...a)).revision;' };
     if (url.endsWith('/app/lib/whatsapp-server.ts')) return { format: 'module', shortCircuit: true, source: 'export const runWhatsApp=async()=>({sent:0});' };
     return next(url, context);
   }

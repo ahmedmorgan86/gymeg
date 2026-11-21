@@ -3,7 +3,7 @@ import { getFirestoreDb } from './firestore-db.ts';
 import { firebaseMemberLicense, memberSessionRef, phoneDigest, pinMatches, recordMemberAttempt, registerMemberSession } from './firebase-member-auth';
 import { normalizeMemberPhone } from './member-phone';
 import { licenseState, type License } from './licensing';
-import { readSpace } from './server-workspace';
+import { readSpaceSlice } from './server-workspace';
 
 export async function firebaseMemberLogin(phone: string, pin: string, ip: string, selected: string) {
   const phoneHash = phoneDigest(phone);
@@ -14,7 +14,7 @@ export async function firebaseMemberLogin(phone: string, pin: string, ip: string
   for (const doc of snapshot.docs) {
     const account = doc.data();
     if (account.revoked || account.inactive || !pinMatches(pin, account)) continue;
-    const { state } = await readSpace(account.owner_id);
+    const { state } = await readSpaceSlice(account.owner_id, { collections: ['members'], ids: [String(account.member_id)] });
     if (!state.members.some(m => m.id === account.member_id && m.branch === account.branch && !m.demo && !m.archived && normalizeMemberPhone(m.phone) === phone)) continue;
     const license = await firebaseMemberLicense(account.owner_id);
     if (license && !licenseState(license as License).writable) continue;
