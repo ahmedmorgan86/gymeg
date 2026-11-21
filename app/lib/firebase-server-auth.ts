@@ -135,6 +135,10 @@ export function firebaseServerAuth(store: CookieStore) {
         return { data: { session: null }, error: { message: 'Invalid credentials', status: 400 } };
       },
 
+      async signInWithIdTokenForHandoff(_provider: 'google', _idToken: string) {
+        return { data: { sessionValue: null }, error: { message: 'Invalid credentials', status: 400 } };
+      },
+
       async verifyEmailToken(_tokenHash: string, _type: string) {
         return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
       },

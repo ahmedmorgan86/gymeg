@@ -30,6 +30,21 @@ public final class MainActivity extends Activity {
  private android.widget.ImageView splash; private WebView web; private ProgressBar progress; private LinearLayout error;
  private static boolean trusted(Uri uri){return uri!=null&&"https".equals(uri.getScheme())&&HOST.equalsIgnoreCase(uri.getHost())&&(uri.getPort()==-1||uri.getPort()==443)&&uri.getUserInfo()==null;}
  private static boolean memberPage(Uri uri){String path=uri.getPath();return trusted(uri)&&path!=null&&(path.equals("/member")||path.startsWith("/member/"));}
+ // Google sign-in runs in the system browser (Chrome cookies, not the
+ // WebView's). The app sends only a SHA-256 challenge here; the matching
+ // verifier stays in memory and is presented once at the handoff exchange.
+ private static final String OAUTH_CLIENT="android-members";
+ private String oauthVerifier;
+ private static boolean oauthStart(Uri uri){return trusted(uri)&&"/api/auth/google".equals(uri.getPath());}
+ private static boolean handoffLink(Uri uri){return trusted(uri)&&"/auth/mobile/callback".equals(uri.getPath());}
+ private static String newVerifier(){byte[] b=new byte[32];new java.security.SecureRandom().nextBytes(b);return android.util.Base64.encodeToString(b,android.util.Base64.URL_SAFE|android.util.Base64.NO_WRAP|android.util.Base64.NO_PADDING);}
+ private static String sha256Base64Url(String s){try{return android.util.Base64.encodeToString(java.security.MessageDigest.getInstance("SHA-256").digest(s.getBytes("UTF-8")),android.util.Base64.URL_SAFE|android.util.Base64.NO_WRAP|android.util.Base64.NO_PADDING);}catch(Exception e){return "";}}
+ private void openExternal(Uri uri){if(uri==null||!"https".equals(uri.getScheme())||uri.getHost()==null||uri.getUserInfo()!=null||(uri.getPort()!=-1&&uri.getPort()!=443))return;try{startActivity(new android.content.Intent(android.content.Intent.ACTION_VIEW,uri));}catch(Exception e){android.widget.Toast.makeText(this,"تعذر فتح الرابط / Cannot open link",android.widget.Toast.LENGTH_LONG).show();}}
+ private void startOAuth(Uri uri){oauthVerifier=newVerifier();Uri out=uri.buildUpon().appendQueryParameter("client",OAUTH_CLIENT).appendQueryParameter("hc",sha256Base64Url(oauthVerifier)).build();openExternal(out);}
+ // Returns true when the intent carried a handoff link (whether or not the
+ // exchange later succeeds); the caller then skips the default loadHome().
+ private boolean handleHandoffIntent(android.content.Intent intent){if(intent==null)return false;Uri uri=intent.getData();if(uri==null||!handoffLink(uri))return false;intent.setData(null);String code=uri.getQueryParameter("code");String client=uri.getQueryParameter("client");final String verifier=oauthVerifier;oauthVerifier=null;if(code==null||!code.matches("[A-Za-z0-9_-]{43}")||!OAUTH_CLIENT.equals(client)||verifier==null){web.loadUrl("https://"+HOST+"/sign-in?error=google_failed");return true;}exchange(code,verifier);return true;}
+ private void exchange(final String code,final String verifier){new Thread(new Runnable(){@Override public void run(){try{java.net.HttpURLConnection c=(java.net.HttpURLConnection)new java.net.URL("https://"+HOST+"/api/auth/mobile/exchange").openConnection();c.setRequestMethod("POST");c.setRequestProperty("Content-Type","application/json");c.setDoOutput(true);c.setConnectTimeout(15000);c.setReadTimeout(15000);String body="{\"code\":\""+code+"\",\"verifier\":\""+verifier+"\",\"client\":\""+OAUTH_CLIENT+"\"}";c.getOutputStream().write(body.getBytes("UTF-8"));int status=c.getResponseCode();final String cookie=c.getHeaderField("Set-Cookie");c.disconnect();if(status==204&&cookie!=null&&cookie.startsWith("gymos_session=")){runOnUiThread(new Runnable(){@Override public void run(){CookieManager.getInstance().setCookie("https://"+HOST,cookie);CookieManager.getInstance().flush();loadHome();}});}else{runOnUiThread(new Runnable(){@Override public void run(){web.loadUrl("https://"+HOST+"/sign-in?error=google_failed");}});}}catch(Exception e){runOnUiThread(new Runnable(){@Override public void run(){web.loadUrl("https://"+HOST+"/sign-in?error=google_failed");}});}}}).start();}
  @Override public void onCreate(Bundle state){super.onCreate(state);
   getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
   FrameLayout root=new FrameLayout(this);root.setBackgroundColor(Color.rgb(18,16,28));setContentView(root);
@@ -44,7 +59,7 @@ public final class MainActivity extends Activity {
   CookieManager.getInstance().setAcceptCookie(true);CookieManager.getInstance().setAcceptThirdPartyCookies(web,false);
   web.setWebChromeClient(new WebChromeClient(){@Override public void onProgressChanged(WebView v,int value){if(value==100&&splash!=null)splash.setVisibility(View.GONE);progress.setProgress(value);progress.setVisibility(value<100?View.VISIBLE:View.GONE);}});
   web.setWebViewClient(new WebViewClient(){
-   @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){if(trusted(request.getUrl())&&request.getUrl().getPath()!=null&&request.getUrl().getPath().endsWith(".apk")){android.widget.Toast.makeText(MainActivity.this,"تطبيق Android مثبت بالفعل / Android app is already installed",android.widget.Toast.LENGTH_LONG).show();return true;}return !memberPage(request.getUrl());}
+   @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest request){if(oauthStart(request.getUrl())){startOAuth(request.getUrl());return true;}if(trusted(request.getUrl())&&request.getUrl().getPath()!=null&&request.getUrl().getPath().endsWith(".apk")){android.widget.Toast.makeText(MainActivity.this,"تطبيق Android مثبت بالفعل / Android app is already installed",android.widget.Toast.LENGTH_LONG).show();return true;}return !memberPage(request.getUrl());}
    @Override public WebResourceResponse shouldInterceptRequest(WebView v,WebResourceRequest request){Uri u=request.getUrl();WebResourceResponse notification=NotificationBridge.intercept(MainActivity.this,u);if(notification!=null)return notification;String asset=u.toString();if(trusted(u)||asset.startsWith("blob:https://"+HOST+"/")||(asset.length()<8000000&&(asset.startsWith("data:image/png;base64,")||asset.startsWith("data:image/jpeg;base64,")||asset.startsWith("data:image/webp;base64,")||asset.startsWith("data:audio/wav;base64,")||asset.startsWith("data:audio/mpeg;base64,")||asset.startsWith("data:audio/mp3;base64,")||asset.startsWith("data:audio/ogg;base64,"))))return null;return new WebResourceResponse("text/plain","UTF-8",403,"Blocked",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));}
    @Override public void onReceivedError(WebView v,WebResourceRequest request,WebResourceError e){if(request.isForMainFrame())showError();}
    @Override public void onReceivedHttpError(WebView v,WebResourceRequest request,WebResourceResponse response){if(request.isForMainFrame()&&response.getStatusCode()>=400)showError();}
@@ -53,11 +68,11 @@ public final class MainActivity extends Activity {
   });
   // Never restore an externally supplied URL or save HTML/account data in the activity bundle.
   if(android.os.Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,new android.window.OnBackInvokedCallback(){@Override public void onBackInvoked(){handleBack();}});
-  refreshFcmToken();loadHome();
+  refreshFcmToken();if(!handleHandoffIntent(getIntent()))loadHome();
  }
  private void refreshFcmToken(){try{com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token->getSharedPreferences("gymeg_fcm",MODE_PRIVATE).edit().putString("token",token).apply());}catch(Exception ignored){}}
  private void loadHome(){error.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);web.loadUrl(HOME);}
- @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent!=null&&"com.pushtorq.members.OPEN_FCM".equals(intent.getAction()))loadHome();}
+ @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent==null)return;if(handleHandoffIntent(intent))return;if("com.pushtorq.members.OPEN_FCM".equals(intent.getAction()))loadHome();}
  private void showError(){if(splash!=null)splash.setVisibility(View.GONE);runOnUiThread(new Runnable(){@Override public void run(){progress.setVisibility(View.GONE);web.setVisibility(View.GONE);error.setVisibility(View.VISIBLE);}});}
  private void handleBack(){if(web!=null&&web.canGoBack())web.goBack();else finish();}
  @Override public void onBackPressed(){handleBack();}

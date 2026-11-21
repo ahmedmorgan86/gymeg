@@ -89,13 +89,13 @@ const EMAIL_NOT_CONFIRMED = { code: 'email_not_confirmed', message: 'Email not v
 
 type SessionPayload = { access_token?: unknown; refresh_token?: unknown; user?: Record<string, unknown> };
 
-// Persists a token pair from a grant response. Fails (no cookie) when the
-// pair is missing or the encoded value would exceed the browser cookie
-// budget, and refuses to open a session for an unconfirmed email. GoTrue
-// confirms the address before granting on recovery links too (verify.go's
-// recoverVerify runs before any code or tokens are issued), so no flow
-// needs an unconfirmed exception.
-function openSession(store: CookieStore, payload: SessionPayload): { access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
+// Validates a grant response and returns the encoded gymos_session cookie
+// value without persisting it. Fails when the pair is missing or the encoded
+// value would exceed the cookie budget, and refuses a session for an
+// unconfirmed email. GoTrue confirms the address before granting on recovery
+// links too (verify.go's recoverVerify runs before any code or tokens are
+// issued), so no flow needs an unconfirmed exception.
+function encodeValidatedSession(payload: SessionPayload): { value: string; access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
   if (typeof payload.access_token !== 'string' || typeof payload.refresh_token !== 'string') return null;
   // A session is only opened for a well-formed email identity: GoTrue always
   // returns the user on a token grant, so a missing or malformed one means
@@ -113,8 +113,16 @@ function openSession(store: CookieStore, payload: SessionPayload): { access_toke
     logAuthDiagnostic('session-cookie', null, 'OVERSIZE');
     return { error: UNAVAILABLE };
   }
-  store.set('gymos_session', value, sessionCookieOptions);
-  return { access_token: payload.access_token };
+  return { value, access_token: payload.access_token };
+}
+
+// Persists a validated token pair as the gymos_session cookie. Fails (no
+// cookie) on the same conditions as encodeValidatedSession.
+function openSession(store: CookieStore, payload: SessionPayload): { access_token: string } | { error: typeof EMAIL_NOT_CONFIRMED | typeof UNAVAILABLE } | null {
+  const encoded = encodeValidatedSession(payload);
+  if (!encoded || 'error' in encoded) return encoded;
+  store.set('gymos_session', encoded.value, sessionCookieOptions);
+  return { access_token: encoded.access_token };
 }
 
 export function supabaseServerAuth(store: CookieStore) {
@@ -200,6 +208,29 @@ export function supabaseServerAuth(store: CookieStore) {
         }
         if ('error' in session) return { data: { session: null }, error: session.error };
         return { data: { session }, error: null };
+      },
+
+      // Android system-browser sign-in: identical GoTrue exchange and
+      // validation, but the session is NOT persisted as a cookie (the callback
+      // runs in Chrome, not the WebView). The callback stores the returned
+      // encoded value behind a single-use handoff code instead.
+      async signInWithIdTokenForHandoff(provider: 'google', idToken: string, nonce?: string) {
+        const config = supabaseConfig();
+        if (!config || !idToken) return { data: { sessionValue: null }, error: UNAVAILABLE };
+        const result = await gotrue(config, '/token?grant_type=id_token', { body: nonce ? { provider, id_token: idToken, nonce } : { provider, id_token: idToken } });
+        if (!result.ok) {
+          logAuthDiagnostic('id-token-sign-in', result.status, result.code);
+          if (result.status >= 500 || result.status === 0) return { data: { sessionValue: null }, error: UNAVAILABLE };
+          if (result.code === 'email_not_confirmed') return { data: { sessionValue: null }, error: EMAIL_NOT_CONFIRMED };
+          return { data: { sessionValue: null }, error: { message: 'Invalid credentials', status: 401 } };
+        }
+        const encoded = encodeValidatedSession(result.json);
+        if (!encoded) {
+          logAuthDiagnostic('id-token-session', result.status, 'MISSING_TOKENS');
+          return { data: { sessionValue: null }, error: UNAVAILABLE };
+        }
+        if ('error' in encoded) return { data: { sessionValue: null }, error: encoded.error };
+        return { data: { sessionValue: encoded.value }, error: null };
       },
 
       // Firebase-backend-only entry point; the Google callback route branches
