@@ -27,7 +27,9 @@ export async function POST(request:Request){
   const limit=consumeAuthRateLimit('session:login',request,credentials.email,10);
   if(!limit.allowed)return limited(limit.retryAfter);
   const auth=await serverAuth();const result=await auth.auth.signInWithPassword(credentials);
-  if(result.error){const r=reply({error:loginCode(result.error)},result.error.status===429?429:400);if(result.error.status===429)r.headers.set('Retry-After','60');return r;}
+  // Preserve server-side auth failures as 503 instead of masking them as 400,
+  // so a real service outage is not reported to the user as bad credentials.
+  if(result.error){const status=result.error.status===429?429:(result.error.status??0)>=500?503:400;const r=reply({error:loginCode(result.error)},status);if(result.error.status===429)r.headers.set('Retry-After','60');return r;}
   if(!result.data.session)return reply({error:'auth_failed'},401);
   return reply({ok:true},200);
  }catch{return reply({error:'connection'},503);}
