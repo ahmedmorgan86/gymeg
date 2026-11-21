@@ -15,14 +15,14 @@ export async function exactPrivateCredit(c:Q,owner:string,payments:GymState['pay
  SELECT position,entity_id,payload->'allocations' AS allocations,payload->'voided' AS voided
  FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'
  ORDER BY position,entity_id LIMIT ${PRIVATE_CREDIT_INVOICE_CAP+1}
- ), budget AS (SELECT count(*) AS budget_rows,coalesce(sum(octet_length(coalesce(allocations::text,''))+octet_length(coalesce(voided::text,''))+64),0) AS budget_bytes FROM projected)
- SELECT budget.budget_rows,budget.budget_bytes,p.position,p.allocations,p.voided
+ ), budget AS (SELECT count(*) AS budget_rows,coalesce(sum(octet_length(coalesce(allocations::text,''))+octet_length(coalesce(voided::text,''))+64),0) AS budget_bytes,coalesce(sum(octet_length(coalesce(allocations::text,''))),0) AS budget_fold_bytes FROM projected)
+ SELECT budget.budget_rows,budget.budget_bytes,budget.budget_fold_bytes,p.position,p.allocations,p.voided
  FROM budget LEFT JOIN projected p ON budget.budget_rows<=${PRIVATE_CREDIT_INVOICE_CAP} AND budget.budget_bytes<=${PRIVATE_CREDIT_BYTES}
- ORDER BY p.position,p.entity_id`,[owner])).rows as Array<{budget_rows:string|number;budget_bytes:string|number;position:unknown;allocations:unknown;voided:unknown}>;
+ ORDER BY p.position,p.entity_id`,[owner])).rows as Array<{budget_rows:string|number;budget_bytes:string|number;budget_fold_bytes:string|number;position:unknown;allocations:unknown;voided:unknown}>;
  if(!rows.length)return{status:'unavailable',reason:'credit-budget-missing'} as const;
  if(Number(rows[0].budget_rows)>PRIVATE_CREDIT_INVOICE_CAP)return{status:'unavailable',reason:'credit-invoice-cap'} as const;
  if(!Number.isFinite(Number(rows[0].budget_bytes))||Number(rows[0].budget_bytes)>PRIVATE_CREDIT_BYTES)return{status:'unavailable',reason:'credit-byte-cap'} as const;
- if(Number(rows[0].budget_bytes)*selected.length>PRIVATE_CREDIT_FOLD_BYTES)return{status:'unavailable',reason:'credit-fold-byte-cap'} as const;
+ if(!Number.isFinite(Number(rows[0].budget_fold_bytes))||Number(rows[0].budget_fold_bytes)*selected.length>PRIVATE_CREDIT_FOLD_BYTES)return{status:'unavailable',reason:'credit-fold-byte-cap'} as const;
  const invoices=Number(rows[0].budget_rows)===0?[]:rows;
  let units=invoices.length;const positions=new Set<unknown>();for(const row of invoices){if(positions.has(row.position))return{status:'unavailable',reason:'credit-order-ambiguous'} as const;positions.add(row.position);if(!row.voided){if(!Array.isArray(row.allocations))return{status:'unavailable',reason:'credit-allocation-shape'} as const;units+=row.allocations.length;}}
  if(units*selected.length>PRIVATE_CREDIT_FOLD_UNITS)return{status:'unavailable',reason:'credit-fold-cap'} as const;
