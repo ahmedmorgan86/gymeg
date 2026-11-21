@@ -4,14 +4,14 @@ import {useCallback,useEffect,useRef,useState} from 'react';
 export const memberHistoryClientEnabled=()=>process.env.NEXT_PUBLIC_GYMOS_MEMBER_HISTORY==='1';
 type Row={id?:string;at?:string};
 export default function MemberVisitPager({member,owner,ar,timeZone,pageSize=25}:{member:string;owner:string;ar:boolean;timeZone:string;pageSize?:number}){
- const [rows,setRows]=useState<Row[]>([]),[next,setNext]=useState<number|null>(null),[state,setState]=useState<'loading'|'ok'|'error'>('loading'),started=useRef(0);
- const load=useCallback(async(before?:number)=>{const ticket=++started.current;setState('loading');
+ const [rows,setRows]=useState<Row[]>([]),[next,setNext]=useState<string|null>(null),[state,setState]=useState<'loading'|'ok'|'error'>('loading'),started=useRef(0);
+ const load=useCallback(async(before?:string)=>{const ticket=++started.current;setState('loading');
   for(let attempt=0;attempt<3;attempt++){try{
-   const q=new URLSearchParams({member,collection:'visits',limit:String(pageSize)});if(before!==undefined)q.set('before',String(before));
+   const q=new URLSearchParams({member,collection:'visits',order:'at',limit:String(pageSize)});if(before!==undefined)q.set('cursor',before);
    const r=await fetch('/api/workspace/member-history?'+q,{credentials:'same-origin',headers:owner?{'X-GymOS-Tenant':owner}:{}});
    if(r.status===409)continue; // a write raced the read: retry
-   if(!r.ok)throw Error(String(r.status));const page=await r.json() as {rows:Row[];next:number|null};
-   if(ticket!==started.current)return;setRows(old=>before===undefined?page.rows:[...old,...page.rows]);setNext(page.next);setState('ok');return;
+   if(!r.ok)throw Error(String(r.status));const page=await r.json() as {rows:Row[];nextCursor?:string|null};
+   if(ticket!==started.current)return;setRows(old=>before===undefined?page.rows:[...old,...page.rows]);setNext(page.nextCursor??null);setState('ok');return;
   }catch{break;}}
   if(ticket===started.current)setState('error');
  },[member,owner,pageSize]);

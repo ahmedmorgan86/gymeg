@@ -37,6 +37,9 @@ export interface SliceBackend{
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
   /** True when some member row has more than 1000 freezes (the full path rejects every operation on such a club). Postgres answers from a tiny partial index. */
   hasOversizedFreezes(owner:string):Promise<boolean>;
+  /** A member's visits ordered like the profile list: `at` descending (plain code-point order), ties in position order. Returns null when it cannot prove that order
+   * (Firestore, or any scoped visit whose `at` is not the fixed ISO form the server writes), so callers fail closed. */
+  visitsByAt(owner:string,q:{member:string;branches?:string[]|null;cursor?:{at:string;position:number};limit:number}):Promise<Entity[]|null>;
 }
 export const MAX_SLICE=500;
 export function checkQuery(q:SliceQuery){
@@ -74,6 +77,14 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     },
     async photo(owner,memberId){return scope(owner,async c=>{const r=(await c.query('SELECT content FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,memberId])).rows[0] as {content:string}|undefined;return r?.content??null;});},
     async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
+    async visitsByAt(owner,q){return scope(owner,async c=>{
+      const base:unknown[]=[owner,q.member];let br='';if(q.branches){if(!q.branches.length)return [];base.push(q.branches);br=`AND branch=ANY($${base.length}::text[])`;}
+      const bad=await c.query(`SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND (jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$') LIMIT 1`,base);
+      if(bad.rows.length)return null;
+      const values=[...base];let cur='';if(q.cursor){values.push(q.cursor.at,q.cursor.position);cur=`AND ((payload->>'at') COLLATE "C"<$${values.length-1}::text COLLATE "C" OR ((payload->>'at') COLLATE "C"=$${values.length-1}::text COLLATE "C" AND position>$${values.length}))`;}
+      values.push(Math.max(1,Math.min(MAX_SLICE,Math.floor(q.limit))));
+      return (await c.query(`SELECT collection,entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} ${cur} ORDER BY (payload->>'at') COLLATE "C" DESC, position ASC LIMIT $${values.length}`,values)).rows as Entity[];
+    });},
     async hasOversizedFreezes(owner){return scope(owner,async c=>((await c.query("SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000 LIMIT 1",[owner])).rows.length>0));},
     async count(owner,collection,branches){return scope(owner,async c=>{const r=(await c.query(branches?'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND branch=ANY($3::text[])':'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2',branches?[owner,collection,branches]:[owner,collection])).rows[0] as {n:number};return Number(r.n);});},
   };
@@ -119,6 +130,7 @@ export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):Slic
     async photo(owner,memberId){const s=await getDb().collection('gym_photos').doc(`${owner}_${memberId}`).get();return s.exists?String((s.data() as {content:string}).content):null;},
     async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
     async hasOversizedFreezes(){return true;}, // fail closed: Firestore never takes the hot path
+    async visitsByAt(){return null;}, // fail closed: no proven at-order on Firestore
     async count(owner,collection,branches){
       const db=getDb();let total=0;
       const groups=branches?Array.from({length:Math.ceil(branches.length/30)},(_,i)=>branches.slice(i*30,i*30+30)):[null];

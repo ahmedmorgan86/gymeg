@@ -11,3 +11,6 @@ CREATE INDEX IF NOT EXISTS gym_entities_owner_member_rows
 CREATE INDEX IF NOT EXISTS gym_entities_oversized_freezes
   ON gymos.gym_entities(owner_id)
   WHERE collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000;
+
+-- Member visit history in the profile's display order (at descending in plain code-point order, ties by position). HELD with the rest of this file.
+CREATE INDEX IF NOT EXISTS gym_entities_visit_member_at ON gymos.gym_entities (owner_id,(payload->>'member'),((payload->>'at') COLLATE "C") DESC,position) WHERE collection='visits';

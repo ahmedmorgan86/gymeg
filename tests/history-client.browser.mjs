@@ -9,7 +9,7 @@ const {GET}=await import('../app/api/workspace/member-history/route.ts');const {
 process.env.GYMOS_MEMBER_HISTORY='1';
 const license={mode:'perpetual',status:'active',starts_at:'2026-01-01T00:00:00Z',ends_at:null,maintenance_until:null};
 globalThis.__qaContext={owner:'A',tenantId:'t-A',role:'owner',branches:null,license,user:{userId:'staff',displayName:'tester'}};
-const s=club(1);{const mm=s.members[0];for(let i=0;i<23;i++){const day='2026-02-'+String(1+(i%27)).padStart(2,'0');s.visits.push({id:'pg'+i,member:mm.id,branch:mm.branch,day,at:day+'T09:00:00.000Z',leftAt:day+'T10:00:00.000Z'});}}
+const s=club(1);{const mm=s.members[0];for(let i=0;i<23;i++){const day='2026-02-'+String(1+(i%27)).padStart(2,'0');s.visits.push({id:'pg'+i,member:mm.id,branch:mm.branch,day,at:day+'T09:00:00.000Z',leftAt:day+'T10:00:00.000Z'});}mm.__late=1;s.visits.unshift({id:'late',member:mm.id,branch:mm.branch,day:'2026-03-01',at:'2026-03-01T09:00:00.000Z',leftAt:'2026-03-01T10:00:00.000Z'});}
 const {metadata,entities}=splitState(s);
 await real.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',['A',JSON.stringify({...metadata,_entityStorage:1}),'2026-03-15']);
 for(const e of entities)await real.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',['A',e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
@@ -28,11 +28,11 @@ try{
  await page.waitForFunction(()=>document.querySelectorAll('[data-testid=visit-pager] p').length>=5,{timeout:8000}).catch(async()=>{console.log('HTML',(await page.content()).slice(-600),'calls',apiCalls);throw Error('first page');});
  check(await count()===5,`first page shows 5 rows (member has ${m.n} visits)`);check(apiCalls.length===1&&/limit=5/.test(apiCalls[0]),'one bounded request: '+apiCalls[0]);
  await page.screenshot({path:'/downloads/history-client-page1.png'});
- const expected=s.visits.filter(v=>v.member===m.x.id).map(v=>v.at).reverse() /* route contract: newest position first */;let shown=5;
+ const expected=s.visits.filter(v=>v.member===m.x.id).slice().sort((a,b)=>b.at.localeCompare(a.at)).map(v=>v.at) /* the legacy profile order */;let shown=5;
  while(shown<m.n){const btn=await page.$('button');check(!!btn,'Show older present while rows remain');if(!btn)break;await btn.click();const want=Math.min(m.n,shown+5);await page.waitForFunction(w=>document.querySelectorAll('[data-testid=visit-pager] p:not([aria-busy])').length>=w,{},want);shown=want;}
  const texts=await page.$$eval('[data-testid=visit-pager] p',e=>e.map(x=>x.textContent));
  const fmt=at=>new Date(at).toLocaleString('en-GB',{timeZone:'Africa/Cairo'});
- check(texts.length===m.n&&texts.every((t,i)=>t===fmt(expected[i])),'all pages, newest first, equal the member visit list ('+texts.length+' rows)');
+ check(texts.length===m.n&&texts.every((t,i)=>t===fmt(expected[i])),'all pages, in the legacy at-descending order ('+texts.length+' rows)');
  check(!await page.$('[data-testid=visit-pager] > button'),'no Show older button after the last page');
  await page.screenshot({path:'/downloads/history-client-all.png'});
  // error path with retry
