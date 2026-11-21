@@ -23,7 +23,7 @@ async function seed(owner,state){
 }
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
 const {readOpenVisits}=await import('../app/lib/open-visits-page.ts');
-const {checkinProfile,checkinProfileFromOpen,checkinPick}=await import('../app/lib/checkin-profile.ts');
+const {checkinProfile,checkinProfileFromOpen,checkinPick,openNow,consumedMap}=await import('../app/lib/checkin-profile.ts');
 const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
 let sd=11;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
 test('open visits == legacy !leftAt filter; popup selection == checkinProfile over consecutive states; falsy leftAt fails closed',async()=>{
@@ -69,4 +69,20 @@ test('failed interval keeps the previous map; a member registered after the pack
   assert.equal(checkinPick(new Map(),o2,new Set(['m3']),NOW+500000,[]).member,null);
   // documented: legacy before also holds closed ids (id unchanged => not new); lazy only has open ids (=> new). Visits are never reopened by any operation.
   assert.equal(checkinPick(new Map(),[{id:'z',member:'m1',at:t(1000)}],new Set(['m1']),NOW).member,'m1');
+});
+
+test('delayed read / retry use elapsed server time and never consume future entries unseen',()=>{
+  const SERVER=Date.parse('2026-03-14T12:00:00.000Z'),RECV=5_000_000,iso=ms=>new Date(SERVER+ms).toISOString();
+  // packet received at RECV; the open read answers 90s later (or a retry at 95s): now must be server+90s / +95s, not the frozen server time
+  assert.equal(openNow(SERVER,RECV,RECV+90000),SERVER+90000);assert.equal(openNow(undefined,RECV,RECV+95000),RECV+95000);
+  const before=new Map(),members=new Set(['m1']);
+  const checkin=[{id:'a',member:'m1',at:iso(150000)}]; // activated 150s after the packet's serverNow
+  // frozen-clock (old behaviour) at +0: 150s is beyond now+60s -> excluded; with elapsed time at +95s it is inside [now-120s, now+60s]
+  assert.equal(checkinPick(before,checkin,members,SERVER).member,null);
+  assert.equal(checkinPick(before,checkin,members,openNow(SERVER,RECV,RECV+95000)).member,'m1');
+  // an entry beyond now+60s is NOT remembered as seen, so it still counts as new when the window reaches it
+  const map=consumedMap(checkin,SERVER);assert.equal(map.size,0);
+  assert.equal(checkinPick(map,checkin,members,SERVER+100000).member,'m1');
+  // an entry already inside the window is remembered (no repeat popup)
+  assert.equal(checkinPick(consumedMap(checkin,SERVER+100000),checkin,members,SERVER+110000).member,null);
 });
