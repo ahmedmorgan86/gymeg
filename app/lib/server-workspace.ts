@@ -1,7 +1,8 @@
 import {commercialEnabled,commercialContext} from './commercial';
 import {trialClosed,CommercialError,type License} from './licensing';
 import {readEntitySpace} from './entity-store';
-import {db} from './database';
+import {db,withScope} from './database';
+import {readMemberPortalSlice} from './member-portal-slice';
 import {useFirestorePersistence,firestoreReadSpace,firestoreCachedSpace} from './firestore-db.ts';
 import {cookies} from 'next/headers';
 import {getChatGPTUser} from '../chatgpt-auth';
@@ -21,7 +22,7 @@ export async function readSpaceMeta(owner:string){return (await readSpaceSlice(o
 /** Only the requested collections; falls back to the full read on legacy layout, so callers must not rely on other collections being empty. */
 export async function readSpaceSlice(owner:string,query:SliceQuery|null){const sliced=await readSlice(sliceBackend(),owner,query,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
 /** What the member portal view needs for one member (see readMemberSlice); full read on legacy layout. */
-export async function readMemberSpace(owner:string,memberId:string,branch:string){const sliced=await readMemberSlice(sliceBackend(),owner,memberId,branch,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
+export async function readMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number}>{if(portalNow&&process.env.GYMOS_MEMBER_PORTAL_READS==='1'&&!useFirestorePersistence()){try{const portal=await readMemberPortalSlice(sliceBackend(),withScope,{owner,member:memberId,branch,now:portalNow});if(portal)return portal;}catch{/* Exact existing hydration remains the fallback. */}}const sliced=await readMemberSlice(sliceBackend(),owner,memberId,branch,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
 /**
  * What GET /api/workspace needs: only the collections packet() will ship to this
  * caller (their branches, their role), never events/receipts, and photo versions
