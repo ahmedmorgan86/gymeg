@@ -1,4 +1,5 @@
 import {readFileSync, writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {validateBackup} from '../app/lib/backup.ts';
 
 // Offline demo-dataset reducer: shrinks the fictional 'sample-full-' demo
@@ -43,14 +44,33 @@ if (state.trainingSessions) {
   state.trainingSessions = drop('trainingSessions', state.trainingSessions, (r) => !keptAssignments.has(r.assignment));
 }
 if (state.classes) {
+  // Demo classes stay even when emptied: removing them deletes the whole
+  // class section, and the generator itself seeds some classes empty.
   for (const c of state.classes) {
     c.members = (c.members ?? []).filter((id) => !removed.has(id));
     c.waitlist = (c.waitlist ?? []).filter((id) => !removed.has(id));
     c.charges = (c.charges ?? []).filter((ch) => !removed.has(ch.member));
   }
-  state.classes = drop('classes', state.classes, (c) => c.id.startsWith(DEMO) && c.members.length === 0 && c.waitlist.length === 0);
 }
-if (state.events) state.events = drop('events', state.events, (r) => r.id.startsWith(DEMO) || removed.has(r.subject));
+// Nested subsystem references the top-level cleanup misses.
+if (state.community?.messages) state.community.messages = drop('communityMessages', state.community.messages, (r) => removed.has(r.member));
+if (state.competitions?.results) state.competitions.results = drop('competitionResults', state.competitions.results, (r) => removed.has(r.member));
+if (state.engagement) {
+  for (const key of ['consents', 'sms', 'tickets']) {
+    if (state.engagement[key]) state.engagement[key] = drop('engagement.' + key, state.engagement[key], (r) => removed.has(r.member));
+  }
+  for (const d of state.engagement.devices ?? []) {
+    if (d.mappings) d.mappings = d.mappings.filter((m) => !removed.has(m.member));
+  }
+}
+// Events: drop only events ABOUT removed members (subjects can be compound,
+// e.g. pulse-v1|expired|<member-id>|...). Workspace and demo-section events,
+// including the demo.complete seed marker, stay so the activity log survives.
+if (state.events) {
+  const removedList = [...removed];
+  const aboutRemoved = (subject) => typeof subject === 'string' && removedList.some((id) => subject.includes(id));
+  state.events = drop('events', state.events, (r) => aboutRemoved(r.subject));
+}
 if (stripPhotos) {
   let stripped = 0;
   for (const m of state.members) if (m.id.startsWith(DEMO) && m.photo) { delete m.photo; stripped++; }
@@ -63,6 +83,7 @@ if (doc.state) doc.state = state; else Object.assign(doc, state);
 const afterBytes = JSON.stringify(doc).length;
 console.log(JSON.stringify({...counts, valid: true, beforeBytes, afterBytes, savedBytes: beforeBytes - afterBytes}, null, 2));
 if (out) {
+  if (doc && typeof doc.digest === 'string') doc.digest = createHash('sha256').update(JSON.stringify(doc.state)).digest('hex');
   writeFileSync(out, JSON.stringify(doc));
   console.log('Wrote ' + out);
 }

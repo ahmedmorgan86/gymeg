@@ -1,4 +1,5 @@
 import {readFileSync, writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import sharp from 'sharp';
 
 // Offline backup-image compressor: re-encodes the base64 data-URL photos
@@ -51,6 +52,7 @@ console.log(JSON.stringify({images: report.length, converted: totals.converted, 
 if (outIndex > 0) {
   const out = process.argv[outIndex + 1];
   if (!out) throw Error('--write needs an output path');
+  if (doc && typeof doc.digest === 'string') doc.digest = createHash('sha256').update(JSON.stringify(doc.state)).digest('hex');
   writeFileSync(out, JSON.stringify(doc));
   console.log('Wrote ' + out);
 }
