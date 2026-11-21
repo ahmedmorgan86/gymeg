@@ -27,7 +27,7 @@ const busy=(e:unknown)=>['55P03','40001'].includes((e as {code?:string})?.code??
 type Rows={member_id:string;payload:unknown}[];
 /** Recompute the listed members under the owner refresh lock. Re-reads everything the computation depends on (marks, stored rows and the MEMBER rows themselves)
  * after the lock, so a period or profile change committed since the caller's read can never be stored stale with its mark cleared. */
-async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candidate>):Promise<Refusal|null>{
+async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candidate>,asOf?:string):Promise<Refusal|null>{
   if(!need.length)return null;
   const k=await bound(c,owner);if(!k)return 'over-state-bound';
   // The body runs inside a savepoint: a lock timeout (55P03) or serialization failure (40001) aborts the statement, and only ROLLBACK TO leaves the caller's
@@ -47,7 +47,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     }
     const todo:string[]=[];
     for(const id of need){const m=members.get(id);if(!m)continue; // deleted meanwhile: not a candidate
-      if(gens.has(id)||!have.has(id))todo.push(id);else out.set(id,{member:m,stored:have.get(id)!});} // refreshed by someone else while we waited
+      if(gens.has(id)||!have.has(id)||have.get(id)!.v!==2)todo.push(id);else out.set(id,{member:m,stored:have.get(id)!});} // refreshed by someone else while we waited
     if(!todo.length){await c.query('RELEASE SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return null;}
     const rowsOf=async(coll:string):Promise<Rows|'raced'>=>{
       const all:Rows=[];
@@ -65,7 +65,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     for(const id of todo){
       const m=members.get(id)!;
       const local={members:[m],visits:V.get(id)??[],payments:P.get(id)??[],invoices:I.get(id)??[]} as unknown as GymState;
-      const s=computeStoredSummary(local,m);
+      const s=computeStoredSummary(local,m,asOf);
       await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify(s)]);
       // Rows read above are at least as new as the marks read under the lock; a later writer leaves a newer gen and the member stays dirty.
       if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
@@ -86,19 +86,19 @@ async function ready(c:Sql,owner:string){
 
 /** Candidates for the members screen. Read-only unless the caller passes refresh:true (request-side writes are explicit): without it, any dirty or
  * missing member returns 'stale' and nothing is written. */
-export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|null,opts:{refresh?:boolean}={}):Promise<CandidateResult>{
+export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|null,opts:{refresh?:boolean;now?:string}={}):Promise<CandidateResult>{
   if(!await ready(c,owner))return refuse('unready');
   const filter=branches?' AND e.branch=ANY($2::text[])':'';const args=branches?[owner,branches]:[owner];
   // ONE statement: each member payload, its stored inputs and its dirty mark come from the same snapshot, so a candidate is never an old member paired with newer inputs.
   const rows=(await c.query(`SELECT e.entity_id,e.payload,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;stored:StoredSummary|null;gen:string|number|null}[];
   if(rows.length>MEMBER_CANDIDATE_MAX)return refuse('too-many-members');
   const members=rows.filter(r=>!r.payload.archived);
-  const need=members.filter(r=>r.gen!==null||!r.stored).map(r=>r.entity_id); // a missing row is never trusted
+  const need=members.filter(r=>r.gen!==null||!r.stored||r.stored.v!==2).map(r=>r.entity_id); // a missing row is never trusted
   if(need.length>REFRESH_MAX)return refuse('too-many-dirty');
   const fresh=new Map<string,Candidate>();
   if(need.length){
     if(!opts.refresh)return refuse('stale');
-    const why=await recompute(c,owner,need,fresh);if(why)return refuse(why);
+    const why=await recompute(c,owner,need,fresh,opts.now);if(why)return refuse(why);
   }
   const needSet=new Set(need),candidates:Candidate[]=[];
   for(const r of members){if(!needSet.has(r.entity_id))candidates.push({member:r.payload,stored:r.stored!});else{const f=fresh.get(r.entity_id);if(!f)return refuse('raced');candidates.push(f);}} // absent: deleted while refreshing
@@ -107,19 +107,19 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
 
 /** Bounded refresher for the (separately gated) backfill and for mass-dirty events such as a restore: recomputes up to `max` dirty members under one bound check and
  * one lock, and reports how many marks are left. Also forgets marks and rows of deleted members. */
-export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX):Promise<RefreshResult>{
+export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,asOf?:string):Promise<RefreshResult>{
   if(!await ready(c,owner))return refuse('unready');
   await c.query("DELETE FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id)",[owner]);
   await c.query("DELETE FROM gymos.gym_member_summaries s WHERE s.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=s.owner_id AND e.collection='members' AND e.entity_id=s.member_id)",[owner]);
   // Bounded waves only: each call recomputes at most `max` (<= REFRESH_MAX) dirty members by per-member index lookups; callers loop until remaining is 0.
   const ids=(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2',[owner,Math.min(max,REFRESH_MAX)])).rows.map(r=>(r as {member_id:string}).member_id);
-  const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out);if(why)return refuse(why);
+  const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out,asOf);if(why)return refuse(why);
   const left=Number((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0]?.['n' as never]??0);
   return{status:'ok',refreshed:ids.length,remaining:left};
 }
 
 /** Convenience for the (future, not yet wired) route: one consistent REPEATABLE READ snapshot for the whole candidate read and refresh. */
-export async function readMemberCandidatesSnapshot(owner:string,branches:string[]|null,opts:{refresh?:boolean}={}):Promise<CandidateResult>{
+export async function readMemberCandidatesSnapshot(owner:string,branches:string[]|null,opts:{refresh?:boolean;now?:string}={}):Promise<CandidateResult>{
   const {withSnapshotScope}=await import('./member-summary-scope.ts');
   return withSnapshotScope(owner,c=>readMemberCandidates(c,owner,branches,opts));
 }

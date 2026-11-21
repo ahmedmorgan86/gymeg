@@ -12,6 +12,8 @@ const {deriveSummary}=await import('../app/lib/member-summary-model.ts');
 const {memberSummary}=await import('../app/lib/member-console.ts');
 const {splitState}=await import('../app/lib/entity-state.ts');
 const {fixture}=await import('./member-summary-fixture.mjs');
+const localOf=(s,m)=>({...s,members:[m],visits:s.visits.filter(v=>v.member===m.id&&v.branch===m.branch),payments:s.payments.filter(p=>p.member===m.id&&p.branch===m.branch),invoices:(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch)});
+const ORACLE=(s,m,now)=>memberSummary(localOf(s,m),m,now); // what consoleIndex(branch) computes for a member of that branch
 const strip=x=>JSON.parse(JSON.stringify(x));
 const NOWS=['2026-03-15T12:00:00.000Z','2026-03-15T15:00:00.000Z','2026-03-20T22:30:00.000Z','2026-04-01T00:30:00.000Z','2027-01-02T10:00:00.000Z'];
 async function seed(owner,state){
@@ -20,13 +22,14 @@ async function seed(owner,state){
   await db.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),'x']);
   for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
 }
-const read=(owner,b=null,opts={refresh:true})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates(c,owner,b,opts);});
-const via=(owner,hook,opts={refresh:true})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates({query:async(s,v)=>{const r=await hook(c,s,v,'before');const x=r??await c.query(s,v);await hook(c,s,v,'after');return x;}},owner,null,opts);});
+const AS='2026-03-14T00:00:00.000Z'; // compute clock for the stored horizon (2026-03-13), before every test clock
+const read=(owner,b=null,opts={refresh:true,now:AS})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates(c,owner,b,opts);});
+const via=(owner,hook,opts={refresh:true,now:AS})=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return readMemberCandidates({query:async(s,v)=>{const r=await hook(c,s,v,'before');const x=r??await c.query(s,v);await hook(c,s,v,'after');return x;}},owner,null,opts);});
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
 async function same(owner,label){
   const res=await read(owner);assert.equal(res.status,'ok',label+': '+res.status);const s=await current(owner);let n=0;
   for(const {member,stored} of res.candidates){
-    for(const now of NOWS){const want=memberSummary(s,member,now),got=deriveSummary(strip(stored),member,s.settings,now);
+    for(const now of NOWS){const want=ORACLE(s,member,now),got=deriveSummary(strip(stored),member,s.settings,now);
       for(const k of ['period','issue','remaining','debt','status','used','visitsRemaining','paid'])assert.deepEqual(strip(got[k]),strip(want[k]),`${label} ${member.id} @ ${now}: ${k}`);
       assert.equal(got.current?.id,want.current?.id,`${label} ${member.id} current`);assert.equal(got.last?.id,want.last?.id,`${label} ${member.id} last`);n++;}
   }
@@ -71,13 +74,13 @@ test('persistSpace full path (a real write) keeps summaries exact',async()=>{
 test('bounded waves store the same summaries whatever the wave size; the snapshot scope works',async()=>{
   const {withSnapshotScope}=await import('../app/lib/member-summary-scope.ts');
   await seed('G1',fixture());
-  const drain=async max=>{await db.query("SELECT gymos.backfill_member_summaries('G1')");let x,waves=0;for(let i=0;i<50;i++){x=await withSnapshotScope('G1',c=>refreshDirtySummaries(c,'G1',max));assert.equal(x.status,'ok');assert.ok(x.refreshed<=max,'wave bounded by max');waves++;if(x.remaining===0)break;}
+  const drain=async max=>{await db.query("SELECT gymos.backfill_member_summaries('G1')");let x,waves=0;for(let i=0;i<50;i++){x=await withSnapshotScope('G1',c=>refreshDirtySummaries(c,'G1',max,AS));assert.equal(x.status,'ok');assert.ok(x.refreshed<=max,'wave bounded by max');waves++;if(x.remaining===0)break;}
     return{waves,rows:(await db.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id='G1' ORDER BY 1")).rows};};
   const a=await drain(500),b=await drain(3);
   assert.ok(a.rows.length>=10);assert.ok(b.waves>a.waves,'small waves take more calls');assert.deepEqual(strip(b.rows),strip(a.rows),'wave size does not change stored summaries');
   // snapshot scope maps a serialization failure to busy, not an exception
   await db.query("SELECT gymos.backfill_member_summaries('G1')");
-  const bz=await withSnapshotScope('G1',c=>readMemberCandidates({query:async(s,v)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}return c.query(s,v);}},'G1',null,{refresh:true}));assert.equal(bz.status,'busy');
+  const bz=await withSnapshotScope('G1',c=>readMemberCandidates({query:async(s,v)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}return c.query(s,v);}},'G1',null,{refresh:true,now:AS}));assert.equal(bz.status,'busy');
   // the 40001 rolled back to the savepoint: the transaction is usable and the marks are still there
   assert.ok(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='G1'")).rows[0].n)>0);
 });
@@ -124,7 +127,7 @@ test('interleave: a member change committed after the caller read the member row
   const mem=await mk('R1');let fired=false;
   const r=await via('R1',async(c,s,v,phase)=>{if(phase==='after'&&!fired&&/collection='members'/.test(s)&&/LIMIT/.test(s)&&/ORDER BY/.test(s)){fired=true;await c.query("UPDATE gymos.gym_entities SET payload=$1 WHERE owner_id='R1' AND collection='members' AND entity_id='m1'",[mem(true)]);}return null;});
   assert.equal(r.status,'ok');assert.equal(r.candidates[0].member.membershipPeriods[0].cancelled,true,'returned member is the re-read one');
-  const st=(await db.query("SELECT stored->'usage' u FROM gymos.gym_member_summaries WHERE owner_id='R1'")).rows[0].u;assert.deepEqual(st,[],'stored from the re-read member (period cancelled)');
+  const st=(await db.query("SELECT stored->'periods' p,stored->'tail' t FROM gymos.gym_member_summaries WHERE owner_id='R1'")).rows[0];assert.deepEqual(st.p,{},'stored from the re-read member (period cancelled: no totals)');assert.deepEqual(st.t,[]);
   assert.equal((await db.query("SELECT count(*)::int n FROM gymos.gym_member_summary_dirty WHERE owner_id='R1'")).rows[0].n,0);
 });
 test('stale owner is read-only without refresh:true (no writes), and refresh waits are explicit statuses',async()=>{

@@ -10,28 +10,59 @@ import {debt,receptionPolicy} from './member-console.ts';
 
 /** [day, periodId|null, units (sessions+1), sameBranchAsMember 0|1] */
 export type UsageTuple=[string,string|null,number,0|1];
+/** Per-period totals over visits dated on or before the horizon: n visits, u units (sessions+1 each), sn/su the same two counted for visits at the member's own branch. */
+export type PeriodTotals={n:number;u:number;sn:number;su:number};
+/** The LISTING projection (v2). Size is O(periods + open visits + visits dated after the horizon), never O(history): the per-visit usage list of v1 is gone.
+ * `horizon` is a calendar day that is at or before "today" in every timezone at the moment of computing. Visits dated on or before it are folded into the per-period
+ * totals (a visit that old is always <= today at any later read, so the quota rule `day<=today` holds for the whole total). Visits dated after it are kept verbatim in
+ * `tail` and judged one by one at read time. A read whose today is BEFORE the horizon (clock moved back, test clock) cannot be answered exactly: deriveSummary
+ * returns null and the caller takes the exact full path for that member. */
 export type StoredSummary={
-  v:1;
+  v:2;
+  horizon:string;
   visitCount:number;
-  /** Only visits that can count toward one of the member's non-cancelled periods. */
-  usage:UsageTuple[];
+  periods:Record<string,PeriodTotals>;
+  tail:UsageTuple[];
   open:{id:string;at:string;activeAt?:string}[];
   last:{id:string;at:string}|null;
   debt:number;
   paid:number;
 };
 type Row=Pick<GymState,'visits'|'payments'|'invoices'>;
+const dayBefore=(iso:string)=>new Date(Date.parse(iso.slice(0,10)+'T00:00:00.000Z')-86400000).toISOString().slice(0,10);
 
-export function computeStoredSummary(s:GymState,m:Member):StoredSummary{
+/** `asOf` is the compute clock (default: now). It only chooses the horizon; everything else is time-independent. */
+/** The console only ever shows a member the rows recorded at the MEMBER'S OWN branch (consoleIndex partitions visits, payments and invoices by branch === the member's
+ * branch). The projection reproduces exactly that view: rows at other branches are ignored, including for debt (an allocation to a payment at another branch finds no
+ * payment, as in consoleIndex) and for the last visit. */
+export function localView(s:GymState,m:Member):GymState{
+  return{...s,members:[m],visits:s.visits.filter(v=>v.member===m.id&&v.branch===m.branch),payments:s.payments.filter(p=>p.member===m.id&&p.branch===m.branch),invoices:(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch)} as GymState;
+}
+export function computeStoredSummary(full:GymState,m:Member,asOf:string=new Date().toISOString()):StoredSummary{
+  const s=localView(full,m);
+  const horizon=dayBefore(asOf);
   const visits=s.visits.filter(v=>v.member===m.id);
   const periods=membershipPeriods(m).filter(p=>!p.cancelled);
   const ids=new Set(periods.map(p=>p.id));
   const relevant=(v:typeof visits[number])=>v.periodId?ids.has(v.periodId):periods.some(p=>v.day>=p.start&&v.day<=p.end);
   const last=visits.slice().sort((a,b)=>b.at.localeCompare(a.at))[0];
+  const totals:Record<string,PeriodTotals>={};
+  for(const p of periods)totals[p.id]={n:0,u:0,sn:0,su:0};
+  const tail:UsageTuple[]=[];
+  for(const v of visits){
+    if(!relevant(v))continue;
+    const units=(v.sessions?.length??0)+1,same=v.branch===m.branch?1:0;
+    if(v.day>horizon){tail.push([v.day,v.periodId??null,units,same as 0|1]);continue;}
+    for(const p of periods){
+      if(!(v.periodId?v.periodId===p.id:v.day>=p.start&&v.day<=p.end))continue;
+      const t=totals[p.id];t.n++;t.u+=units;if(same){t.sn++;t.su+=units;}
+    }
+  }
   return{
-    v:1,
+    v:2,horizon,
     visitCount:visits.length,
-    usage:visits.filter(relevant).map(v=>[v.day,v.periodId??null,(v.sessions?.length??0)+1,v.branch===m.branch?1:0] as UsageTuple),
+    periods:totals,
+    tail,
     open:visits.filter(v=>!v.leftAt).map(v=>({id:v.id,at:v.at,activeAt:v.activeAt})),
     last:last?{id:last.id,at:last.at}:null,
     debt:debt(s as GymState,m.id),
@@ -39,20 +70,25 @@ export function computeStoredSummary(s:GymState,m:Member):StoredSummary{
   };
 }
 
+/** Exact equivalent of memberSummary() at `now`, or null when the stored projection cannot answer exactly (today before the horizon, or a period without totals). */
 export function deriveSummary(stored:StoredSummary,m:Member,settings:GymState['settings'],now:string){
   const policy=receptionPolicy({settings} as GymState);
   const today=dayAt(now,settings.timezone),period=membershipPeriod(m,today);
+  if(stored.v!==2||today<stored.horizon)return null;
+  const totals=period?stored.periods[period.id]:undefined;
+  if(period&&!totals)return null;
   const current=stored.open.find(v=>Date.parse(v.activeAt??v.at)+policy.autoExitMinutes*60000>Date.parse(now));
-  const units=(t:UsageTuple)=>period&&period.quotaMode==='sessions'?t[2]:1; // sessions mode counts every session, otherwise one per visit
+  const sessions=!!period&&period.quotaMode==='sessions';
+  const units=(t:UsageTuple)=>sessions?t[2]:1; // sessions mode counts every session, otherwise one per visit
   const inPeriod=(t:UsageTuple)=>t[1]?t[1]===period!.id:t[0]>=period!.start&&t[0]<=period!.end;
   // memberSummary().used: this period's visits (any branch), or every visit when there is no period.
-  const used=period?stored.usage.filter(inPeriod).reduce((n,t)=>n+units(t),0):stored.visitCount;
+  const used=period?(sessions?totals!.u:totals!.n)+stored.tail.filter(inPeriod).reduce((n,t)=>n+units(t),0):stored.visitCount;
   let issue:string|null=null;
   if(m.awaitingSubscription)issue='inactive';
   else if(membershipPeriods(m).length&&!period)issue='inactive';
   else if(m.archived||m.joined>today||m.expires<today)issue='inactive';
   else if(m.freezes?.some(f=>!f.cancelled&&f.from<=today&&f.to>=today))issue='frozen';
-  else if(period?.visits!=null&&stored.usage.filter(t=>t[3]===1&&inPeriod(t)&&t[0]<=today).reduce((n,t)=>n+units(t),0)>=period.visits)issue='quota';
+  else if(period?.visits!=null&&(sessions?totals!.su:totals!.sn)+stored.tail.filter(t=>t[3]===1&&inPeriod(t)&&t[0]<=today).reduce((n,t)=>n+units(t),0)>=period.visits)issue='quota';
   const remaining=days(today,period?.end??m.expires);
   return{
     period,current,issue,remaining,debt:stored.debt,
@@ -68,9 +104,9 @@ export type {Row};
  * per-member compute on that member's rows only (O(rows), not members x rows).
  * Debt only looks at a member's own payments, so the per-member view is exact.
  */
-export function backfillSummaries(s:GymState):Map<string,StoredSummary>{
+export function backfillSummaries(s:GymState,asOf?:string):Map<string,StoredSummary>{
   const group=<T extends {member:string}>(rows:T[]|undefined)=>{const g=new Map<string,T[]>();for(const r of rows??[]){const a=g.get(r.member);if(a)a.push(r);else g.set(r.member,[r]);}return g;};
   const v=group(s.visits),p=group(s.payments),i=group(s.invoices),out=new Map<string,StoredSummary>();
-  for(const m of s.members)out.set(m.id,computeStoredSummary({...s,visits:v.get(m.id)??[],payments:p.get(m.id)??[],invoices:i.get(m.id)??[]} as GymState,m));
+  for(const m of s.members)out.set(m.id,computeStoredSummary({...s,visits:v.get(m.id)??[],payments:p.get(m.id)??[],invoices:i.get(m.id)??[]} as GymState,m,asOf));
   return out;
 }
