@@ -22,13 +22,27 @@ test('refs mirror the legacy per-payment element sequence through insert/update/
   assert.equal(Number((await db.query("SELECT gymos.invoice_allocation_refs_mismatches('A') + gymos.invoice_allocation_refs_mismatches('B') AS n")).rows[0].n),0);
   // odd table: exactly the invoices with a non-array allocations or a skipped element
   const odd=new Set((await db.query("SELECT owner_id||'/'||invoice_id k FROM gymos.invoice_allocation_odd")).rows.map(x=>x.k));
-  const expOdd=new Set(rows.filter(r=>{const a=r.p.allocations;if(a===undefined||a===null)return false;if(!Array.isArray(a))return true;return a.some(e=>!(e&&typeof e==='object'&&!Array.isArray(e)&&typeof e.payment==='string'));}).map(r=>r.o+'/'+r.id));
+  const expOdd=new Set(rows.filter(r=>{const a=r.p.allocations;if(!Array.isArray(a))return true;return a.some(e=>!(e&&typeof e==='object'&&!Array.isArray(e)&&typeof e.payment==='string'));}).map(r=>r.o+'/'+r.id));
   assert.deepEqual([...odd].sort(),[...expOdd].sort());
+  // actual ledger functions (not a normalizing oracle): every invoice on which the real code throws must be marked odd
+  const {paymentAvailable,invoiceOutstanding,paymentBreakdown}=await import('../app/lib/member-ledger.ts');
+  let thrown=0;for(const r of rows){const inv={id:r.id,member:'m',branch:'a',total:10,voided:false,allocations:r.p.allocations};const pay={id:'p1',member:'m',branch:'a',minor:100,voided:false};
+    let threw=false;for(const f of [()=>paymentAvailable({payments:[pay],invoices:[inv]},pay),()=>invoiceOutstanding({payments:[pay],invoices:[inv]},inv),()=>paymentBreakdown({payments:[pay],invoices:[inv]},pay)]){try{f();}catch{threw=true;}}
+    if(threw){thrown++;assert.ok(odd.has(r.o+'/'+r.id),'real ledger throws but invoice not odd: '+r.id);}}
+  assert.ok(thrown>0);
   // corrupt a ref: verification sees it, rebuild (batched) repairs it, 0 mismatches again
   await db.query("DELETE FROM gymos.invoice_allocation_refs WHERE owner_id='A' AND ctid IN (SELECT ctid FROM gymos.invoice_allocation_refs WHERE owner_id='A' LIMIT 1)");
   assert.ok(Number((await db.query("SELECT gymos.invoice_allocation_refs_mismatches('A') n")).rows[0].n)>=1);
   let after=null;do{after=(await db.query("SELECT gymos.invoice_allocation_refs_rebuild('A',$1,7) a",[after])).rows[0].a;}while(after!==null);
   assert.equal(Number((await db.query("SELECT gymos.invoice_allocation_refs_mismatches('A') n")).rows[0].n),0);await check();
+  // moving an invoice row OUT of the collection removes its refs and odd rows; moving a row INTO it adds them
+  {const o='A',id='mv1';await ins(o,id,1,'a',{id,allocations:[{payment:'p1',minor:1},5]});
+   const cnt=async()=>[Number((await db.query("SELECT count(*) n FROM gymos.invoice_allocation_refs WHERE owner_id='A' AND invoice_id='mv1'")).rows[0].n),Number((await db.query("SELECT count(*) n FROM gymos.invoice_allocation_odd WHERE owner_id='A' AND invoice_id='mv1'")).rows[0].n)];
+   assert.deepEqual(await cnt(),[1,1]);
+   await db.query("UPDATE gymos.gym_entities SET collection='members' WHERE owner_id='A' AND collection='invoices' AND entity_id='mv1'");assert.deepEqual(await cnt(),[0,0]);
+   await db.query("UPDATE gymos.gym_entities SET collection='invoices' WHERE owner_id='A' AND collection='members' AND entity_id='mv1'");assert.deepEqual(await cnt(),[1,1]);
+   await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='A' AND entity_id='mv1'");assert.deepEqual(await cnt(),[0,0]);
+   assert.equal(Number((await db.query("SELECT gymos.invoice_allocation_refs_mismatches('A') n")).rows[0].n),0);}
   // key change (entity id) and truncate
   const r0=rows[0];await db.query("UPDATE gymos.gym_entities SET entity_id='renamed' WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[r0.o,r0.id]);r0.id='renamed';await check();
   await db.query("TRUNCATE gymos.gym_entities");assert.equal(Number((await db.query("SELECT count(*) n FROM gymos.invoice_allocation_refs")).rows[0].n),0);

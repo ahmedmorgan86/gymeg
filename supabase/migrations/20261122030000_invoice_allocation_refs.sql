@@ -30,15 +30,16 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'allocations')='array' THEN p_payload->'allocations' ELSE '[]'::jsonb END) WITH ORDINALITY a(v,ord)
   WHERE jsonb_typeof(a.v)='object' AND jsonb_typeof(a.v->'payment')='string' $$;
 
--- count of unsupported allocation shapes of one invoice (0 = every element is represented). A missing `allocations` key or JSON null counts as no allocations (legacy treats it as empty), a non-array value counts as 1.
+-- count of unsupported allocation shapes of one invoice (0 = every element is represented). The real ledger functions (paymentAvailable, invoiceOutstanding, paymentBreakdown) call `invoice.allocations.filter` directly,
+-- so a missing key, JSON null or any non-array value THROWS for a non-voided invoice: it is counted as 1 (unsupported, a consumer must refuse), regardless of the invoice's voided flag (conservative: a voided invoice with such a shape
+-- is refused too rather than modelling JS truthiness of `voided` here). An element that is not an object with a string payment (a null element throws on `.payment`) is counted per element.
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_odd_count(p_payload jsonb) RETURNS integer LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-  SELECT CASE WHEN p_payload->'allocations' IS NULL OR jsonb_typeof(p_payload->'allocations')='null' THEN 0
-              WHEN jsonb_typeof(p_payload->'allocations')<>'array' THEN 1
+  SELECT CASE WHEN jsonb_typeof(p_payload->'allocations') IS DISTINCT FROM 'array' THEN 1
               ELSE (SELECT count(*)::integer FROM jsonb_array_elements(p_payload->'allocations') a WHERE NOT COALESCE(jsonb_typeof(a)='object' AND jsonb_typeof(a->'payment')='string',false)) END $$;
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_sync() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP IN ('UPDATE','DELETE') THEN DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id; END IF;
-  IF TG_OP IN ('INSERT','UPDATE') THEN
+  IF TG_OP IN ('UPDATE','DELETE') AND OLD.collection='invoices' THEN DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id; END IF;
+  IF TG_OP IN ('INSERT','UPDATE') AND NEW.collection='invoices' THEN
     INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(NEW.owner_id,NEW.entity_id,NEW.position,NEW.branch,NEW.payload);
     INSERT INTO gymos.invoice_allocation_odd SELECT NEW.owner_id,NEW.entity_id,gymos.invoice_allocation_odd_count(NEW.payload) WHERE gymos.invoice_allocation_odd_count(NEW.payload)>0;
   END IF;
@@ -48,12 +49,12 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_truncate() RETURNS trig
 DROP TRIGGER IF EXISTS invoice_allocation_refs_ins ON gymos.gym_entities;
 CREATE TRIGGER invoice_allocation_refs_ins AFTER INSERT ON gymos.gym_entities FOR EACH ROW WHEN (NEW.collection='invoices') EXECUTE FUNCTION gymos.invoice_allocation_refs_sync();
 DROP TRIGGER IF EXISTS invoice_allocation_refs_upd ON gymos.gym_entities;
-CREATE TRIGGER invoice_allocation_refs_upd AFTER UPDATE ON gymos.gym_entities FOR EACH ROW WHEN (NEW.collection='invoices' AND (OLD.payload->'allocations' IS DISTINCT FROM NEW.payload->'allocations' OR OLD.position IS DISTINCT FROM NEW.position OR OLD.branch IS DISTINCT FROM NEW.branch OR OLD.entity_id IS DISTINCT FROM NEW.entity_id OR OLD.owner_id IS DISTINCT FROM NEW.owner_id OR OLD.collection IS DISTINCT FROM NEW.collection)) EXECUTE FUNCTION gymos.invoice_allocation_refs_sync();
+CREATE TRIGGER invoice_allocation_refs_upd AFTER UPDATE ON gymos.gym_entities FOR EACH ROW WHEN ((NEW.collection='invoices' OR OLD.collection='invoices') AND (OLD.payload->'allocations' IS DISTINCT FROM NEW.payload->'allocations' OR OLD.position IS DISTINCT FROM NEW.position OR OLD.branch IS DISTINCT FROM NEW.branch OR OLD.entity_id IS DISTINCT FROM NEW.entity_id OR OLD.owner_id IS DISTINCT FROM NEW.owner_id OR OLD.collection IS DISTINCT FROM NEW.collection)) EXECUTE FUNCTION gymos.invoice_allocation_refs_sync();
 DROP TRIGGER IF EXISTS invoice_allocation_refs_del ON gymos.gym_entities;
 CREATE TRIGGER invoice_allocation_refs_del AFTER DELETE ON gymos.gym_entities FOR EACH ROW WHEN (OLD.collection='invoices') EXECUTE FUNCTION gymos.invoice_allocation_refs_sync();
 DROP TRIGGER IF EXISTS invoice_allocation_refs_trunc ON gymos.gym_entities;
 CREATE TRIGGER invoice_allocation_refs_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.invoice_allocation_refs_truncate();
--- an UPDATE that renames a row out of 'invoices' (collection is part of the key, so this is exotic) still has its old refs removed by the upd trigger's DELETE of OLD.
+-- an UPDATE that moves a row out of (or into) 'invoices' fires on OLD or NEW identity: old refs/odd are deleted only if OLD was an invoice, new ones inserted only if NEW is an invoice.
 
 -- held backfill + verification (idempotent, per owner, batched by invoice id; run by the migration role with app.gym_owner set when RLS applies)
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_rebuild(p_owner text,p_after text,p_limit integer) RETURNS text LANGUAGE plpgsql AS $$
