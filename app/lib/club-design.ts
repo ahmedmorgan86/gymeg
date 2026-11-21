@@ -1,7 +1,7 @@
 import {z} from 'zod';
 import {themes,type ThemeId} from './themes.ts';
 const color=z.string().regex(/^#[0-9a-fA-F]{6}$/);
-const image=z.string().max(300000).regex(/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/).nullable();
+const image=z.string().max(300000).regex(/^data:image\/(?:jpeg;base64,\/9j\/|webp;base64,UklGR)[A-Za-z0-9+/=]+$/).nullable();
 export const clubDesignSchema=z.object({accent:color,background:color,surface:color,text:color,sidebar:color,sidebarText:color,muted:color,border:color,radius:z.number().int().min(0).max(30),buttonRadius:z.number().int().min(0).max(30),fontSize:z.number().int().min(14).max(20),fontWeight:z.number().int().min(600).max(900),density:z.enum(['comfortable','compact']),motion:z.boolean(),backgroundImage:image,memberImage:image}).strict();
 export type ClubDesign=z.infer<typeof clubDesignSchema>;
 function luminance(hex:string){const rgb=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16)/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4);return rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722;}
