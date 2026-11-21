@@ -40,5 +40,8 @@ test('last visits per member == the legacy loop; odd data fails closed',async()=
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','\"2026-3-9\"') WHERE owner_id='L1' AND entity_id='v1'");
   const bad=cur.visits.find(v=>v.id==='v1').branch;
   assert.deepEqual(await readLastVisits(scope,{owner:'L1',branch:bad,today:'2026-03-14'}),{status:'unavailable',reason:'non-canonical-visit'});
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','\"2026-03-09\"') WHERE owner_id='L1' AND entity_id='v1'");
+  const first=cur.visits.find(v=>v.id==='v2');await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{member}','5') WHERE owner_id='L1' AND entity_id='v2'");
+  assert.deepEqual(await readLastVisits(scope,{owner:'L1',branch:first.branch,today:'2026-03-14'}),{status:'unavailable',reason:'non-string-member'});
   await assert.rejects(readLastVisits(scope,{owner:'L1',branch:'a',today:'x'}),RangeError);
 });

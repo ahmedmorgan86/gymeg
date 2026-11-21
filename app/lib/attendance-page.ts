@@ -1,7 +1,7 @@
 // Bounded read for the Attendance page: the branch's check-ins today (ALL of the branch's visits of that day, as the page counts them) and the newest ATTENDANCE_ROWS visits
 // in the page's order `b.day.localeCompare(a.day)||b.at.localeCompare(a.at)` (stable, so ties keep position order). Code-point order equals localeCompare only for canonical
 // day/at strings. A branch holding any non-canonical value is answered exactly by a candidate merge: the canonical top 100, plus the non-canonical rows streamed in position-ordered pages of IRREGULAR_PAGE that the browser merges into a running top 100 with its own comparator. No row limit: transfer is proportional to the non-canonical rows only.
-import {boundedRead} from './bounded-read.ts';
+import {boundedRead,indexProbe} from './bounded-read.ts';
 import {readOwnerVersion} from './member-summary-store.ts';
 import type {Scope} from './member-console-source.ts';
 export const ATTENDANCE_ROWS=100;
@@ -14,7 +14,7 @@ export async function readAttendance(scope:Scope,q:{owner:string;branch:string;d
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.day)||(q.after!==undefined&&(!Number.isSafeInteger(q.after.pos)||!q.after.id||q.after.id.length>200||typeof q.ver!=='string')))throw new RangeError('invalid');
   return scope(q.owner,c=>boundedRead(c,q.owner,'att\u0000'+q.branch+'\u0000'+q.day+'\u0000'+(q.after?q.after.pos+'\u0000'+q.after.id+'\u0000'+q.ver:''),async()=>{
     const ver0=await readOwnerVersion(c,q.owner); // read BEFORE the irregular probe: the regular path rechecks it after its rows
-    const irregular=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch])).rows[0] as {x:boolean};
+    const irregular=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
     const CANON=`jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
     const ODD=`jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
     const paging=q.after!==undefined;

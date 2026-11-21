@@ -19,3 +19,11 @@ export async function boundedRead<T>(c:Sql,owner:string,key:string,work:()=>Prom
   }catch(e){return budgetGuard(e);}
 }
 export function clearBoundedReadCache(){cache.clear();}
+
+/** Runs an existence probe against a partial index that is empty in normal clubs. The planner cannot know the partial index is empty, and in some table states (many owners, stale statistics,
+ * generic plans) it prefers a whole-table scan for `EXISTS(... LIMIT 1)`. Disabling seq scan for this one statement (transaction-local, restored right after) makes the eligible index
+ * the plan; if the index is absent the planner still falls back to a scan (enable_seqscan=off only penalises it), so correctness never depends on the setting. */
+export async function indexProbe<T>(c:Sql,work:()=>Promise<T>):Promise<T>{
+  await c.query("SELECT set_config('enable_seqscan','off',true)");
+  try{return await work();}finally{try{await c.query("SELECT set_config('enable_seqscan','on',true)");}catch{/* aborted transaction: the setting dies with it */}}
+}
