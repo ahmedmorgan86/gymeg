@@ -227,3 +227,9 @@ test('Barcode contract: entity-layout clubs keep members out of metadata, so the
   const src=readFileSync(new URL('../app/api/member-barcode/route.ts',import.meta.url),'utf8');
   assert.ok(/\breadSpace\b/.test(src)&&!/readSpaceMeta|readSpaceSlice|readMemberSpace/.test(src),'barcode route uses the full-state read (member, branch, archived, duplicate-card checks need real members)');
 });
+
+test('Firestore cannot bound the open-visit query, so portal slices fall back to the full read there',async()=>{
+  const {db}=fakeFs('club1',richClub());const be=firestoreBackend(()=>db);
+  assert.equal(be.supportsOpen,false);
+  assert.equal(await readMemberSlice(be,'club1','m0','a',normalize),null);
+});

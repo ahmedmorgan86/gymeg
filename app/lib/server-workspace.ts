@@ -31,8 +31,10 @@ export async function readMemberSpace(owner:string,memberId:string,branch:string
 export async function readSpaceForPacket(owner:string,ctx:Pick<Context,'role'|'branches'|'user'>){
   if(isFirebaseConfigured()){const revision=await readRevision(owner);const hit=firestoreCachedSpace(owner,revision);if(hit)return{current:{state:hit,revision},photoVersions:undefined};}
   const be=sliceBackend();
-  const [sliced,photoVersions]=await Promise.all([readSlice(be,owner,m=>packetQueries(ctx,(m.settings??{}) as GymState['settings']),normalize),be.photoVersions(owner)]);
-  if(!sliced)return{current:await readSpace(owner),photoVersions:undefined};
+  const sliced=await readSlice(be,owner,m=>packetQueries(ctx,(m.settings??{}) as GymState['settings']),normalize);
+  if(!sliced)return{current:await readSpace(owner),photoVersions:undefined}; // disabled or legacy: no photo scan
+  const photoVersions=await be.photoVersions(owner);
+  if(await be.revision(owner)!==sliced.revision)return{current:await readSpace(owner),photoVersions:undefined}; // a commit landed between rows and photo versions
   return{current:{state:sliced.state,revision:sliced.revision},photoVersions};
 }
 export type {Collection,SliceQuery};

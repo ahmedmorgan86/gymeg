@@ -25,6 +25,8 @@ export type SliceQuery={
 };
 export type Meta={metadata:Record<string,unknown>;revision:number};
 export interface SliceBackend{
+  /** True when `open:true` is answered by the query itself. Firestore cannot query a missing field, so it filters after fetching the branch history and reports false. */
+  readonly supportsOpen:boolean;
   revision(owner:string):Promise<number|null>;
   meta(owner:string):Promise<Meta|null>;
   entities(owner:string,query:SliceQuery):Promise<Entity[]>;
@@ -51,6 +53,7 @@ type Sql={query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>};
 /** Postgres backend over gymos.gym_states / gym_entities / gym_photos. `scope` must set app.gym_owner (withScope does). */
 export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promise<T>)=>Promise<T>):SliceBackend{
   return{
+    supportsOpen:true,
     async revision(owner){return scope(owner,async c=>{const r=(await c.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {revision:number}|undefined;return r?Number(r.revision):null;});},
     async meta(owner){return scope(owner,async c=>{const r=(await c.query('SELECT payload,revision FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {payload:string;revision:number}|undefined;return r?{metadata:JSON.parse(r.payload),revision:Number(r.revision)}:null;});},
     async entities(owner,q){
@@ -79,6 +82,7 @@ type FsDb={collection(name:string):FsQuery&{doc(id:string):{get():Promise<FsDoc>
 export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):SliceBackend{
   const indexed=opts.indexed!==false;
   return{
+    supportsOpen:false,
     async revision(owner){const s=await getDb().collection('gym_states').doc(owner).get();return s.exists?Number((s.data() as {revision?:number}).revision??0):null;},
     async meta(owner){if(!indexed)return null; // composite indexes not confirmed: callers fall back to the full read
       const s=await getDb().collection('gym_states').doc(owner).get();if(!s.exists)return null;const d=s.data() as {payload:string;revision:number};return{metadata:JSON.parse(d.payload),revision:Number(d.revision)};},
@@ -160,6 +164,7 @@ export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|Sl
  * the full state in tests. Returns null for legacy single-payload clubs.
  */
 export async function readMemberSlice(be:SliceBackend,owner:string,memberId:string,branch:string,normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
+  if(!be.supportsOpen)return null; // occupancy needs open visits; without a bounded query use the full read
   const got=await consistently(be,owner,async meta=>{
     const own=(c:Collection):SliceQuery=>({collections:[c],match:{field:'member',values:[memberId]},branches:[branch]});
     const first=(await Promise.all([
