@@ -37,9 +37,9 @@ export interface SliceBackend{
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
   /** True when some member row has more than 1000 freezes (the full path rejects every operation on such a club). Postgres answers from a tiny partial index. */
   hasOversizedFreezes(owner:string):Promise<boolean>;
-  /** A member's visits ordered like the profile list: `at` descending (plain code-point order), ties in position order. Returns null when it cannot prove that order
-   * (Firestore, or any scoped visit whose `at` is not the fixed ISO form the server writes), so callers fail closed. */
-  visitsByAt(owner:string,q:{member:string;branches?:string[]|null;cursor?:{at:string;position:number};limit:number}):Promise<Entity[]|null>;
+  /** A member's visits ordered like the profile list: `at` descending (plain code-point order), ties in position order. Returns 'irregular' when some scoped visit has an `at` string that is not the canonical ISO form (code-point order may then differ
+   * from the legacy localeCompare, so the caller uses its exact fallback), and null when no exact order exists (Firestore, or a visit without a string `at`). */
+  visitsByAt(owner:string,q:{member:string;branches?:string[]|null;cursor?:{at:string;position:number};limit:number}):Promise<Entity[]|null|'irregular'>;
 }
 export const MAX_SLICE=500;
 export function checkQuery(q:SliceQuery){
@@ -79,8 +79,9 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
     async visitsByAt(owner,q){return scope(owner,async c=>{
       const base:unknown[]=[owner,q.member];let br='';if(q.branches){if(!q.branches.length)return [];base.push(q.branches);br=`AND branch=ANY($${base.length}::text[])`;}
-      const bad=await c.query(`SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND (jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$') LIMIT 1`,base);
-      if(bad.rows.length)return null;
+      // Two EXISTS probes on the tiny partial index of non-canonical visits (gym_entities_visit_irregular_at); O(1) while every `at` is canonical.
+      const flags=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND jsonb_typeof(payload->'at') IS DISTINCT FROM 'string') AS missing,EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} AND jsonb_typeof(payload->'at')='string' AND payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$') AS irregular`,base)).rows[0] as {missing:boolean;irregular:boolean};
+      if(flags.missing)return null;if(flags.irregular)return 'irregular';
       const values=[...base];let cur='';if(q.cursor){values.push(q.cursor.at,q.cursor.position);cur=`AND ((payload->>'at') COLLATE "C"<$${values.length-1}::text COLLATE "C" OR ((payload->>'at') COLLATE "C"=$${values.length-1}::text COLLATE "C" AND position>$${values.length}))`;}
       values.push(Math.max(1,Math.min(MAX_SLICE,Math.floor(q.limit))));
       return (await c.query(`SELECT collection,entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'member'=$2 ${br} ${cur} ORDER BY (payload->>'at') COLLATE "C" DESC, position ASC LIMIT $${values.length}`,values)).rows as Entity[];

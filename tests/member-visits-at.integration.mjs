@@ -29,13 +29,15 @@ test('order=at equals the legacy profile sort (at desc via localeCompare, ties i
     ctx('A',{branches:[w.m.branch]});assert.deepEqual(await pageAll(w.m.id,5),['t-a1'],'out-of-scope malformed row neither leaks nor blocks');
     ctx('A');
     // malformed at in scope: cannot prove the order, fail closed
-    const bad=withVisits([['b1',iso('03')],['b2','2026-02-04T09:00:00Z']]);await seed('A',bad.s);
-    assert.equal((await get({member:bad.m.id})).status,501,'non-canonical at: unsupported, never a guessed order');
+    // non-canonical (historically accepted) timestamps: exact legacy fallback, same order as the profile sort, any page size
+    const odd=withVisits([['b1',iso('03')],['b2','2026-02-04T09:00:00Z'],['b3','2026-02-04T09:00:00.000Z'],['b4','2026-02-04T09:00:00+02:00'],['b5','2026-02-04t09:00:00.000z'],['b6','2026-02-04T09:00:00.000z'],['b7','2026-02-04T09:00:00.000Z'],['b8',iso('09')]]);await seed('A',odd.s);
+    const oddExpected=odd.s.visits.filter(v=>v.member===odd.m.id).slice().sort((a,b)=>b.at.localeCompare(a.at)).map(v=>v.id);
+    for(const limit of [1,2,3,100])assert.deepEqual(await pageAll(odd.m.id,limit),oddExpected,'fallback limit '+limit);
     const bad2=withVisits([['c1',iso('03')]]);bad2.s.visits.push({id:'t-c2',member:bad2.m.id,branch:bad2.m.branch,day:'2026-02-04',leftAt:'2026-02-04T10:00:00.000Z'});await seed('A',bad2.s);
     assert.equal((await get({member:bad2.m.id})).status,501,'missing at: unsupported');
     // cursor and param validation
     await seed('A',withVisits([['d1',iso('03')]]).s);const mid=(await real.query("SELECT payload->>'member' AS m FROM gymos.gym_entities WHERE owner_id='A' AND collection='visits' LIMIT 1")).rows[0].m;
-    assert.equal((await get({member:mid,cursor:'nope'})).status,400);assert.equal((await get({member:mid,cursor:"x|1"})).status,400);
+    assert.equal((await get({member:mid,cursor:'nope'})).status,400);assert.equal((await get({member:mid,cursor:'a|b'})).status,400);assert.equal((await get({member:mid,cursor:'%E0%A4%A|1'})).status,400);
     assert.equal((await GET(new Request('https://example.test/api/workspace/member-history?member='+mid+'&collection=payments&order=at',{headers:{'X-GymOS-Tenant':'t-A'}}))).status,400,'order=at is visits only');
     assert.equal((await get({member:'nobody'})).status,404);
   }finally{delete process.env.GYMOS_MEMBER_HISTORY;}
