@@ -2,7 +2,7 @@
 import {useState,useRef,useMemo} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
 import {dayAt} from './lib/domain';
-import {useLastVisits} from './use-last-visits';
+import {useLastVisits,LAZY_STRICT,LAST_VISITS_ON} from './use-last-visits';
 import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,type ManualWhatsAppTemplate} from './lib/manual-whatsapp';
 
 const labels={
@@ -222,8 +222,8 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
       };
     });
   },[rawTemplates,ar]);
-  const serverLast=useLastVisits(state,owner,branch,dayAt(now,state.settings.timezone));
-  const due=useMemo(()=>manualWhatsAppDue(state,branch,now,serverLast),[state,branch,now,serverLast]);
+  const {last:serverLast,failed:lastFailed,retry:lastRetry}=useLastVisits(state,owner,branch,dayAt(now,state.settings.timezone)),lastStrict=LAZY_STRICT&&LAST_VISITS_ON&&!serverLast;
+  const due=useMemo(()=>lastStrict?[]:manualWhatsAppDue(state,branch,now,serverLast),[state,branch,now,serverLast,lastStrict]);
   const branchName=state.branches.find(b=>b.id===branch)?.name??'';
 
   // Counts per scenario for badges
@@ -390,6 +390,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
     {/* TAB 1: Due follow-ups */}
     {activeTab==='due'&&(
       <section className="card">
+        {(lastFailed||lastStrict)&&<p className="operation-notice" role="status">{lastFailed?<>{t('تعذر تحميل آخر زيارة للأعضاء.','Could not load members\' last visits.')} <button className="button secondary" onClick={lastRetry}>{t('إعادة المحاولة','Retry')}</button></>:t('جارٍ التحميل…','Loading…')}</p>}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'14px'}}>
           <h2 style={{margin:0}}>{t('قائمة المتابعات والتذكيرات المستحقة اليوم','Due Follow-ups & Reminders')}</h2>
           

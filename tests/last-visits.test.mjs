@@ -35,7 +35,7 @@ test('last visits per member == the legacy loop; odd data fails closed',async()=
   for(const branch of ['a','b','c'])for(const today of ['2026-03-14','2025-12-30','2027-01-01']){
     const legacy=new Map();for(const v of cur.visits)if(v.branch===branch&&v.day<=today&&v.day>(legacy.get(v.member)??''))legacy.set(v.member,v.day);
     const r=await readLastVisits(scope,{owner:'L1',branch,today});assert.equal(r.status,'ok');
-    assert.deepEqual(new Map(Object.entries(r.last)),legacy,branch+today);
+    for(const m of cur.members.filter(m=>m.branch===branch))assert.equal(r.last[m.id],legacy.get(m.id),branch+today+m.id);assert.ok(Object.keys(r.last).every(id=>cur.members.some(m=>m.id===id&&m.branch===branch)));
   }
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','\"2026-3-9\"') WHERE owner_id='L1' AND entity_id='v1'");
   const bad=cur.visits.find(v=>v.id==='v1').branch;
