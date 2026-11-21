@@ -74,3 +74,9 @@ test('bounded read: timeout aborts the read; cache serves the same version once'
   assert.deepEqual(a,{n:1});assert.deepEqual(b,{n:1});assert.equal(runs,1);
   // statement_timeout enforcement is a real-Postgres behaviour (PGlite does not enforce it): see tests/bounded-timeout.pg.mjs
 });
+test('57014 is converted so the pool retry text match cannot repeat the query',async()=>{
+  const {ReadBudgetError}=await import('../app/lib/bounded-read.ts');clearBoundedReadCache();let calls=0;
+  const fake={async query(sql){if(/set_config/.test(sql))return{rows:[]};if(/to_regclass/.test(sql))return{rows:[{ok:false}]};return{rows:[]};}};
+  await assert.rejects(boundedRead(fake,'o','k',async()=>{calls++;const e=new Error('canceling statement due to statement timeout');e.code='57014';throw e;}),e=>e instanceof ReadBudgetError&&!/timeout|503|Connection/.test(e.message));
+  assert.equal(calls,1);
+});

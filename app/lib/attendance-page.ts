@@ -1,7 +1,7 @@
 // Bounded read for the Attendance page: the branch's check-ins today (ALL of the branch's visits of that day, as the page counts them) and the newest ATTENDANCE_ROWS visits
 // in the page's order `b.day.localeCompare(a.day)||b.at.localeCompare(a.at)` (stable, so ties keep position order). Code-point order equals localeCompare only for canonical
 // day/at strings, so any irregular value in the branch returns {status:'fallback'} and the page keeps the legacy path.
-import {boundedRead} from './bounded-read.ts';
+import {boundedRead,budgetGuard} from './bounded-read.ts';
 import type {Scope} from './member-console-source.ts';
 export const ATTENDANCE_ROWS=100;
 export type AttendanceKey={id:string;day:unknown;at:unknown};
@@ -26,7 +26,7 @@ export async function readVisitsByIds(scope:Scope,q:{owner:string;branch:string;
   if(!q.ids.length)return[];
   return scope(q.owner,async c=>{
     await c.query("SELECT set_config('statement_timeout','2000',true)");
-    const rows=(await c.query("SELECT entity_id AS id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND entity_id=ANY($3::text[])",[q.owner,q.branch,q.ids])).rows as {id:string;payload:Record<string,unknown>}[];
+    let rows:{id:string;payload:Record<string,unknown>}[];try{rows=(await c.query("SELECT entity_id AS id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND entity_id=ANY($3::text[])",[q.owner,q.branch,q.ids])).rows as typeof rows;}catch(e){return budgetGuard(e);}
     const by=new Map(rows.map(r=>[r.id,r.payload]));return q.ids.flatMap(i=>by.has(i)?[by.get(i)!]:[]);
   });
 }

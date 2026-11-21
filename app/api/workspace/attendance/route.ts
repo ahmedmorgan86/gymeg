@@ -1,4 +1,5 @@
 import {assertRequestTenant} from '../../../lib/request-tenant';
+import {ReadBudgetError} from '../../../lib/bounded-read';
 import {CommercialError} from '../../../lib/licensing';
 import {context,readSpaceMeta,reply} from '../../../lib/server-workspace';
 import {withScope} from '../../../lib/database';
@@ -19,4 +20,4 @@ export async function GET(request:Request){try{
  const ids=url.searchParams.get('ids');
  if(ids!==null)return reply({status:'ok',rows:await readVisitsByIds(withScope as unknown as Scope,{owner:ctx.owner,branch,ids:ids?ids.split(','):[]})});
  return reply(await readAttendance(withScope as unknown as Scope,{owner:ctx.owner,branch,day}));
- }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);console.error('[Attendance Error]:',e);return reply({status:'fallback',reason:'unavailable'});}}
+ }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);if(e instanceof ReadBudgetError)return reply({error:'budget'},503);console.error('[Attendance Error]:',e);return reply({error:'unavailable'},503);}}

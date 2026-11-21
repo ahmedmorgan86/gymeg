@@ -1,4 +1,5 @@
 import {assertRequestTenant} from '../../../lib/request-tenant';
+import {ReadBudgetError} from '../../../lib/bounded-read';
 import {CommercialError} from '../../../lib/licensing';
 import {context,readSpaceMeta,reply} from '../../../lib/server-workspace';
 import {withScope} from '../../../lib/database';
@@ -17,4 +18,4 @@ export async function GET(request:Request){try{
  const cols=new Set(packetQueries(ctx,meta.state.settings).flatMap(q=>q.collections as string[]));
  if(!cols.has('visits')||!cols.has('members'))return reply({error:'forbidden'},403);
  return reply({status:'ok',...await readTodayVisits(withScope as unknown as Scope,{owner:ctx.owner,branch,day})});
- }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);console.error('[Today Visits Error]:',e);return reply({status:'fallback',reason:'unavailable'});}}
+ }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);if(e instanceof ReadBudgetError)return reply({error:'budget'},503);console.error('[Today Visits Error]:',e);return reply({error:'unavailable'},503);}}
