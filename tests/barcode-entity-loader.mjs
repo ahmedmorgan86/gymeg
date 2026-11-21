@@ -4,7 +4,7 @@ import './role-api-loader.mjs';
 import {registerHooks} from 'node:module';
 const sliceUrl=new URL('../app/lib/workspace-slice.ts',import.meta.url).href,extUrl=new URL('../app/lib/extensions.ts',import.meta.url).href;
 registerHooks({load(url,ctx,next){
-  if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export async function withScope(owner,work){return globalThis.__entityDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);});}`};
+  if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__entityDb.query(sql,v),release(){}})});export async function withScope(owner,work){return globalThis.__entityDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);});}`};
   if(url.endsWith('/app/lib/server-workspace.ts')){const real=next(url,ctx);let src=String(real.source);
     src=src.replace('export const readSpace=async()=>structuredClone(globalThis.__qaSpace);','').replace('readSpaceMeta=(...a)=>readSpace(...a),','');
     return{...real,source:src+`
