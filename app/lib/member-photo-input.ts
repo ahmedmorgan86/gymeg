@@ -1,4 +1,4 @@
-import { encodeImage } from './image-encode';
+import { encodeImage } from './image-encode.ts';
 
 export function validateMemberPhotoFile(file: Pick<File, 'type' | 'size'>) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size < 1 || file.size > 12 * 1024 * 1024) throw Error('photoFile');

@@ -35,10 +35,12 @@ interface SourceSize {
 }
 
 function sourceSize(source: EncodeImageSource): SourceSize {
-  if (source instanceof HTMLVideoElement) {
+  // Duck-typed, never instanceof: HTMLVideoElement/HTMLImageElement are
+  // undefined outside the browser and test doubles are not real elements.
+  if ('videoWidth' in source && source.videoWidth > 0) {
     return { width: source.videoWidth, height: source.videoHeight };
   }
-  if (source instanceof HTMLImageElement) {
+  if ('naturalWidth' in source && source.naturalWidth > 0) {
     return { width: source.naturalWidth, height: source.naturalHeight };
   }
   return { width: source.width, height: source.height };
