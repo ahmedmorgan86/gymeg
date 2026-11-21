@@ -6,3 +6,9 @@ export function checkinProfile(previous:GymState|null,next:GymState,branch:strin
  const entries=next.visits.filter(v=>v.branch===branch&&!v.leftAt&&before.get(v.id)!==(v.activeAt??v.at)&&Date.parse(v.activeAt??v.at)<=now+60000&&Date.parse(v.activeAt??v.at)>=now-120000&&members.has(v.member));
  entries.sort((a,b)=>Date.parse(b.activeAt??b.at)-Date.parse(a.activeAt??a.at));return entries[0]?.member??null;
 }
+/** Same selection over an already-known set of OPEN visits of the branch (from the lazy open-visits read). `before` maps id -> activeAt??at of the previous read of the same scope. */
+export function checkinProfileFromOpen(before:ReadonlyMap<string,string>|null,open:{id:string;member:string;at:string;activeAt?:string}[],members:ReadonlySet<string>,now:number):string|null{
+ if(!before)return null;
+ const entries=open.filter(v=>before.get(v.id)!==(v.activeAt??v.at)&&Date.parse(v.activeAt??v.at)<=now+60000&&Date.parse(v.activeAt??v.at)>=now-120000&&members.has(v.member));
+ entries.sort((a,b)=>Date.parse(b.activeAt??b.at)-Date.parse(a.activeAt??a.at));return entries[0]?.member??null;
+}
