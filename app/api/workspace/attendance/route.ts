@@ -4,7 +4,7 @@ import {CommercialError} from '../../../lib/licensing';
 import {context,readSpaceMeta,reply} from '../../../lib/server-workspace';
 import {withScope} from '../../../lib/database';
 import {packetQueries} from '../../../lib/workspace-packet';
-import {readAttendance,readVisitsByIds} from '../../../lib/attendance-page';
+import {readAttendance} from '../../../lib/attendance-page';
 import type {Scope} from '../../../lib/member-console-source';
 export const dynamic='force-dynamic';
 /** Default-off (GYMOS_ATTENDANCE=1). Branch check-ins today and the newest 100 visits in the Attendance page order. Same role and branch scope as the packet. */
@@ -17,7 +17,5 @@ export async function GET(request:Request){try{
  const meta=await readSpaceMeta(ctx.owner);
  const cols=new Set(packetQueries(ctx,meta.state.settings).flatMap(q=>q.collections as string[]));
  if(!cols.has('visits')||!cols.has('members'))return reply({error:'forbidden'},403);
- const ids=url.searchParams.get('ids');
- if(ids!==null)return reply({status:'ok',rows:await readVisitsByIds(withScope as unknown as Scope,{owner:ctx.owner,branch,ids:ids?ids.split(','):[]})});
  return reply(await readAttendance(withScope as unknown as Scope,{owner:ctx.owner,branch,day}));
  }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);if(e instanceof ReadBudgetError)return reply({error:'budget'},503);console.error('[Attendance Error]:',e);return reply({error:'unavailable'},503);}}

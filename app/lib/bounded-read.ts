@@ -9,11 +9,13 @@ const cache=new Map<string,unknown>();
 export class ReadBudgetError extends Error{constructor(){super('read budget exceeded');this.name='ReadBudgetError';}}
 export function budgetGuard(e:unknown):never{if((e as {code?:string})?.code==='57014')throw new ReadBudgetError();throw e;}
 export async function boundedRead<T>(c:Sql,owner:string,key:string,work:()=>Promise<T>):Promise<T>{
-  await c.query("SELECT set_config('statement_timeout',$1,true)",[String(READ_TIMEOUT_MS)]);
-  const v1=await readOwnerVersion(c,owner),k=v1===null?null:owner+'\u0000'+v1+'\u0000'+key;
-  if(k!==null&&cache.has(k))return structuredClone(cache.get(k)) as T;
-  let out:T;try{out=await work();}catch(e){return budgetGuard(e);}
-  if(k!==null&&(await readOwnerVersion(c,owner))===v1){if(cache.size>=MAX_ENTRIES)cache.delete(cache.keys().next().value as string);cache.set(k,structuredClone(out));}
-  return out;
+  try{
+    await c.query("SELECT set_config('statement_timeout',$1,true)",[String(READ_TIMEOUT_MS)]);
+    const v1=await readOwnerVersion(c,owner),k=v1===null?null:owner+'\u0000'+v1+'\u0000'+key;
+    if(k!==null&&cache.has(k))return structuredClone(cache.get(k)) as T;
+    const out=await work();
+    if(k!==null&&(await readOwnerVersion(c,owner))===v1){if(cache.size>=MAX_ENTRIES)cache.delete(cache.keys().next().value as string);cache.set(k,structuredClone(out));}
+    return out;
+  }catch(e){return budgetGuard(e);}
 }
 export function clearBoundedReadCache(){cache.clear();}
