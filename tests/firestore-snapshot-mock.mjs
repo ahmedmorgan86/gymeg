@@ -73,6 +73,16 @@ function queryApi(name, filters, orders, lim) {
     where: (field, op, value) => queryApi(name, [...filters, [field, op, value]], orders, lim),
     orderBy: (field, dir = 'asc') => queryApi(name, filters, [...orders, [field, dir]], lim),
     limit: (n) => queryApi(name, filters, orders, n),
+    // Aggregation: bills ~1 read per 1000 index entries like real Firestore.
+    // Set GYMEG_MOCK_DISABLE_COUNT=1 to simulate an SDK/backend without it.
+    count: () => ({
+      get: async () => {
+        if (process.env.GYMEG_MOCK_DISABLE_COUNT) throw Object.assign(new Error('UNIMPLEMENTED: count aggregation'), { code: 12 });
+        const rows = [...coll(name).entries()].filter(([id, data]) => matches(id, data, filters));
+        __counters.reads += Math.max(1, Math.ceil(rows.length / 1000));
+        return { data: () => ({ count: rows.length }) };
+      },
+    }),
     get: async () => {
       if (__hooks.beforeQueryGet) __hooks.beforeQueryGet(name);
       let rows = [...coll(name).entries()].filter(([id, data]) => matches(id, data, filters));
