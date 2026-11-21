@@ -1,15 +1,18 @@
 import { createHash } from 'node:crypto';
 import { requestClientIp } from './request-origin';
 
-// Mirrors isFirebaseConfigured() without importing the Firestore module at
+// Store selection mirrors the persistence backend without importing modules at
 // load time: the limiter is imported by test harnesses and cold auth routes,
-// and must not drag the firebase-admin chain in unless the shared store is
-// actually used.
-const sharedEnabled = () => process.env.NODE_ENV !== 'test' && Boolean(
+// and must not drag the firebase-admin or pg chain in unless the shared store
+// is actually used. Firestore counters only when Firestore is the persistence
+// backend; Postgres when GYMOS_DATA_BACKEND=postgres (or any deployment with
+// DATABASE_URL and no Firebase envs); otherwise a per-process Map.
+const firestoreEnabled = () => process.env.NODE_ENV !== 'test' && Boolean(
   process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
   process.env.FIREBASE_PROJECT_ID ||
   process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
-);
+) && process.env.GYMOS_DATA_BACKEND !== 'postgres';
+const postgresEnabled = () => process.env.NODE_ENV !== 'test' && !firestoreEnabled() && Boolean(process.env.DATABASE_URL);
 
 // Rate limiting for unauthenticated auth endpoints.
 //
@@ -19,10 +22,11 @@ const sharedEnabled = () => process.env.NODE_ENV !== 'test' && Boolean(
 //   2. per (scope, IP) with IP_LIMIT per window - one client cannot spray
 //      attempts across many email addresses either.
 //
-// Storage: when Firebase is configured (production), counters live in the
-// shared `auth_rate_limits` Firestore collection so every serverless instance
-// enforces the same limit. Without Firebase (local development and tests) a
-// per-process Map is used, which is sufficient for a single Node instance.
+// Storage: counters live in the shared persistence backend (Firestore
+// `auth_rate_limits` collection, or the gymos.auth_rate_limits table on
+// Postgres deployments) so every serverless instance enforces the same limit.
+// Without a shared store (local development and tests) a per-process Map is
+// used, which is sufficient for a single Node instance.
 // A store outage fails open (logged): identity providers apply their own
 // server-side throttling, and blocking all sign-ins because the counter
 // store is down is the worse failure.
@@ -79,10 +83,40 @@ async function consumeShared(key: string, limit: number, windowMs: number, now: 
   });
 }
 
+async function consumePostgres(key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
+  const { getPool } = await import('./database.ts');
+  const id = docId(key);
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const row = (await client.query('SELECT hits, reset_at FROM gymos.auth_rate_limits WHERE key_hash=$1 FOR UPDATE', [id])).rows[0] as { hits: number; reset_at: string } | undefined;
+    const resetAt = row ? Date.parse(row.reset_at) : 0;
+    if (!row || !Number.isFinite(resetAt) || now >= resetAt) {
+      await client.query(
+        'INSERT INTO gymos.auth_rate_limits(key_hash,hits,reset_at) VALUES($1,1,$2) ON CONFLICT(key_hash) DO UPDATE SET hits=1,reset_at=excluded.reset_at',
+        [id, new Date(now + windowMs).toISOString()],
+      );
+      await client.query('COMMIT');
+      return { allowed: true, retryAfter: 0 };
+    }
+    const hits = row.hits + 1;
+    await client.query('UPDATE gymos.auth_rate_limits SET hits=$2 WHERE key_hash=$1', [id, hits]);
+    await client.query('COMMIT');
+    if (hits > limit) return { allowed: false, retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)) };
+    return { allowed: true, retryAfter: 0 };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function consume(key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
-  if (sharedEnabled()) {
+  const shared = firestoreEnabled() ? consumeShared : postgresEnabled() ? consumePostgres : null;
+  if (shared) {
     try {
-      return await consumeShared(key, limit, windowMs, now);
+      return await shared(key, limit, windowMs, now);
     } catch (error) {
       console.error('[gymeg-rate-limit] shared store unavailable, allowing request', error instanceof Error ? error.message : error);
       return { allowed: true, retryAfter: 0 };
