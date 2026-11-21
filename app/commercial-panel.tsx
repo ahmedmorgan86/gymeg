@@ -1,6 +1,7 @@
 'use client';
 import {WORKSPACE_PATH} from './lib/navigation';
 import ClubHub from './club-hub';
+import SupportNotificationControls from './support-notification-controls';
 import Copyright from './copyright';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -143,6 +144,8 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
    </div>
    <button className="button secondary text-button" disabled={busy} onClick={()=>void send({action:"support.stop"})}>{t("إنهاء جلسة الدعم الحالية","End current support session")}</button>
   </div>}
+
+  {platform&&<SupportNotificationControls ar={ar}/>}
 
   <section className="commercial-hero">
    <span>GymEG BUSINESS</span>
