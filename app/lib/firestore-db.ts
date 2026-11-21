@@ -63,11 +63,79 @@ const SNAPSHOT_MAX_CHUNKS = 8;
 const snapshotRef = (db: Firestore, owner: string, chunk: number) =>
   db.collection('gym_state_snapshots').doc(`${owner}_${chunk}`);
 
-// Reads the gzipped snapshot chunks for an exact revision. Returns null when
-// no complete snapshot for that revision exists; never returns a state for a
+// Circuit breaker for the entity-scan and photo-reattach read paths: a single
+// read may never pull more documents than this (override with
+// GYMEG_MAX_SCAN_DOCS). Over the cap the read fails closed instead of silently
+// burning the daily quota; a snapshot backfill (below) is what makes scans
+// one-time per club. Read at call time so tests and operators can adjust it.
+function maxScanDocs(): number {
+  return Math.max(100, Number(process.env.GYMEG_MAX_SCAN_DOCS) || 25_000);
+}
+export class ScanBudgetError extends Error {
+  readonly scanned: number;
+  readonly cap: number;
+  constructor(scanned: number, cap: number) {
+    super(`scanBudget:${scanned}>${cap}`);
+    this.scanned = scanned;
+    this.cap = cap;
+  }
+}
+
+// Builds gzipped snapshot chunks for a state, or null when the stripped state
+// is too large to snapshot. Member photo payloads are EXCLUDED: they already
+// live as individual gym_photos documents written in the same transaction, so
+// embedding them would duplicate the largest bytes of the club into every
+// snapshot write and push photo-heavy clubs past the chunk cap. The ids of
+// stripped members ride along so a reader can re-attach the photos.
+function buildSnapshotChunks(state: GymState): { chunks: Buffer[]; photoIds: string[] } | null {
+  const photoIds: string[] = [];
+  const slim = {
+    ...state,
+    members: state.members.map(member => {
+      if (typeof member.photo !== 'string' || member.photo.length === 0) return member;
+      photoIds.push(member.id);
+      const { photo: _stripped, ...rest } = member;
+      return rest;
+    }),
+  };
+  const buffer = gzipSync(JSON.stringify({ s: slim, p: photoIds }));
+  const chunks: Buffer[] = [];
+  for (let offset = 0; offset < buffer.length; offset += SNAPSHOT_CHUNK_BYTES) {
+    chunks.push(buffer.subarray(offset, offset + SNAPSHOT_CHUNK_BYTES));
+  }
+  return chunks.length >= 1 && chunks.length <= SNAPSHOT_MAX_CHUNKS ? { chunks, photoIds } : null;
+}
+
+// Best-effort snapshot backfill after a legacy entity-scan read: later cold
+// reads of this revision cost 1 + chunks document reads instead of another
+// full scan. Not transactional by design: chunk payloads carry their revision
+// and readers verify it against the state document, so a stale backfill can
+// never be served; a racing persist overwrites the chunks atomically.
+async function backfillSnapshot(db: Firestore, owner: string, revision: number, state: GymState): Promise<void> {
+  try {
+    const built = buildSnapshotChunks(state);
+    if (!built) return;
+    const batch = db.batch();
+    built.chunks.forEach((chunk, index) => {
+      batch.set(snapshotRef(db, owner, index), { revision, chunks: built.chunks.length, data: chunk });
+    });
+    await batch.commit();
+    await db.collection('gym_states').doc(owner).update({ _snapshotChunks: built.chunks.length });
+  } catch (error) {
+    console.warn('snapshot_backfill_failed', error);
+  }
+}
+
+// Reads the gzipped snapshot chunks for an exact revision and re-attaches
+// member photos from their gym_photos documents. Returns null when no
+// complete snapshot for that revision exists; never returns a state for a
 // different revision, so a snapshot can never serve stale data after another
-// writer has advanced the state document.
+// writer has advanced the state document. A failed Firestore read is NOT a
+// missing snapshot: it is logged and rethrown so a transient error is never
+// silently converted into a full entity scan. Only a corrupt payload (which
+// no retry would fix) falls back to the bounded scan, and that is logged too.
 async function readSnapshot(db: Firestore, owner: string, revision: number): Promise<GymState | null> {
+  let packed: { s: GymState; p: string[] };
   try {
     const first = await snapshotRef(db, owner, 0).get();
     if (!first.exists) return null;
@@ -80,10 +148,32 @@ async function readSnapshot(db: Firestore, owner: string, revision: number): Pro
       if (!partData) return null;
       parts.push(Buffer.from(partData));
     }
-    return JSON.parse(gunzipSync(Buffer.concat(parts)).toString('utf8')) as GymState;
-  } catch {
-    return null;
+    packed = JSON.parse(gunzipSync(Buffer.concat(parts)).toString('utf8')) as { s: GymState; p: string[] };
+  } catch (error) {
+    // A corrupt payload (bad gzip/JSON) is permanent: log it and fall back
+    // to the bounded scan, whose backfill repairs the snapshot. Anything
+    // else (network, quota, permissions) is transient: fail closed rather
+    // than convert it into a full entity scan.
+    const corrupt = error instanceof SyntaxError || (typeof (error as { code?: unknown }).code === 'string' && (error as { code: string }).code.startsWith('Z_'));
+    if (corrupt) {
+      console.warn('snapshot_corrupt_fallback_scan', error);
+      return null;
+    }
+    console.error('snapshot_read_failed', error);
+    throw error;
   }
+  const photoIds = Array.isArray(packed.p) ? packed.p : [];
+  if (photoIds.length > 0) {
+    if (photoIds.length > maxScanDocs()) throw new ScanBudgetError(photoIds.length, maxScanDocs());
+    const docs = await Promise.all(photoIds.map(id => db.collection('gym_photos').doc(`${owner}_${id}`).get()));
+    const photos: Record<string, string> = {};
+    docs.forEach((doc, index) => {
+      const content = doc.exists ? (doc.data() as { content?: string }).content : undefined;
+      if (typeof content === 'string') photos[photoIds[index]] = content;
+    });
+    packed.s.members = packed.s.members.map(member => (photos[member.id] ? { ...member, photo: photos[member.id] } : member));
+  }
+  return packed.s;
 }
 
 function sanitize<T>(value: T): T {
@@ -174,18 +264,24 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       return { state, revision: data.revision };
     }
 
-    // Read entities
+    // Read entities. Bounded: never scan more than MAX_SCAN_DOCS documents in
+    // a single read - fail closed rather than burn the daily quota silently.
     const entitiesSnap = await db.collection('gym_entities')
       .where('owner_id', '==', owner)
       .orderBy('collection')
       .orderBy('position')
+      .limit(maxScanDocs() + 1)
       .get();
+    if (entitiesSnap.docs.length > maxScanDocs()) throw new ScanBudgetError(entitiesSnap.docs.length, maxScanDocs());
     const entities = entitiesSnap.docs.map(d => d.data() as Entity);
 
-    // Read photos
+    // Read photos. The remaining budget is always >= 1 here because the
+    // entities check above already threw when the cap was exceeded.
     const photosSnap = await db.collection('gym_photos')
       .where('owner_id', '==', owner)
+      .limit(maxScanDocs() - entitiesSnap.docs.length + 1)
       .get();
+    if (entitiesSnap.docs.length + photosSnap.docs.length > maxScanDocs()) throw new ScanBudgetError(entitiesSnap.docs.length + photosSnap.docs.length, maxScanDocs());
     const photos = Object.fromEntries(
       photosSnap.docs.map(d => {
         const pd = d.data();
@@ -195,6 +291,8 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
 
     const state = normalize(assembleState(parsedMeta, entities, photos));
     cacheSpace(owner, data.revision, state);
+    // One-time bootstrap: persist a snapshot so later cold reads skip the scan.
+    await backfillSnapshot(db, owner, data.revision, state);
     return { state, revision: data.revision };
   }
 
@@ -327,21 +425,17 @@ export async function firestorePersistSpace(
     // rides on the state document so stale extra chunks from a larger older
     // state can be deleted here without an extra read. Oversized states skip
     // the snapshot; reads fall back to the entity scan for those revisions.
-    const snapshotBuffer = gzipSync(JSON.stringify(next));
-    const snapshotChunks: Buffer[] = [];
-    for (let offset = 0; offset < snapshotBuffer.length; offset += SNAPSHOT_CHUNK_BYTES) {
-      snapshotChunks.push(snapshotBuffer.subarray(offset, offset + SNAPSHOT_CHUNK_BYTES));
-    }
+    const built = buildSnapshotChunks(next);
     const previousChunks = typeof (curData as { _snapshotChunks?: unknown })._snapshotChunks === 'number'
       ? (curData as unknown as { _snapshotChunks: number })._snapshotChunks
       : 0;
-    const snapshotWritten = snapshotChunks.length >= 1 && snapshotChunks.length <= SNAPSHOT_MAX_CHUNKS;
-    if (snapshotWritten) {
-      snapshotChunks.forEach((chunk, index) => {
-        tx.set(snapshotRef(db, owner, index), { revision: newRevision, chunks: snapshotChunks.length, data: chunk });
+    const snapshotWritten = built !== null;
+    if (built) {
+      built.chunks.forEach((chunk, index) => {
+        tx.set(snapshotRef(db, owner, index), { revision: newRevision, chunks: built.chunks.length, data: chunk });
       });
     }
-    for (let index = snapshotWritten ? snapshotChunks.length : 0; index < previousChunks; index++) {
+    for (let index = built ? built.chunks.length : 0; index < previousChunks; index++) {
       tx.delete(snapshotRef(db, owner, index));
     }
 
@@ -350,7 +444,7 @@ export async function firestorePersistSpace(
       payload: JSON.stringify(after.metadata),
       revision: newRevision,
       updated_at: new Date().toISOString(),
-      _snapshotChunks: snapshotWritten ? snapshotChunks.length : 0,
+      _snapshotChunks: built ? built.chunks.length : 0,
     });
 
     // Append workspace outbox
