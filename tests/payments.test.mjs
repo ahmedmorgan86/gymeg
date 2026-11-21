@@ -22,7 +22,7 @@ async function seed(owner,state){
   for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
 }
 async function current(owner){const r=await db.query("SELECT collection,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY position,entity_id",[owner]);const s=fixture();const by=c=>r.rows.filter(x=>x.collection===c).map(x=>x.payload);s.members=by('members');s.visits=by('visits');s.payments=by('payments');s.invoices=by('invoices');return s;}
-const {readPaymentsSummary,readPaymentsExport,PAYMENTS_PAGE}=await import('../app/lib/payments-page.ts');
+const {readPaymentsSummary,readPaymentsExport,PAYMENTS_PAGE,SUMMARY_CHUNK}=await import('../app/lib/payments-page.ts');
 const {addDays}=await import('../app/lib/domain.ts');
 const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
 let sd=7;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
@@ -54,4 +54,16 @@ test('payments summary/trend/export == legacy expressions, paging, odd data, sta
   assert.ok(o.status==='unavailable'||o.status==='ok'&&false,'odd minor'+JSON.stringify(o).slice(0,80));
   await assert.rejects(readPaymentsSummary(scope,{owner:'P1',branch:'a',today:'x',period:7}),RangeError);
   await assert.rejects(readPaymentsSummary(scope,{owner:'P1',branch:'a',today:TODAY,period:0}),RangeError);
+});
+test('summary streams in chunks with legacy float order and fails closed on inexact month sums',async()=>{
+  const TODAY='2026-03-14',s=fixture();s.visits=[];s.invoices=[];s.payments=[];const m=s.members[0];
+  for(let n=0;n<SUMMARY_CHUNK*2+313;n++)s.payments.push({id:'q'+n,member:m.id,branch:m.branch,minor:n%7===0?Math.round(rnd()*1e6)/7:1+Math.floor(rnd()*99999),day:pick(['2026-02-10','2026-02-11','2026-02-12'].concat(n%3?['2026-03-12','2026-03-13']:[])),voided:rnd()<.1});
+  // fractional minors only in February (outside the month), integers in March
+  for(const p of s.payments)if(p.day.startsWith('2026-03'))p.minor=Math.round(p.minor);
+  await seed('P2',s);const cur=await current('P2'),pays=cur.payments.filter(p=>p.branch===m.branch);
+  const r=await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40});assert.equal(r.status,'ok');
+  assert.deepEqual(r.trend,Array.from({length:40},(_,i)=>{const day=addDays(TODAY,i-39);return pays.filter(p=>!p.voided&&p.day===day).reduce((v,p)=>v+p.minor/100,0);}));
+  assert.equal(r.monthSum,pays.filter(p=>!p.voided&&p.day.startsWith('2026-03')).reduce((a,p)=>a+p.minor,0));
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{minor}','10.5') WHERE owner_id='P2' AND collection='payments' AND payload->>'day'='2026-03-13' AND entity_id=(SELECT entity_id FROM gymos.gym_entities WHERE owner_id='P2' AND collection='payments' AND payload->>'day'='2026-03-13' LIMIT 1)");
+  assert.deepEqual(await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40}),{status:'unavailable',reason:'non-integer-minor'});
 });
