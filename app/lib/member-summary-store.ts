@@ -151,13 +151,14 @@ export async function readOwnerVersion(c:Sql,owner:string):Promise<string|null>{
 /** Headline total of the Operations dues tab for a whole branch from the maintained per-member summaries instead of scanning every invoice and allocation.
  *  Exact or null: null (caller runs the exact scan) unless the owner is ready, every dirty member was refreshed, every summary carries finite dues, and the invoice count the
  *  summaries saw for this branch equals the branch's real invoice count (invoices of deleted/unknown members make them differ). */
-export async function branchDuesTotal(c:Sql,owner:string,branch:string):Promise<number|null>{
+export async function branchDuesTotal(c:Sql,owner:string,branch:string,diag?:{gap?:number}):Promise<number|null>{
   if(!await ready(c,owner))return null;
   if(Number(((await c.query('SELECT count(*) AS n FROM (SELECT 1 FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 LIMIT $2) x',[owner,2*REFRESH_MAX+1])).rows[0] as {n:string}).n)>2*REFRESH_MAX)return null; // cold backfill or a heavy write burst: refresh waves would be thrown away next to the scan, so the caller scans directly and the background drain catches up
   for(let wave=0;wave<3;wave++){const r=await refreshDirtySummaries(c,owner);if(r.status!=='ok')return null;if(r.remaining===0)break;if(wave===2)return null;}
   const r=(await c.query("SELECT count(*) FILTER (WHERE stored->'dues' IS NULL) AS nodues,count(*) FILTER (WHERE stored->'dues'->$2 IS NOT NULL AND (jsonb_typeof(stored->'dues'->$2->'sum')<>'number' OR stored->'dues'->$2->>'odd'='true')) AS bad,COALESCE(sum((stored->'dues'->$2->>'n')::int),0) AS n,COALESCE(sum((stored->'dues'->$2->>'sum')::numeric),0)::text AS total FROM gymos.gym_member_summaries WHERE owner_id=$1",[owner,branch])).rows[0] as {nodues:string;bad:string;n:string;total:string};
   const inv=Number(((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices' AND branch=$2",[owner,branch])).rows[0] as {n:string}).n);
   const dirty=Number(((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0] as {n:string}).n);
+  if(Number(r.n)!==inv&&dirty===0&&diag)diag.gap=inv-Number(r.n); // invoices no member summary accounts for (no member key): the exact scan runs and the gap is reported, not hidden
   if(dirty!==0||Number(r.nodues)!==0||Number(r.bad)!==0||Number(r.n)!==inv)return null;
   const total=Number(r.total);return Number.isFinite(total)?total:null;
 }

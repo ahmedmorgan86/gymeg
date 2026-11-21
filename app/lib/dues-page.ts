@@ -8,7 +8,7 @@ import type {Scope} from './member-console-source.ts';
 export const DUES_PAGE=50; // transfer chunk (judgment), not a limit: the page keeps offering the next chunk
 export type DueRow={invoice:Record<string,unknown>;outstanding:number;name:string|null;allocations:{payment:string;found:boolean;day:string|null;method:string|null;voided:boolean|null}[]};
 export type Cursor={pos:number;id:string};
-export type DuesData={status:'ok';version:string;total?:number;rows:DueRow[];next:Cursor|null}|{status:'stale'}|{status:'unavailable';reason?:'invalid-data';invoices?:string[]};
+export type DuesData={status:'ok';version:string;total?:number;unmaintainedInvoices?:number;rows:DueRow[];next:Cursor|null}|{status:'stale'}|{status:'unavailable';reason?:'invalid-data';invoices?:string[]};
 const OUT=`CASE WHEN COALESCE(i.payload->>'voided','false')='true' THEN 0 ELSE (i.payload->>'total')::numeric - COALESCE((SELECT sum((a->>'minor')::numeric) FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.payload->'allocations')='array' THEN i.payload->'allocations' ELSE '[]'::jsonb END) a WHERE EXISTS(SELECT 1 FROM gymos.gym_entities p WHERE p.owner_id=i.owner_id AND p.collection='payments' AND p.entity_id=a->>'payment' AND COALESCE(p.payload->>'voided','false')<>'true' AND p.payload->>'member'=i.payload->>'member' AND p.payload->>'branch'=i.payload->>'branch')),0) END`;
 /** Invoice rows whose stored shape the legacy JS arithmetic treats differently from this SQL (non-boolean voided flags are JS-truthy, a missing or non-numeric total or minor becomes NaN). Such a branch is reported unavailable instead of quietly summing to a wrong or zero total, so the caller keeps the exact packet path. */
 const ODD=`(jsonb_typeof(i.payload->'voided') NOT IN ('boolean','null') OR jsonb_typeof(i.payload->'total') IS DISTINCT FROM 'number' OR jsonb_typeof(i.payload->'allocations') IS DISTINCT FROM 'array' OR EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(i.payload->'allocations')='array' THEN i.payload->'allocations' ELSE '[]'::jsonb END) a LEFT JOIN gymos.gym_entities p ON p.owner_id=i.owner_id AND p.collection='payments' AND p.entity_id=a->>'payment' WHERE jsonb_typeof(a->'minor') IS DISTINCT FROM 'number' OR jsonb_typeof(p.payload->'voided') NOT IN ('boolean','null')))`;
@@ -18,7 +18,8 @@ export async function readDues(scope:Scope,q:{owner:string;branch:string;member?
     const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable'} as const;
     if(q.after&&q.ver!==ver)return{status:'stale'} as const;
     const mem=q.member!==undefined,args:unknown[]=[q.owner,q.branch,...(mem?[q.member]:[])],M=mem?" AND i.payload->>'member'=$3":'';
-    const fast=q.after||mem?null:await branchDuesTotal(c,q.owner,q.branch); // whole-branch headline from the maintained summaries when provably exact, else the exact scan below
+    const diag:{gap?:number}={};
+    const fast=q.after||mem?null:await branchDuesTotal(c,q.owner,q.branch,diag); // whole-branch headline from the maintained summaries when provably exact, else the exact scan below
     let oddRows=0;
     const total=q.after?undefined:fast!==null?fast:await (async()=>{const r=(await c.query(`SELECT COALESCE(sum(${OUT}),0)::text AS n,count(*) FILTER (WHERE ${ODD}) AS odd FROM gymos.gym_entities i WHERE i.owner_id=$1 AND i.collection='invoices' AND i.branch=$2${M}`,args)).rows[0] as {n:string;odd:string};oddRows+=Number(r.odd);return Number(r.n);})();
     const k=args.length;const cur=q.after?` AND (i.position,i.entity_id)>($${k+1}::bigint,$${k+2}::text)`:'';
@@ -29,6 +30,6 @@ export async function readDues(scope:Scope,q:{owner:string;branch:string;member?
       return{status:'unavailable',reason:'invalid-data',invoices:bad} as const;}
     if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
     const more=rows.length>DUES_PAGE,page=more?rows.slice(0,DUES_PAGE):rows,last=page[page.length-1];
-    return{status:'ok',version:ver,...(total!==undefined?{total}:{}),rows:page.map(r=>({invoice:r.payload,outstanding:Number(r.outstanding),name:r.name,allocations:r.allocs})),next:more?{pos:Number(last.position),id:last.entity_id}:null} as const;
+    return{status:'ok',version:ver,...(total!==undefined?{total}:{}),...(diag.gap?{unmaintainedInvoices:diag.gap}:{}),rows:page.map(r=>({invoice:r.payload,outstanding:Number(r.outstanding),name:r.name,allocations:r.allocs})),next:more?{pos:Number(last.position),id:last.entity_id}:null} as const;
   },o=>o.status==='ok'));
 }

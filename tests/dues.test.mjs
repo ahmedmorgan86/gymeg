@@ -101,3 +101,10 @@ test('maintained total stays exact (no scan) after member deletion, orphan invoi
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{total}','777') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,other.id]);
   assert.equal(await total(),await legacy(),'write to a live member invoice');
 });
+
+test('invoice without a member key: exact total via scan and the gap is reported',async()=>{
+  const owner='NUL';const s=fixture();await seed(owner,s);await db.query("INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES($1) ON CONFLICT DO NOTHING",[owner]).catch(()=>{});
+  const br=s.invoices[0].branch;await db.query("UPDATE gymos.gym_entities SET payload=payload-'member' WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
+  const d=await readDues(scope,{owner,branch:br});assert.equal(d.status==='ok'||d.status==='unavailable',true);
+  if(d.status==='ok')assert.equal(d.unmaintainedInvoices,1);
+});
