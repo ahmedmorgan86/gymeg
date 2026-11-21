@@ -13,6 +13,7 @@ CREATE INDEX IF NOT EXISTS gym_entities_oversized_freezes
   WHERE collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000;
 
 -- Member visit history in the profile's display order (at descending in plain code-point order, ties by position). HELD with the rest of this file.
-CREATE INDEX IF NOT EXISTS gym_entities_visit_member_at ON gymos.gym_entities (owner_id,(payload->>'member'),((payload->>'at') COLLATE "C") DESC,position) WHERE collection='visits';
+CREATE INDEX IF NOT EXISTS gym_entities_visit_member_at ON gymos.gym_entities (owner_id,(payload->>'member'),((payload->>'at') COLLATE "C") DESC,position) WHERE collection='visits' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$';
+-- Only canonical `at` values are indexed: an arbitrary-length string would exceed the btree row limit and block the insert (SQLSTATE 54000); those rows are served by the exact irregular path.
 -- Visits whose `at` is missing, not a string, or not the canonical ISO form. Empty in normal clubs, so the history route's order check is an index probe. HELD.
 CREATE INDEX IF NOT EXISTS gym_entities_visit_irregular_at ON gymos.gym_entities (owner_id,(payload->>'member')) WHERE collection='visits' AND (jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$');

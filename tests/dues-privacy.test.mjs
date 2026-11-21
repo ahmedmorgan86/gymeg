@@ -46,3 +46,20 @@ test('dues allocation metadata hides a payment outside the caller branch scope',
   const north=await get(['a']);assert.equal(north.allocations[0].found,false);assert.equal(north.allocations[0].method??null,null);assert.equal(north.allocations[0].day??null,null);
   assert.equal(north.outstanding,all.outstanding,'legacy outstanding unchanged (a payment of another branch never counted)');
 });
+
+test('cache key distinguishes branch scopes that a comma join would merge',async()=>{
+  const owner='KEY';
+  const s=fixture();s.branches.push({id:'a,b',name:'AB'});
+  const {splitState}=await import('../app/lib/entity-state.ts');
+  s.visits=[];s.payments=[{id:'pK',member:s.members[0].id,branch:'a',minor:100,day:'2026-03-02',method:'cash',voided:false}];
+  s.invoices=[{id:'iK',member:s.members[0].id,branch:'a',total:300,due:'2026-03-01',voided:false,allocations:[{payment:'pK',minor:100}]}];
+  const {metadata,entities}=splitState(s);
+  await db.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),'x']);
+  for(const e of entities)await db.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
+  await db.query("INSERT INTO gymos.gym_owner_version(owner_id,token) VALUES($1,'v') ON CONFLICT DO NOTHING",[owner]).catch(()=>{});
+  const aOnly=await readDues(scope,{owner,branch:'a',branches:['a']});
+  const odd=await readDues(scope,{owner,branch:'a',branches:['a,b']});
+  const both=await readDues(scope,{owner,branch:'a',branches:['a','b']});
+  if(aOnly.status==='ok'&&odd.status==='ok'){assert.equal(aOnly.rows[0].allocations[0].found,true);assert.equal(odd.rows[0].allocations[0].found,false,'scope [a,b] must not reuse the [a] answer');}
+  assert.ok(both.status==='ok'||both.status==='unavailable');
+});

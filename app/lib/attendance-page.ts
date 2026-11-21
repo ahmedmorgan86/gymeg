@@ -20,7 +20,7 @@ export async function readAttendance(scope:Scope,q:{owner:string;branch:string;d
     if(irregular.x||paging){
       // Every page of one answer must come from one owner version: pages carry the version they were read at, and a page whose version moved (before, during or after its read) answers 'stale' so the browser restarts.
       const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable'} as const;if(paging&&q.ver!==ver)return{status:'stale'} as const;
-      const todayCount=paging?undefined:Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+      const todayCount=paging?undefined:Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3 AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$'",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
       const top=paging?[]:(await c.query(`SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number;entity_id:string}[];
       // Steer the planner to the partial index (key owner,branch,position) for this statement only: with LIMIT it otherwise scans the whole branch in position order (~51k buffers measured).
       await c.query("SELECT set_config('enable_seqscan','off',true)");
@@ -31,7 +31,7 @@ export async function readAttendance(scope:Scope,q:{owner:string;branch:string;d
       if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
       return{status:'irregular',version:ver,...(todayCount!==undefined?{todayCount}:{}),canonical:top.map(cand),candidates:page.map(cand),next:more?{pos:Number(page[page.length-1].position),id:page[page.length-1].entity_id}:null} as const;
     }
-    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3 AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$'",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
     const rows=(await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows.map(r=>(r as {payload:Record<string,unknown>}).payload);
     return{status:'ok',todayCount,rows} as const;
   },o=>o.status==='ok'||o.status==='irregular'));
