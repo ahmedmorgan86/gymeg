@@ -20,6 +20,8 @@ export type SliceQuery={
   /** Newest-first when true (highest position first). */
   desc?:boolean;
   limit?:number;
+  /** Only rows with no payload.leftAt (open visits). */
+  open?:boolean;
 };
 export type Meta={metadata:Record<string,unknown>;revision:number};
 export interface SliceBackend{
@@ -57,6 +59,7 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
       if(q.branches){values.push(q.branches);where.push(`branch=ANY($${values.length}::text[])`);}
       if(q.ids){values.push(q.ids);where.push(`entity_id=ANY($${values.length}::text[])`);}
       if(q.match){values.push(q.match.values);where.push(`payload->>'${q.match.field}'=ANY($${values.length}::text[])`);}
+      if(q.open)where.push("payload->>'leftAt' IS NULL");
       if(q.after!==undefined){values.push(q.after);where.push(`position>$${values.length}`);}
       if(q.before!==undefined){values.push(q.before);where.push(`position<$${values.length}`);}
       values.push(clampLimit(q.limit));
@@ -73,14 +76,17 @@ type FsDoc={exists:boolean;data():unknown};
 type FsQuery={where(f:string,op:string,v:unknown):FsQuery;orderBy(f:string,d?:string):FsQuery;startAfter(v:unknown):FsQuery;limit(n:number):FsQuery;get():Promise<{docs:{data():unknown}[]}>;count?():{get():Promise<{data():{count:number}}>}};
 type FsDb={collection(name:string):FsQuery&{doc(id:string):{get():Promise<FsDoc>}}};
 /** Firestore backend. Entity ids are deterministic (`owner_collection_id`), so id lookups are direct document gets. */
-export function firestoreBackend(getDb:()=>FsDb):SliceBackend{
+export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):SliceBackend{
+  const indexed=opts.indexed!==false;
   return{
     async revision(owner){const s=await getDb().collection('gym_states').doc(owner).get();return s.exists?Number((s.data() as {revision?:number}).revision??0):null;},
-    async meta(owner){const s=await getDb().collection('gym_states').doc(owner).get();if(!s.exists)return null;const d=s.data() as {payload:string;revision:number};return{metadata:JSON.parse(d.payload),revision:Number(d.revision)};},
+    async meta(owner){if(!indexed)return null; // composite indexes not confirmed: callers fall back to the full read
+      const s=await getDb().collection('gym_states').doc(owner).get();if(!s.exists)return null;const d=s.data() as {payload:string;revision:number};return{metadata:JSON.parse(d.payload),revision:Number(d.revision)};},
     async entities(owner,q){
       if(!checkQuery(q))return [];
+      if(!indexed)throw new Error('firestore slice indexes not enabled');
       const db=getDb();
-      if(q.ids){const c=q.collections[0];const snaps=await Promise.all(q.ids.slice(0,MAX_SLICE).map(id=>db.collection('gym_entities').doc(`${owner}_${c}_${id}`).get()));return snaps.filter(s=>s.exists).map(s=>s.data() as Entity).filter(e=>!q.branches||(e.branch!==null&&q.branches.includes(e.branch)));}
+      if(q.ids){const c=q.collections[0];const snaps=await Promise.all(q.ids.slice(0,MAX_SLICE).map(id=>db.collection('gym_entities').doc(`${owner}_${c}_${id}`).get()));return snaps.filter(s=>s.exists).map(s=>s.data() as Entity).filter(e=>!q.open||!(e.payload as {leftAt?:unknown}).leftAt).filter(e=>!q.branches||(e.branch!==null&&q.branches.includes(e.branch)));}
       const out:Entity[]=[];
       for(const c of q.collections){
         // Firestore `in` allows 30 values; larger branch lists are queried in chunks.
@@ -99,7 +105,8 @@ export function firestoreBackend(getDb:()=>FsDb):SliceBackend{
         }
       }
       const sorted=out.sort((a,b)=>a.collection.localeCompare(b.collection)||(q.desc?b.position-a.position:a.position-b.position));
-      return complete(q,sorted.slice(0,clampLimit(q.limit)*q.collections.length),q.collections.length);
+      const kept=q.open?sorted.filter(e=>!(e.payload as {leftAt?:unknown}).leftAt):sorted;
+      return complete(q,kept.slice(0,clampLimit(q.limit)*q.collections.length),q.collections.length);
     },
     async photo(owner,memberId){const s=await getDb().collection('gym_photos').doc(`${owner}_${memberId}`).get();return s.exists?String((s.data() as {content:string}).content):null;},
     async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
@@ -112,6 +119,23 @@ export function firestoreBackend(getDb:()=>FsDb):SliceBackend{
   };
 }
 
+
+/**
+ * Snapshot guard: meta and entity rows are separate reads. Every commit bumps the
+ * revision in the same transaction as its row writes, so if the revision is
+ * unchanged after the reads, no commit landed in between. After a few changed
+ * revisions this returns null and callers use the single-snapshot full read.
+ */
+export async function consistently<T>(be:SliceBackend,owner:string,work:(meta:Meta)=>Promise<T>):Promise<{value:T;revision:number}|null>{
+  for(let attempt=0;attempt<3;attempt++){
+    const meta=await be.meta(owner);
+    if(!meta||meta.metadata._entityStorage!==1)return null;
+    const value=await work(meta);
+    if(await be.revision(owner)===meta.revision)return{value,revision:meta.revision};
+  }
+  return null;
+}
+
 export type Sliced={state:GymState;revision:number;partial:true};
 /** Revision only: one row / one document. null when the club has no state yet. */
 export const readRevisionOnly=(be:SliceBackend,owner:string)=>be.revision(owner);
@@ -121,12 +145,12 @@ export const readRevisionOnly=(be:SliceBackend,owner:string)=>be.revision(owner)
  * back to the full read. Every other collection is an empty array.
  */
 export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|SliceQuery[]|null|((metadata:Record<string,unknown>)=>SliceQuery[]),normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
-  const meta=await be.meta(owner);
-  if(!meta||meta.metadata._entityStorage!==1)return null;
-  const queries=query===null?[]:typeof query==='function'?query(meta.metadata):Array.isArray(query)?query:[query];
-  const rows=(await Promise.all(queries.map(q=>be.entities(owner,q)))).flat();
-  const state=normalizeState(assembleState(meta.metadata,rows,{}));
-  return{state,revision:meta.revision,partial:true};
+  const got=await consistently(be,owner,async meta=>{
+    const queries=query===null?[]:typeof query==='function'?query(meta.metadata):Array.isArray(query)?query:[query];
+    const rows=(await Promise.all(queries.map(q=>be.entities(owner,q)))).flat();
+    return normalizeState(assembleState(meta.metadata,rows,{}));
+  });
+  return got?{state:got.value,revision:got.revision,partial:true}:null;
 }
 
 /**
@@ -136,19 +160,29 @@ export async function readSlice(be:SliceBackend,owner:string,query:SliceQuery|Sl
  * the full state in tests. Returns null for legacy single-payload clubs.
  */
 export async function readMemberSlice(be:SliceBackend,owner:string,memberId:string,branch:string,normalizeState:(s:GymState)=>GymState=s=>s):Promise<Sliced|null>{
-  const meta=await be.meta(owner);
-  if(!meta||meta.metadata._entityStorage!==1)return null;
-  const own=(c:Collection):SliceQuery=>({collections:[c],match:{field:'member',values:[memberId]},branches:[branch]});
-  const first=(await Promise.all([
-    be.entities(owner,{collections:['members'],ids:[memberId],branches:[branch]}),
-    ...(['visits','payments','invoices','trainingAssignments','coaching'] as Collection[]).map(c=>be.entities(owner,own(c))),
-    be.entities(owner,{collections:['plans','classes','shifts'],branches:[branch]}),
-  ])).flat();
-  const assignments=first.filter(e=>e.collection==='trainingAssignments');
-  const programIds=[...new Set(assignments.map(e=>String(e.payload.program)))],assignmentIds=assignments.map(e=>e.entity_id);
-  const second=(await Promise.all([
-    programIds.length?be.entities(owner,{collections:['programs'],ids:programIds,branches:[branch]}):[],
-    assignmentIds.length?be.entities(owner,{collections:['trainingSessions'],match:{field:'assignment',values:assignmentIds},branches:[branch]}):[],
-  ])).flat();
-  return{state:normalizeState(assembleState(meta.metadata,[...first,...second],{})),revision:meta.revision,partial:true};
+  const got=await consistently(be,owner,async meta=>{
+    const own=(c:Collection):SliceQuery=>({collections:[c],match:{field:'member',values:[memberId]},branches:[branch]});
+    const first=(await Promise.all([
+      be.entities(owner,{collections:['members'],ids:[memberId],branches:[branch]}),
+      ...(['visits','payments','invoices','trainingAssignments','coaching'] as Collection[]).map(c=>be.entities(owner,own(c))),
+      be.entities(owner,{collections:['plans','classes','shifts'],branches:[branch]}),
+      // Branch occupancy: open visits only, then every visit of those members so the
+      // "latest visit per member" rule matches presentVisits over the full state.
+      be.entities(owner,{collections:['visits'],branches:[branch],open:true}),
+    ])).flat();
+    const openMembers=[...new Set(first.filter(e=>e.collection==='visits'&&!(e.payload as {leftAt?:unknown}).leftAt).map(e=>String(e.payload.member)))];
+    const assignments=first.filter(e=>e.collection==='trainingAssignments');
+    const programIds=[...new Set(assignments.map(e=>String(e.payload.program)))],assignmentIds=assignments.map(e=>e.entity_id);
+    const coachIds=[...new Set(first.filter(e=>e.collection==='coaching').map(e=>String(e.payload.coach)))];
+    const second=(await Promise.all([
+      programIds.length?be.entities(owner,{collections:['programs'],ids:programIds,branches:[branch]}):[],
+      assignmentIds.length?be.entities(owner,{collections:['trainingSessions'],match:{field:'assignment',values:assignmentIds},branches:[branch]}):[],
+      coachIds.length?be.entities(owner,{collections:['coaches'],ids:coachIds}):[],
+      openMembers.length?be.entities(owner,{collections:['visits'],match:{field:'member',values:openMembers},branches:[branch]}):[],
+      openMembers.length?be.entities(owner,{collections:['members'],ids:openMembers,branches:[branch]}):[],
+    ])).flat();
+    const seen=new Set<string>(),rows=[...first,...second].filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
+    return normalizeState(assembleState(meta.metadata,rows,{}));
+  });
+  return got?{state:got.value,revision:got.revision,partial:true}:null;
 }

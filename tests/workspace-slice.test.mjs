@@ -37,12 +37,12 @@ test('Postgres slices read only what is asked, scoped to branch, owner and page'
     assert.equal(await readRevisionOnly(backend,'nobody'),null);
 
     stat.rows=0;const meta=await readSlice(backend,'club1',null);
-    assert.equal(stat.rows,1,'settings read touches only the state row');
+    assert.equal(stat.rows,2,'settings read: state row plus the revision re-check, no entity rows');
     assert.equal(meta.state.members.length,0);assert.equal(meta.state.branches.length,3);assert.equal(meta.revision,7);
 
     stat.rows=0;const members=await readSlice(backend,'club1',{collections:['members'],branches:['a']});
     assert.equal(members.state.members.length,20);assert.ok(members.state.members.every(m=>m.branch==='a'));assert.equal(members.state.visits.length,0);
-    assert.equal(stat.rows,21,'20 branch-a members + 1 state row, not 480 entities');
+    assert.equal(stat.rows,22,'20 branch-a members + state row + revision re-check, not 480 entities');
     assert.equal(members.state.members[0].photo,undefined,'photos stay out of list reads');
 
     const one=await readSlice(backend,'club1',{collections:['members'],ids:['m5']});
@@ -97,9 +97,9 @@ test('Firestore slices read documents by id, branch and page, never the whole cl
   const {stat,db}=fakeFs('club1',club());const be=firestoreBackend(()=>db);
   assert.equal(await readRevisionOnly(be,'club1'),3);assert.equal(stat.docs,1);
   stat.docs=0;const one=await readSlice(be,'club1',{collections:['members'],ids:['m5','m6','nope']});
-  assert.deepEqual(one.state.members.map(m=>m.id).sort(),['m5','m6']);assert.equal(stat.docs,3,'state + 2 member docs');
+  assert.deepEqual(one.state.members.map(m=>m.id).sort(),['m5','m6']);assert.equal(stat.docs,4,'state + 2 member docs + revision re-check');
   stat.docs=0;const page=await readSlice(be,'club1',{collections:['visits'],branches:['b'],desc:true,limit:25});
-  assert.equal(page.state.visits.length,25);assert.ok(page.state.visits.every(v=>v.branch==='b'));assert.equal(stat.docs,26,'25 visits + state doc, not 480+');
+  assert.equal(page.state.visits.length,25);assert.ok(page.state.visits.every(v=>v.branch==='b'));assert.equal(stat.docs,27,'25 visits + state doc + revision re-check, not 480+');
   const next=await be.entities('club1',{collections:['visits'],branches:['b'],desc:true,limit:25,before:Math.min(...(await be.entities('club1',{collections:['visits'],branches:['b'],desc:true,limit:25})).map(e=>e.position))});
   assert.equal(next.length,25);
   assert.equal(await be.photo('club1','m0'),'data:image/png;base64,AAAA');
@@ -118,7 +118,11 @@ function richClub(){
   s.programs=[{id:'pr-a',branch:'a',name:'Prog A',days:[]},{id:'pr-b',branch:'b',name:'Prog B',days:[]}];
   s.trainingAssignments=[{id:'ta0',member:'m0',program:'pr-a',start:'2026-01-01',end:null,notes:'',active:true,branch:'a'},{id:'ta1',member:'m1',program:'pr-b',start:'2026-01-01',end:null,notes:'',active:true,branch:'b'}];
   s.trainingSessions=Array.from({length:20},(_,i)=>({id:`ts${i}`,assignment:i%2?'ta1':'ta0',day:i%7,date:day(i),note:'',branch:i%2?'b':'a'}));
-  s.coaching=[{id:'co0',member:'m0',branch:'a',title:'PT'}];
+  s.coaching=[{id:'co0',member:'m0',branch:'a',title:'PT',coach:'ch1',at:'2026-03-01T10:00:00.000Z'}];
+  s.coaches=[{id:'ch1',name:'Coach One'},{id:'ch2',name:'Coach Two'}];
+  // occupancy: other members are inside right now; m4 has an older open visit hidden by a newer closed one
+  s.visits.push({id:'o1',member:'m2',branch:'a',day:'2026-03-15',at:'2026-03-15T11:00:00.000Z'},{id:'o2',member:'m6',branch:'a',day:'2026-03-15',at:'2026-03-15T11:30:00.000Z'},{id:'o3',member:'m1',branch:'b',day:'2026-03-15',at:'2026-03-15T11:10:00.000Z'},
+    {id:'o4',member:'m4',branch:'a',day:'2026-03-14',at:'2026-03-14T09:00:00.000Z'},{id:'o5',member:'m4',branch:'a',day:'2026-03-15',at:'2026-03-15T09:00:00.000Z',leftAt:'2026-03-15T09:30:00.000Z'});
   s.community={posts:[{id:'po0',branch:'a',enabled:true,title:'Hi',body:'B',publishAt:'2026-01-01T00:00:00.000Z'}],messages:[{id:'ms0',branch:'a',member:'m0',text:'x',side:'member',at:'2026-01-02T00:00:00.000Z'}]};
   return s;
 }
@@ -129,7 +133,7 @@ test('Member portal view from a slice equals the view from the full state, with 
   try{
     const full=richClub();await seedPg(db,'club1',full);
     const {stat,backend}=counted(db);
-    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching']});
+    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching','coaches']});
     const meta=await backend.meta('club1');
     const baseline=normalize(assembleState(meta.metadata,everything,{}));
     let sliceRows=0;
@@ -140,6 +144,10 @@ test('Member portal view from a slice equals the view from the full state, with 
     }
     console.log("MEASURE member-view rows",sliceRows,"of",everything.length);
     assert.ok(sliceRows<everything.length/2,`slice read ${sliceRows} rows vs ${everything.length}`);
+    const v0=JSON.parse(view(baseline,'m0'));
+    assert.equal(v0.coaching[0].coach,'Coach One','fixture exercises coach names');
+    assert.ok(v0.occupancy>=2,'fixture exercises occupancy');
+    assert.equal((await readMemberSlice(backend,'club1','m0','a',normalize)).state.coaches.length,1,'only the coaches this member needs');
     const wrongBranch=await readMemberSlice(backend,'club1','m0','b',normalize);
     assert.equal(view(wrongBranch.state,'m0'),'ERR:notFound','a member is invisible through another branch');
     const other=await readMemberSlice(backend,'club2','m0','a',normalize);
@@ -159,7 +167,7 @@ test('Packet built from role-scoped slices equals the packet from the full state
     full.settings.receptionGrants={rec2:['payment.add']};
     await seedPg(db,'club1',full);
     const {stat,backend}=counted(db);
-    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching','events','receipts','products','followUps']});
+    const everything=await backend.entities('club1',{collections:['members','visits','payments','invoices','classes','plans','shifts','programs','trainingAssignments','trainingSessions','coaching','coaches','events','receipts','products','followUps']});
     const meta=await backend.meta('club1');const photos=Object.fromEntries([['m0',full.members[0].photo],['m3',full.members[3].photo]]);
     const baseline=()=>normalize(assembleState(structuredClone(meta.metadata),structuredClone(everything),structuredClone(photos)));
     const versions=await backend.photoVersions('club1');
@@ -183,4 +191,22 @@ test('Packet built from role-scoped slices equals the packet from the full state
     }
     assert.match(JSON.stringify(packet({state:(await readSlice(backend,'club1',m=>packetQueries(ctxs.owner,m.settings),normalize)).state,revision:7},ctxs.owner,versions).state.members[0].photo),/member-photo.*v=/);
   }finally{await db.close();}
+});
+
+test('Slice reads retry when a commit lands between meta and rows, then fall back to the full read',async()=>{
+  const {consistently}=await import('../app/lib/workspace-slice.ts');
+  let rev=1,calls=0;
+  const be={meta:async()=>({metadata:{_entityStorage:1},revision:rev}),revision:async()=>rev};
+  const ok=await consistently(be,'o',async()=>{calls++;if(calls===1)rev=2;return 'x';});
+  assert.deepEqual(ok,{value:'x',revision:2},'second attempt is stable at the new revision');
+  calls=0;
+  assert.equal(await consistently(be,'o',async()=>{calls++;rev+=1;return 'y';}),null,'a club that keeps changing returns null (caller uses the single-snapshot full read)');
+  assert.equal(calls,3);
+});
+
+test('Firestore slices stay off (full read) until the indexes are confirmed',async()=>{
+  const {db}=fakeFs('club1',club());const be=firestoreBackend(()=>db,{indexed:false});
+  assert.equal(await readSlice(be,'club1',{collections:['members']}),null);
+  assert.equal(typeof await be.revision('club1'),'number','revision polling needs no composite index');
+  await assert.rejects(()=>be.entities('club1',{collections:['members'],branches:['a']}),/indexes/);
 });
