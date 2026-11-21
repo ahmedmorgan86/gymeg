@@ -12,7 +12,7 @@ registerHooks({
   load(url, context, next) {
     if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: `export const getFirestoreDb=()=>({collection:()=>({doc:()=>({set:async value=>{globalThis.__whatsappStored=value}})})});` };
     if (url.endsWith('/app/lib/firebase-member-auth.ts')) return { format: 'module', shortCircuit: true, source: 'export const firebaseMemberLicense=async()=>null;' };
-    if (url.endsWith('/app/lib/server-workspace.ts')) return { format: 'module', shortCircuit: true, source: 'export const readSpace=async()=>({state:{}});' };
+    if (url.endsWith('/app/lib/server-workspace.ts')) return { format: 'module', shortCircuit: true, source: 'export const readSpace=async()=>({state:{}});export const readSpaceSlice=(...a)=>readSpace(...a),readSpaceMeta=(...a)=>readSpace(...a),readMemberSpace=(...a)=>readSpace(...a),readSpaceForPacket=async(...a)=>({current:await readSpace(...a),photoVersions:undefined}),readRevision=async(...a)=>(await readSpace(...a)).revision;' };
     if (url.endsWith('/app/lib/commercial.ts')) return { format: 'module', shortCircuit: true, source: 'export const normalizeLicense=x=>x;' };
     return next(url, context);
   }
