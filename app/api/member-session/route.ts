@@ -28,11 +28,14 @@ export async function POST(request:Request){
     const license=await withScope(account.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[account.owner_id])).rows[0] as License|undefined);if(license&&!licenseState(normalizeLicense(license)).writable)continue;
     valid.push({...account,key:account.owner_id+'|'+account.member_id,clubName:state.settings.name,branchName:state.branches.find(b=>b.id===account.branch)?.name??account.branch});
    }
-   if(!valid.length||!valid.some(a=>a.matches))return reply({error:'invalidCredentials'},401);
+   // Only PIN-matched memberships may be revealed or selected: exposing other
+   // clubs' membership for the same phone would leak cross-club membership to
+   // anyone holding one club's PIN.
+   const matched=valid.filter(a=>a.matches);
+   if(!matched.length)return reply({error:'invalidCredentials'},401);
    const selected=typeof body.account==='string'?body.account.trim():'';
-   const clubCount=new Set(valid.map(a=>a.owner_id)).size;
-   if(clubCount>1&&!selected){const memberships=valid.map(a=>({id:a.key,name:a.clubName,branch:a.branchName}));const sameClub=new Map<string,number>();for(const a of valid)sameClub.set(a.owner_id,(sameClub.get(a.owner_id)??0)+1);return reply({chooseAccount:memberships.map((membership,i)=>({id:membership.id,name:sameClub.get(valid[i].owner_id)!>1?membership.name+' · '+membership.branch:membership.name}))});}
-   const matched=valid.filter(a=>a.matches);const account=selected?valid.find(a=>a.key===selected):matched.length===1?matched[0]:undefined;if(!account||!account.matches)return reply({error:'invalidCredentials'},401);
+   if(!selected&&matched.length>1){const sameClub=new Map<string,number>();for(const a of matched)sameClub.set(a.owner_id,(sameClub.get(a.owner_id)??0)+1);return reply({chooseAccount:matched.map(a=>({id:a.key,name:sameClub.get(a.owner_id)!>1?a.clubName+' · '+a.branchName:a.clubName}))});}
+   const account=selected?matched.find(a=>a.key===selected):matched[0];if(!account)return reply({error:'invalidCredentials'},401);
    const token=randomBytes(32).toString('hex');await withScope(account.owner_id,async c=>{await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND expires_at<now()',[account.owner_id]);await c.query("INSERT INTO gymos.member_code_sessions(session_hash,owner_id,member_id,version,expires_at) VALUES($1,$2,$3,$4,now()+interval '7 days')",[memberCodeHash(token),account.owner_id,account.member_id,account.version]);});return sessionReply(token,7*86400);
   }catch{return reply({error:'unavailable'},503);}
 }
