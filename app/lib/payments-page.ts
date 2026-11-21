@@ -11,6 +11,7 @@ import {addDays} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
 export const PAYMENTS_PAGE=500; // transfer chunk (judgment)
 export const SUMMARY_CHUNK=1000; // rows per read inside one summary (judgment; memory bound, not a data limit)
+export const SUMMARY_DEADLINE_MS=4000; // whole-loop budget for one summary request (judgment); past it the answer is 'unavailable' and the screen keeps the packet expression, so no result is lost and the pooled connection is released
 export const PERIOD_MAX=3660; // input sanity for the chart period (the UI offers a few fixed values), not a data limit
 export type Cursor={pos:number;id:string};
 export type SummaryData={status:'ok';version:string;trend:number[];monthSum:number}|{status:'stale'}|{status:'unavailable';reason?:string};
@@ -18,7 +19,7 @@ export type ExportRow={payment:Record<string,unknown>;member:{name:unknown;demo:
 export type ExportData={status:'ok';version:string;rows:ExportRow[];next:Cursor|null}|{status:'stale'}|{status:'unavailable';reason?:string};
 const DAY_RE=`'^\\d{4}-\\d\\d-\\d\\d$'`;
 const OFFSHAPE=`(jsonb_typeof(payload->'minor') IS DISTINCT FROM 'number' OR jsonb_typeof(payload->'voided') NOT IN ('boolean','null'))`;
-export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:string;today:string;period:number}):Promise<SummaryData>{
+export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:string;today:string;period:number;deadlineMs?:number;now?:()=>number}):Promise<SummaryData>{
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.today)||!Number.isSafeInteger(q.period)||q.period<1||q.period>PERIOD_MAX)throw new RangeError('invalid');
   const days=Array.from({length:q.period},(_,i)=>addDays(q.today,i-q.period+1)),month=q.today.slice(0,7);
   return scope(q.owner,c=>boundedRead(c,q.owner,'paysum\u0000'+q.branch+'\u0000'+q.today+'\u0000'+q.period,async()=>{
@@ -29,7 +30,8 @@ export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:str
     // Streamed in keyset chunks of SUMMARY_CHUNK rows ordered (day, position, entity_id) = the index order, so memory is O(chunk + period) however many payments the window holds.
     // Per day the rows arrive in packet order (position, entity_id), so each day's float sum `acc+minor/100` is the legacy reduce exactly. The month total is accumulated in day order:
     // identical to the legacy packet-order sum only when every addend is an integer and every partial sum is exact (|sum| <= 2^53), so any non-integer minor answers 'unavailable' (packet path).
-    const acc=new Map<string,number>(days.map(d=>[d,0])),inWindow=new Set(days);let monthSum=0,cur:{day:string;pos:number;id:string}|null=null;
+    const now=q.now??Date.now,t0=now(),budget=q.deadlineMs??SUMMARY_DEADLINE_MS;
+    const acc=new Map<string,number>(days.map(d=>[d,0])),inWindow=new Set(days);let monthSum=0,cur=null as {day:string;pos:number;id:string}|null;
     for(;;){
       const args:unknown[]=[q.owner,q.branch,lo,hi];let after='';if(cur){args.push(cur.day,cur.pos,cur.id);after=` AND ((payload->>'day') COLLATE "C",position,entity_id) > ($5::text COLLATE "C",$6::bigint,$7::text)`;}
       const rows=(await c.query(`SELECT payload,position,entity_id,${OFFSHAPE} AS odd FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND payload->>'day' ~ ${DAY_RE} AND (payload->>'day') COLLATE "C" >= ($3::text COLLATE "C") AND (payload->>'day') COLLATE "C" <= ($4::text COLLATE "C")${after} ORDER BY (payload->>'day') COLLATE "C",position,entity_id LIMIT ${SUMMARY_CHUNK}`,args)).rows as {payload:{day:string;minor:number;voided?:unknown};position:number;entity_id:string;odd:boolean}[];
@@ -39,7 +41,10 @@ export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:str
         if(inWindow.has(p.day))acc.set(p.day,acc.get(p.day)!+p.minor/100);
         if(p.day.startsWith(month)){if(!Number.isInteger(p.minor))return{status:'unavailable',reason:'non-integer-minor'} as const;monthSum+=p.minor;if(!Number.isSafeInteger(monthSum))return{status:'unavailable',reason:'month-total-inexact'} as const;}
       }
-      if(rows.length<SUMMARY_CHUNK)break;const l=rows[rows.length-1];cur={day:l.payload.day,pos:Number(l.position),id:l.entity_id};
+      if(rows.length<SUMMARY_CHUNK)break;
+      if(now()-t0>=budget)return{status:'unavailable',reason:'deadline'} as const; // before the next chunk: stop scanning, release the connection
+      if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const; // a writer committed: the answer would be discarded anyway
+      const l=rows[rows.length-1];cur={day:l.payload.day,pos:Number(l.position),id:l.entity_id};
     }
     const trend=days.map(d=>acc.get(d)!);
     if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
