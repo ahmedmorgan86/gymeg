@@ -81,7 +81,7 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
       const values:unknown[]=[owner,q.collections];const where=['owner_id=$1','collection=ANY($2::text[])'];
       if(q.branches){values.push(q.branches);where.push(`branch=ANY($${values.length}::text[])`);}
       if(q.ids){values.push(q.ids);where.push(`entity_id=ANY($${values.length}::text[])`);}
-      if(q.match){values.push(q.match.values);where.push(`payload->>'${q.match.field}'=ANY($${values.length}::text[])`);}
+      if(q.match){values.push(q.match.values);where.push(`payload->>'${q.match.field}'=ANY($${values.length}::text[])`);if(q.match.field==='member')where.push(`md5(payload->>'member')=ANY(ARRAY(SELECT md5(x) FROM unnest($${values.length}::text[]) x))`);}
       if(q.open)where.push("payload->>'leftAt' IS NULL");
       if(q.after!==undefined){values.push(q.after);where.push(`position>$${values.length}`);}
       if(q.before!==undefined){values.push(q.before);where.push(`position<$${values.length}`);}

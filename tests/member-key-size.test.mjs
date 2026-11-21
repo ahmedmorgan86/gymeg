@@ -28,3 +28,14 @@ test('arbitrary-length member keys never block a write; readers still find exact
   assert.equal((await db.query("SELECT 1 FROM gymos.gym_member_summary_ready WHERE owner_id=$1",[owner])).rowCount,0);
   const {readMemberDetail}=await import('../app/lib/member-detail-source.ts');void readMemberDetail;
 });
+
+test('generic entities() member match carries the hash condition and the plan can use the member index (exact equality kept)',async()=>{
+  const {postgresBackend}=await import('../app/lib/workspace-slice.ts');
+  let seen='';const rec=(o,work)=>scope(o,c=>work({query:(s,v)=>{if(/payload->>'member'=ANY/.test(s))seen=s;return c.query(s,v);}}));
+  const be=postgresBackend(rec);
+  await be.entities('BIGM',{collections:['visits','payments','invoices'],match:{field:'member',values:['m1']},limit:10}).catch(()=>{});
+  assert.match(seen,/md5\(payload->>'member'\)=ANY\(ARRAY\(SELECT md5\(x\)/);
+  assert.match(seen,/payload->>'member'=ANY\(\$\d+::text\[\]\)/,'exact equality stays as the recheck');
+  const plan=await scope('BIGM',async c=>{await c.query('SET LOCAL enable_seqscan=off');return JSON.stringify((await c.query('EXPLAIN (FORMAT JSON) '+seen.replace(/ ORDER BY.*$/,'').replace(/\$1/g,"'BIGM'").replace(/\$2/g,"'{visits,payments,invoices}'::text[]").replace(/\$3/g,"'{m1}'::text[]").replace(/\$4/g,'10'))).rows);});
+  assert.match(plan,/gym_entities_owner_member_rows/);
+});
