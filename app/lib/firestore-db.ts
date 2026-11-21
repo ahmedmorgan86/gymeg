@@ -67,7 +67,14 @@ export function isFirebaseConfigured(): boolean {
 // setting GYMOS_DATA_BACKEND=postgres. Auth/session/push-provider code keeps
 // checking isFirebaseConfigured(); data-access code checks this instead.
 export function useFirestorePersistence(): boolean {
-  return isFirebaseConfigured() && process.env.GYMOS_DATA_BACKEND !== 'postgres';
+  const backend = process.env.GYMOS_DATA_BACKEND;
+  // Unset/empty is the legitimate legacy configuration: Firestore whenever
+  // Firebase is configured (today's production behavior, unchanged).
+  if (backend === undefined || backend === '') return isFirebaseConfigured();
+  if (backend === 'postgres') return false;
+  // Fail closed: an explicit but unsupported value (typo, drift) must stop
+  // the process, never silently select a backend and write to the wrong one.
+  throw new Error('GYMOS_DATA_BACKEND must be "postgres" or unset');
 }
 
 export function getFirestoreDb(): Firestore {

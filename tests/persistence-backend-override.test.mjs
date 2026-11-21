@@ -30,8 +30,17 @@ test('persistence backend selector follows GYMOS_DATA_BACKEND independently of F
     assert.equal(isFirebaseConfigured(),true);
     assert.equal(useFirestorePersistence(),false);
   });
-  // Unknown values are not treated as postgres.
-  withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:'firestore'},()=>{
+  // Explicit unknown values fail closed: no silent fallback to either backend.
+  for (const bad of ['firestore','postgrs','POSTGRES','sqlite']) {
+    withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:bad},()=>{
+      assert.throws(()=>useFirestorePersistence(),/GYMOS_DATA_BACKEND/);
+    });
+    withEnv({GYMOS_DATA_BACKEND:bad},()=>{
+      assert.throws(()=>useFirestorePersistence(),/GYMOS_DATA_BACKEND/);
+    });
+  }
+  // Empty string behaves as unset (legacy).
+  withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:''},()=>{
     assert.equal(useFirestorePersistence(),true);
   });
 });
