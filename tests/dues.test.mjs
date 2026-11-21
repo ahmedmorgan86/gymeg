@@ -82,3 +82,22 @@ test('odd stored shapes are reported unavailable, never a quiet zero; maintained
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{voided}','\"yes\"') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
   assert.equal((await readDues(scope,{owner,branch:br})).status,'unavailable');
 });
+
+test('maintained total stays exact (no scan) after member deletion, orphan invoices, and writes between refreshes',async()=>{
+  const {branchDuesTotal}=await import('../app/lib/member-summary-store.ts');
+  const owner='ORP';const s=fixture();await seed(owner,s);
+  await db.query("INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES($1) ON CONFLICT DO NOTHING",[owner]).catch(()=>{});
+  const br=s.invoices[0].branch;
+  const legacy=()=>current(owner).then(st=>st.invoices.filter(i=>i.branch===br).reduce((n,i)=>n+outstanding(st,i),0));
+  const total=()=>scope(owner,c=>branchDuesTotal(c,owner,br));
+  // cold: no summaries yet, dirty queue filled by backfill or empty; refresh waves bring it to the exact total
+  assert.equal(await total(),await legacy());
+  const victim=s.invoices.find(i=>i.branch===br).member;
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND entity_id=$2",[owner,victim]);
+  assert.equal(await total(),await legacy(),'orphan invoices of a deleted member still counted exactly');
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{total}','12345') WHERE owner_id=$1 AND collection='invoices' AND payload->>'member'=$2",[owner,victim]);
+  assert.equal(await total(),await legacy(),'write to an orphan invoice');
+  const other=s.invoices.find(i=>i.branch===br&&i.member!==victim);
+  await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{total}','777') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,other.id]);
+  assert.equal(await total(),await legacy(),'write to a live member invoice');
+});

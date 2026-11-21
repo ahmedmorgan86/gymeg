@@ -3,7 +3,7 @@
 // Nothing here uses the clock: callers apply deriveSummary at read time. Every refusal is a named status; the caller takes the exact full path.
 import {readCounters,STATE_BYTE_LIMIT} from './workspace-slice.ts';
 import type {GymState,Member} from './domain.ts';
-import {computeStoredSummary,type StoredSummary} from './member-summary-model.ts';
+import {computeStoredSummary,memberDues,type StoredSummary} from './member-summary-model.ts';
 
 type Sql={query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>};
 export const MEMBER_CANDIDATE_MAX=10000; // the cap the operation path and restore enforce; more members fail closed
@@ -52,6 +52,16 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
       for(const r of (await c.query('SELECT member_id,gen FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows as {member_id:string;gen:string|number}[])gens.set(r.member_id,String(r.gen));
       for(const r of (await c.query("SELECT entity_id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND entity_id=ANY($2::text[])",[owner,ids])).rows as {entity_id:string;payload:Member}[])members.set(r.entity_id,r.payload);
       for(const r of (await c.query('SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows as {member_id:string;stored:StoredSummary}[])have.set(r.member_id,r.stored);
+    }
+    // Members that no longer exist (deleted, or invoices/payments naming an unknown member) keep a dues-only row (v:0) while they still own invoices, so the branch
+    // dues total stays exact without a historical scan. v:0 rows are never candidates (candidates join the member rows). No invoices left: row and mark are dropped.
+    for(const id of need){if(members.has(id))continue;
+      const own=async(coll:string)=>(await c.query("SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=$3 ORDER BY position,entity_id LIMIT "+lim(coll),[owner,coll,id])).rows.map(r=>(r as {payload:unknown}).payload);
+      const inv=await own('invoices'),pay=await own('payments');
+      if(inv.length>lim('invoices')-1||pay.length>lim('payments')-1){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
+      if(inv.length)await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify({v:0,dues:memberDues({payments:pay,invoices:inv} as unknown as GymState,{id} as Member)})]);
+      else await c.query('DELETE FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id=$2',[owner,id]);
+      if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
     }
     const todo:string[]=[];
     for(const id of need){const m=members.get(id);if(!m)continue; // deleted meanwhile: not a candidate
@@ -117,8 +127,6 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
  * one lock, and reports how many marks are left. Also forgets marks and rows of deleted members. */
 export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,asOf?:string):Promise<RefreshResult>{
   if(!await ready(c,owner))return refuse('unready');
-  await c.query("DELETE FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id)",[owner]);
-  await c.query("DELETE FROM gymos.gym_member_summaries s WHERE s.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=s.owner_id AND e.collection='members' AND e.entity_id=s.member_id)",[owner]);
   // Bounded waves only: each call recomputes at most `max` (<= REFRESH_MAX) dirty members by per-member index lookups; callers loop until remaining is 0.
   const ids=(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2',[owner,Math.min(max,REFRESH_MAX)])).rows.map(r=>(r as {member_id:string}).member_id);
   const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out,asOf);if(why)return refuse(why);
@@ -145,7 +153,8 @@ export async function readOwnerVersion(c:Sql,owner:string):Promise<string|null>{
  *  summaries saw for this branch equals the branch's real invoice count (invoices of deleted/unknown members make them differ). */
 export async function branchDuesTotal(c:Sql,owner:string,branch:string):Promise<number|null>{
   if(!await ready(c,owner))return null;
-  for(let wave=0;wave<5;wave++){const r=await refreshDirtySummaries(c,owner);if(r.status!=='ok')return null;if(r.remaining===0)break;if(wave===4)return null;}
+  if(Number(((await c.query('SELECT count(*) AS n FROM (SELECT 1 FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 LIMIT $2) x',[owner,2*REFRESH_MAX+1])).rows[0] as {n:string}).n)>2*REFRESH_MAX)return null; // cold backfill or a heavy write burst: refresh waves would be thrown away next to the scan, so the caller scans directly and the background drain catches up
+  for(let wave=0;wave<3;wave++){const r=await refreshDirtySummaries(c,owner);if(r.status!=='ok')return null;if(r.remaining===0)break;if(wave===2)return null;}
   const r=(await c.query("SELECT count(*) FILTER (WHERE stored->'dues' IS NULL) AS nodues,count(*) FILTER (WHERE stored->'dues'->$2 IS NOT NULL AND (jsonb_typeof(stored->'dues'->$2->'sum')<>'number' OR stored->'dues'->$2->>'odd'='true')) AS bad,COALESCE(sum((stored->'dues'->$2->>'n')::int),0) AS n,COALESCE(sum((stored->'dues'->$2->>'sum')::numeric),0)::text AS total FROM gymos.gym_member_summaries WHERE owner_id=$1",[owner,branch])).rows[0] as {nodues:string;bad:string;n:string;total:string};
   const inv=Number(((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices' AND branch=$2",[owner,branch])).rows[0] as {n:string}).n);
   const dirty=Number(((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0] as {n:string}).n);
