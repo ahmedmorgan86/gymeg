@@ -77,7 +77,7 @@ test('odd stored shapes are reported unavailable, never a quiet zero; maintained
   const legacy=s.invoices.filter(i=>i.branch===br).reduce((n,i)=>n+outstanding(s,i),0);assert.equal(clean.total,legacy);
   // odd: missing total, and a truthy non-boolean voided flag
   await db.query("UPDATE gymos.gym_entities SET payload=payload-'total' WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
-  assert.equal((await readDues(scope,{owner,branch:br})).status,'unavailable');
+  {const d=await readDues(scope,{owner,branch:br});assert.equal(d.status,'unavailable');assert.equal(d.reason,'invalid-data');assert.ok(d.invoices.includes(s.invoices[0].id));}
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{total}','100') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{voided}','\"yes\"') WHERE owner_id=$1 AND collection='invoices' AND entity_id=$2",[owner,s.invoices[0].id]);
   assert.equal((await readDues(scope,{owner,branch:br})).status,'unavailable');
