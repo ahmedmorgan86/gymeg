@@ -46,3 +46,13 @@ test('default-OFF sender retains full read and fresh consent cancellation; enabl
   for(const mode of ['consent','phone','optout','rule-disabled','rule-branch','unavailable']){const w=setup(mode);assert.deepEqual(await runWhatsApp('synthetic-owner','main'),{sent:0,deferred:mode==='unavailable'},mode);assert.equal(w.status,mode==='unavailable'?'pending':'cancelled',mode);assert.equal(w.full,0,mode);assert.equal(w.ids.size,1,mode);if(mode!=='rule-branch')assert.equal(w.pages[1].memberId,'synthetic');}
  }finally{globalThis.fetch=fetch;if(prior===undefined)delete process.env.GYMOS_WHATSAPP_READS;else process.env.GYMOS_WHATSAPP_READS=prior;}
 });
+test('expensive resumable enumeration leaves a delivery reserve for an already pending job',async()=>{
+ const prev=process.env.GYMOS_WHATSAPP_READS,realNow=Date.now,realFetch=globalThis.fetch;process.env.GYMOS_WHATSAPP_READS='1';let clock=realNow();Date.now=()=>clock;
+ globalThis.fetch=async()=>assert.fail('No outbound sends');
+ try{const w=setup('consent'),base=w.query;let queued=0,claimedAt;
+ w.page=q=>q.memberId?{status:'ok',version:'1',next:null,jobs:[]}:{status:'ok',version:'1',next:{position:queued*250,id:'m'+queued},jobs:[]};
+ w.query=async(sql,p)=>{if(sql.startsWith('INSERT INTO gymos.whatsapp_scan_cursor')){queued++;clock+=4000;}if(sql.includes('FOR UPDATE SKIP LOCKED'))claimedAt=clock;return base(sql,p);};
+ const started=clock,r=await runWhatsApp('synthetic-owner','main',clock+40000);
+ assert.equal(r.sent,0);assert.equal(r.deferred,true);assert.ok(queued>=1&&queued<=3);assert.ok(claimedAt-started<20000);assert.equal(w.status,'cancelled');assert.equal(w.full,0);
+ }finally{Date.now=realNow;globalThis.fetch=realFetch;if(prev===undefined)delete process.env.GYMOS_WHATSAPP_READS;else process.env.GYMOS_WHATSAPP_READS=prev;}
+});

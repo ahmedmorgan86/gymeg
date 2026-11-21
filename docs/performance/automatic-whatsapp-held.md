@@ -14,7 +14,7 @@ Default OFF: `GYMOS_WHATSAPP_READS=1` opts PostgreSQL into this candidate. It do
 
 Held migration `20261122000000_whatsapp_scan_cursor.sql` adds owner-RLS cursor rows. One owner/rule advisory transaction lock protects each page. The page's deterministic outbox batch is one INSERT, and its next member cursor advances in the SAME transaction. Failure or deadline rolls both back. On completion cursor becomes null, so a later run starts a fresh full pass. This does not truncate results or require retaining the process.
 
-A run processes rules oldest-progress-first, one page per rule per round. A rule with more members rejoins the queue after its peers. Deadline stops further pages; subsequent invocations resume from stored progress. Deterministic outbox ids and ON CONFLICT retain idempotency through wrap-around. Writers can move members across a cursor, so a later full pass may still be needed, as with any changing paged population. Fresh individual consent is checked again before sending.
+Enumeration has a separate phase budget of at most 10 seconds and must leave 10 seconds of the caller deadline for pending delivery. If the caller supplies less, enumeration defers and delivery can proceed immediately. A run processes rules oldest-progress-first, one page per rule per round. A rule with more members rejoins the queue after its peers. Deadline stops further pages; subsequent invocations resume from stored progress. Deterministic outbox ids and ON CONFLICT retain idempotency through wrap-around. Writers can move members across a cursor, so a later full pass may still be needed, as with any changing paged population. Fresh individual consent is checked again before sending.
 
 ## Budget and remaining caveats
 
