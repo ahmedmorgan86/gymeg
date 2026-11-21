@@ -1,5 +1,7 @@
 import {reply} from '../../../lib/server-workspace';
 import {consumeWhatsAppWebhook,verifyWebhookSignature,verifyWebhookToken} from '../../../lib/whatsapp-server';
+import {isFirebaseConfigured} from '../../../lib/firestore-db';
+import {consumeWhatsAppWebhookFirestore} from '../../../lib/firestore-whatsapp';
 
 export const runtime='nodejs';
 export const dynamic='force-dynamic';
@@ -30,5 +32,5 @@ export async function POST(request:Request){
   if(!verifyWebhookSignature(raw,signature,secret))return reply({error:'signatureMismatch'},403);
   let payload:unknown;
   try{payload=JSON.parse(raw.toString('utf8'));}catch{return reply({error:'invalid'},400);}
-  try{return reply({ok:true,...await consumeWhatsAppWebhook(payload)});}catch{return reply({error:'unavailable'},503);}
+  try{return reply({ok:true,...await (isFirebaseConfigured()?consumeWhatsAppWebhookFirestore(payload):consumeWhatsAppWebhook(payload))});}catch{return reply({error:'unavailable'},503);}
 }

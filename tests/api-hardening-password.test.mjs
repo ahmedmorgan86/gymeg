@@ -64,7 +64,8 @@ test('A14: repeated password-reset requests hit 429 with Retry-After and stop em
   assert.ok(Number(blocked.headers.get('Retry-After')) > 0);
   assert.equal((await blocked.json()).error, 'rate');
   assert.equal(globalThis.__resetCalls.length, 5);
-  assert.match(globalThis.__resetCalls[0].options.redirectTo, /^https:\/\/gym\.example\/auth\/callback/);
+  assert.equal(globalThis.__resetCalls[0].email, 'owner@example.test');
+  assert.equal(globalThis.__resetCalls[0].options, undefined);
 });
 
 test('A14: reset buckets are keyed by email and IP', async () => {

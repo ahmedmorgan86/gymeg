@@ -6,6 +6,9 @@ import {CommercialError,licenseState} from '../../lib/licensing';
 import {normalizeLicense} from '../../lib/commercial';
 import {encryptFcmToken,fcmTokenDigest,pushEncryptionConfigured} from '../../lib/push-crypto';
 import {firebaseMessagingConfigured} from '../../lib/firebase-messaging';
+import {isFirebaseConfigured} from '../../lib/firestore-db';
+import {firebaseMemberLicense} from '../../lib/firebase-member-auth';
+import {setFcmSubscription} from '../../lib/firestore-fcm';
 
 export const dynamic='force-dynamic';
 export const runtime='nodejs';
@@ -25,11 +28,12 @@ export async function POST(request:Request){
    if(identity.pin_must_change)return reply({error:'pinChangeRequired'},403);
    owner=identity.owner_id;recipientType='member';recipientId=identity.member_id;branch=identity.branch;
    const {state}=await readSpace(owner);if(!state.members.some(m=>m.id===recipientId&&m.branch===branch&&!m.demo&&!m.archived))return reply({error:'notLinked'},404);
-   const license=await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
+   const license=isFirebaseConfigured()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
    const ctx=await context();if(!ctx)return reply({error:'auth'},401);
    if(ctx.support){
+    if(isFirebaseConfigured())return reply({error:'supportUnavailable'},503);
     const tokenHash=fcmTokenDigest(body.token),userId=ctx.user.userId;
     await withScope(userId,async client=>{if(body.action==='register')await client.query(`INSERT INTO gymos.support_fcm_subscriptions(user_id,token_hash,token_ciphertext) VALUES($1,$2,$3) ON CONFLICT(user_id,token_hash) DO UPDATE SET token_ciphertext=excluded.token_ciphertext,updated_at=now()`,[userId,tokenHash,encryptFcmToken(body.token)]);else await client.query('DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2',[userId,tokenHash]);});
     return reply({ok:true,registered:body.action==='register'});
@@ -41,6 +45,7 @@ export async function POST(request:Request){
    const {state}=await readSpace(owner);if(!state.branches.some(b=>b.id===branch))return reply({error:'notFound'},404);
   }
   const tokenHash=fcmTokenDigest(body.token);
+  if(isFirebaseConfigured()){await setFcmSubscription(owner,branch,recipientType,recipientId,body.token,body.action==='register');return reply({ok:true,registered:body.action==='register'});}
   await withScope(owner,async client=>{
    if(body.action==='register')await client.query(
     `INSERT INTO gymos.fcm_subscriptions(owner_id,branch,recipient_type,recipient_id,token_hash,token_ciphertext)

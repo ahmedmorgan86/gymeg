@@ -3,47 +3,20 @@ import { isFirebaseConfigured, getFirestoreDb } from './firestore-db.ts';
 
 export async function serverAuth() {
   const store = await cookies();
-  const sessionToken = store.get('gymos_session')?.value || store.get('sb-token')?.value;
+  const sessionToken = store.get('gymos_session')?.value;
 
   return {
     auth: {
       async getUser() {
-        if (!sessionToken) {
-          if (process.env.NODE_ENV === 'test' || process.env.GYMOS_ALLOW_DB_MOCK === '1') {
-            return {
-              data: { user: { id: 'owner', email: 'owner@example.invalid', user_metadata: { name: 'Owner' } } },
-              error: null,
-            };
-          }
-          return { data: { user: null }, error: null };
-        }
-
+        if (!sessionToken) return { data: { user: null }, error: null };
         try {
-          // Fast-path: native base64url session token
-          try {
-            const parsed = JSON.parse(Buffer.from(sessionToken, 'base64url').toString('utf8'));
-            if (parsed && (parsed.uid || parsed.id || parsed.email)) {
-              return {
-                data: {
-                  user: {
-                    id: parsed.uid || parsed.id || 'owner',
-                    email: parsed.email || 'owner@example.com',
-                    user_metadata: { name: parsed.name || 'Owner' },
-                  },
-                },
-                error: null,
-              };
-            }
-          } catch {
-            // Not a native base64url JSON session token, try Firebase Auth if configured
-          }
-
           if (isFirebaseConfigured()) {
-            getFirestoreDb(); // ensure admin app is initialized
+            getFirestoreDb();
             const { getAuth } = await import('firebase-admin/auth');
             const auth = getAuth();
             try {
               const decoded = await auth.verifySessionCookie(sessionToken, true);
+              if (!decoded.email_verified) return { data: { user: null }, error: null };
               return {
                 data: {
                   user: {
@@ -55,22 +28,8 @@ export async function serverAuth() {
                 },
                 error: null,
               };
-            } catch {
-              const decoded = await auth.verifyIdToken(sessionToken);
-              return {
-                data: {
-                  user: {
-                    id: decoded.uid,
-                    email: decoded.email,
-                    is_anonymous: false,
-                    user_metadata: { name: decoded.name || decoded.email || 'Member' },
-                  },
-                },
-                error: null,
-              };
-            }
+            } catch { return { data: { user: null }, error: null }; }
           }
-
           return { data: { user: null }, error: null };
         } catch (e) {
           return { data: { user: null }, error: e };
@@ -81,17 +40,25 @@ export async function serverAuth() {
         if (!email || !password) {
           return { data: { session: null }, error: { message: 'Invalid credentials', status: 400 } };
         }
-
+        const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+        if (!apiKey || !isFirebaseConfigured()) {
+          return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        }
         try {
-          const tokenPayload = Buffer.from(
-            JSON.stringify({
-              uid: email.replace(/[^a-zA-Z0-9_-]/g, '_'),
-              email,
-              name: email.split('@')[0],
-              iat: Date.now(),
-            })
-          ).toString('base64url');
-
+          const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(apiKey), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, returnSecureToken: true }),
+            cache: 'no-store',
+          });
+          if (!response.ok) return { data: { session: null }, error: { message: 'Invalid credentials', status: 401 } };
+          const result = await response.json() as { idToken?: string; registered?: boolean };
+          if (!result.idToken) throw new Error('Missing Firebase ID token');
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          const verified = await getAuth().verifyIdToken(result.idToken, true);
+          if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
+          const tokenPayload = await getAuth().createSessionCookie(result.idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
           store.set('gymos_session', tokenPayload, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
@@ -99,11 +66,60 @@ export async function serverAuth() {
             path: '/',
             maxAge: 60 * 60 * 24 * 7,
           });
-
           return { data: { session: { access_token: tokenPayload } }, error: null };
         } catch {
           return { data: { session: null }, error: { message: 'Auth failed', status: 401 } };
         }
+      },
+
+      // Establishes the same session as signInWithPassword from a Firebase ID
+      // token minted for an external provider (the Google OAuth callback
+      // exchanges the Google credential through accounts:signInWithIdp first).
+      async signInWithFirebaseToken(idToken: string) {
+        if (!idToken || !isFirebaseConfigured()) {
+          return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        }
+        try {
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          const verified = await getAuth().verifyIdToken(idToken, true);
+          if (!verified.email_verified) return { data: { session: null }, error: { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } };
+          const tokenPayload = await getAuth().createSessionCookie(idToken, { expiresIn: 60 * 60 * 24 * 7 * 1000 });
+          store.set('gymos_session', tokenPayload, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: 'lax',
+            path: '/',
+            maxAge: 60 * 60 * 24 * 7,
+          });
+          return { data: { session: { access_token: tokenPayload } }, error: null };
+        } catch {
+          return { data: { session: null }, error: { message: 'Auth failed', status: 401 } };
+        }
+      },
+
+      async signUp({ email, password, name }: { email: string; password: string; name: string }) {
+        const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+        if (!apiKey || !isFirebaseConfigured()) return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
+        try {
+          const endpoint = 'https://identitytoolkit.googleapis.com/v1/accounts:';
+          const response = await fetch(endpoint + 'signUp?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password, returnSecureToken: true }), cache: 'no-store',
+          });
+          if (!response.ok) return { data: { session: null }, error: { message: 'Registration failed', status: 400 } };
+          const result = await response.json() as { idToken?: string; localId?: string };
+          if (!result.idToken || !result.localId) throw new Error('Invalid Firebase response');
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          await getAuth().updateUser(result.localId, { displayName: name });
+          const verification = await fetch(endpoint + 'sendOobCode?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestType: 'VERIFY_EMAIL', idToken: result.idToken }), cache: 'no-store',
+          });
+          if (!verification.ok) throw new Error('Verification email failed');
+          return { data: { session: null }, error: null };
+        } catch { return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } }; }
       },
 
       async signOut(_options?: { scope?: string }) {
@@ -112,36 +128,35 @@ export async function serverAuth() {
         return { error: null };
       },
 
-      async resetPasswordForEmail(email: string, _options?: { redirectTo?: string }) {
-        if (isFirebaseConfigured()) {
-          try {
-            getFirestoreDb();
-            const { getAuth } = await import('firebase-admin/auth');
-            const link = await getAuth().generatePasswordResetLink(email);
-            return { error: null, link };
-          } catch (err) {
-            const message = err instanceof Error ? err.message : 'reset_failed';
-            return { error: { message, status: 400 } };
-          }
-        }
-        return { error: null };
+      async resetPasswordForEmail(email: string) {
+        const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+        if (!apiKey || !isFirebaseConfigured()) return { error: { message: 'Auth unavailable', status: 503 } };
+        try {
+          const response = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=' + encodeURIComponent(apiKey), {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ requestType: 'PASSWORD_RESET', email }), cache: 'no-store',
+          });
+          if (!response.ok && response.status >= 500) return { error: { message: 'Auth unavailable', status: 503 } };
+          return { error: null };
+        } catch { return { error: { message: 'Auth unavailable', status: 503 } }; }
       },
 
-      async updateUser(_data: { password?: string }) {
-        return { data: { user: null }, error: null };
+      async updateUser(data: { password?: string }) {
+        const user = await this.getUser();
+        if (!user.data.user || !data.password || !isFirebaseConfigured()) return { data: { user: null }, error: { message: 'Unauthorized', status: 401 } };
+        try {
+          getFirestoreDb();
+          const { getAuth } = await import('firebase-admin/auth');
+          await getAuth().updateUser(user.data.user.id, { password: data.password });
+          await getAuth().revokeRefreshTokens(user.data.user.id);
+          store.delete('gymos_session');
+          return { data: { user: user.data.user }, error: null };
+        } catch { return { data: { user: null }, error: { message: 'Update failed', status: 503 } }; }
       },
 
       async exchangeCodeForSession(code: string) {
-        if (code) {
-          store.set('gymos_session', code, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
-            sameSite: 'lax',
-            path: '/',
-          });
-          return { data: { session: { access_token: code } }, error: null };
-        }
-        return { data: { session: null }, error: { message: 'Invalid code' } };
+        void code;
+        return { data: { session: null }, error: { message: 'Unsupported auth callback', status: 400 } };
       },
     },
   };
