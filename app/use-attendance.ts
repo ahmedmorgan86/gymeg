@@ -43,7 +43,8 @@ export function useAttendance(active:boolean,state:GymState|undefined,owner:stri
         while(run&&next!==null){
           const pg=await get('&after='+next.pos+'&afterId='+encodeURIComponent(next.id)+'&ver='+encodeURIComponent(String(d.version)));
           if(pg&&pg.status==='stale'){stale=true;break;}
-          if(!pg||pg.status!=='irregular'||!Array.isArray(pg.candidates)||pg.version!==d.version||pg.candidates.some(c=>posOrder({p:c.p,pos:c.pos,id:c.id},{p:c.p,pos:next!.pos,id:next!.id})<=0))return fail();
+          if(pg&&pg.status==='irregular'&&pg.version!==d.version){stale=true;break;}
+          if(!pg||pg.status!=='irregular'||!Array.isArray(pg.candidates)||pg.candidates.some(c=>posOrder({p:c.p,pos:c.pos,id:c.id},{p:c.p,pos:next!.pos,id:next!.id})<=0))return fail();
           run=mergeNewest([...run,...pg.candidates],100);next=pg.next??null;
         }
         if(stale){if(attempt<2)return void(await attemptRead(attempt+1));return fail();} // the owner changed between pages: restart from page 1 (bounded to 3 attempts), then the failure state

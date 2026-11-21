@@ -8,13 +8,13 @@ const cache=new Map<string,unknown>();
 /** Thrown instead of the driver's 57014 so the pool wrapper's retry-on-"timeout" text match does not repeat an expensive query. Deliberately carries no "timeout"/"503" text. */
 export class ReadBudgetError extends Error{constructor(){super('read budget exceeded');this.name='ReadBudgetError';}}
 export function budgetGuard(e:unknown):never{if((e as {code?:string})?.code==='57014')throw new ReadBudgetError();throw e;}
-export async function boundedRead<T>(c:Sql,owner:string,key:string,work:()=>Promise<T>):Promise<T>{
+export async function boundedRead<T>(c:Sql,owner:string,key:string,work:()=>Promise<T>,cacheable:(out:T)=>boolean=()=>true):Promise<T>{
   try{
     await c.query("SELECT set_config('statement_timeout',$1,true)",[String(READ_TIMEOUT_MS)]);
     const v1=await readOwnerVersion(c,owner),k=v1===null?null:owner+'\u0000'+v1+'\u0000'+key;
     if(k!==null&&cache.has(k))return structuredClone(cache.get(k)) as T;
     const out=await work();
-    if(k!==null&&(await readOwnerVersion(c,owner))===v1){if(cache.size>=MAX_ENTRIES)cache.delete(cache.keys().next().value as string);cache.set(k,structuredClone(out));}
+    if(k!==null&&cacheable(out)&&(await readOwnerVersion(c,owner))===v1){if(cache.size>=MAX_ENTRIES)cache.delete(cache.keys().next().value as string);cache.set(k,structuredClone(out));}
     return out;
   }catch(e){return budgetGuard(e);}
 }
