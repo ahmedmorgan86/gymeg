@@ -1,11 +1,13 @@
-import {test,after} from 'node:test';import assert from 'node:assert/strict';
+import {test,after,mock} from 'node:test';import assert from 'node:assert/strict';
 import {bootstrapDb} from './db-bootstrap-helpers.mjs';
 const real=await bootstrapDb();let rowsRead=0;
 globalThis.__postDb={query:async(s,v)=>{const r=await real.query(s,v);rowsRead+=r.rows?.length??0;return r;},transaction:fn=>real.transaction(c=>fn({query:async(s,v)=>{const r=await c.query(s,v);rowsRead+=r.rows?.length??0;return r;}}))};
 after(()=>real.close());
 const {POST}=await import('../app/api/workspace/route.ts');
 const {splitState}=await import('../app/lib/entity-state.ts');
-const {club}=await import('./hot-ops-fixture.mjs');
+const {club,NOW}=await import('./hot-ops-fixture.mjs');
+const {applyOperation}=await import('../app/lib/domain.ts');
+const {normalize}=await import('../app/lib/extensions.ts');
 const license={mode:'perpetual',status:'active',starts_at:'2026-01-01T00:00:00Z',ends_at:null,maintenance_until:null};
 function ctx(owner,extra={}){globalThis.__qaContext={owner,tenantId:'t-'+owner,role:'owner',branches:null,license,user:{userId:'staff',displayName:'tester'},...extra};}
 async function seed(owner){
@@ -45,4 +47,35 @@ test('POST /api/workspace: flag off vs on over the real entity layout',async()=>
     // invalid operation under the flag still returns the full path's rule error
     ctx('S');const bad=await post('S',{operation:{type:'payment.add',branch:m.branch,id:m.id,minor:-5,method:'cash'},requestId:'req-aaaaaaaaaaaaaaaa5',revision:7});assert.equal(bad.status,400);assert.equal(await rev('S'),7);
   }finally{delete process.env.GYMOS_HOT_OPS;}
+});
+
+async function seedSmall(owner){
+  const {emptyState}=await import('../app/lib/domain.ts');
+  const st=emptyState();st.branches=[{id:'a',name:'A'},{id:'b',name:'B'}];st.settings.timezone='Africa/Cairo';
+  st.members=['m1','m2'].map(id=>({id,name:'Member '+id,phone:'0100000000'+id.slice(1),branch:'a',joined:'2026-01-01',expires:'2026-12-31',archived:false,demo:false}));
+  const {metadata,entities}=splitState(st);
+  for(const t of ['gym_entities','gym_states'])await real.query(`DELETE FROM gymos.${t} WHERE ${t==='gym_states'?'user_id':'owner_id'}=$1`,[owner]);
+  await real.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',[owner,JSON.stringify({...metadata,_entityStorage:1,_activityArchive:1}),new Date().toISOString()]);
+  for(const e of entities)await real.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',[owner,e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
+}
+test('POST /api/workspace: visit.add and visit.exit take the hot path and match the full path',async()=>{
+  mock.timers.enable({apis:['Date'],now:Date.parse(NOW)}); // the route stamps real time; visits and memberships are clock-dependent, so run at the fixture clock
+  try{
+    await seedSmall('F');await seedSmall('S');
+    const openVisit=async o=>(await real.query("SELECT entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'leftAt' IS NULL",[o])).rows.map(r=>r.entity_id);
+    const stats={};
+    for(const step of ['add','exit','add-dup-open','exit-missing']){
+      const res={};
+      for(const [o,flag] of [['F',false],['S',true]]){
+        const op=step==='exit'?{type:'visit.exit',branch:'a',id:(await openVisit(o))[0]}:step==='exit-missing'?{type:'visit.exit',branch:'a',id:'nope'}:{type:'visit.add',branch:'a',id:'m1'};
+        const before=await rev(o);
+        if(flag)process.env.GYMOS_HOT_OPS='1';else delete process.env.GYMOS_HOT_OPS;
+        try{ctx(o);rowsRead=0;const r=await post(o,{operation:op,requestId:'req-cccccccccccccccc'+step.length+step[0],revision:before});res[o]={status:r.status,body:await r.json(),rows:rowsRead,rev:await rev(o),open:(await openVisit(o)).length,before};}finally{delete process.env.GYMOS_HOT_OPS;}
+      }
+      assert.equal(res.S.status,res.F.status,step+' status');assert.deepEqual(res.S.body,res.F.body,step+' body');assert.equal(res.S.rev-res.S.before,res.F.rev-res.F.before,step+' revision movement');assert.equal(res.S.open,res.F.open,step+' open visits');
+      stats[step]=[res.F.status,res.F.rows,res.S.rows];
+    }
+    assert.equal(stats.add[0],200);assert.equal(stats.exit[0],200);assert.ok(stats['add-dup-open'][0]>=400||stats['add-dup-open'][0]===200);
+    console.log('POST visit ops [status, rows full, rows hot]',JSON.stringify(stats));
+  }finally{mock.timers.reset();}
 });

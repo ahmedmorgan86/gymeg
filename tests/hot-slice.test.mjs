@@ -83,11 +83,18 @@ test('Member history pages newest-first and equals the full filtered list; scope
     let checked=0;
     for(const m of full.members.slice(0,6)){
       for(const c of ['visits','payments','invoices']){
-        const want=full[c].filter(x=>x.member===m.id).map(x=>x.id).reverse();
+        const want=full[c].filter(x=>x.member===m.id&&x.branch===m.branch).map(x=>x.id).reverse(); // the packet scopes rows by their own branch
         const got=[];let before,pages=0;
         for(;;){const p=await readMemberHistory(backend,'h',{member:m.id,collection:c,branches:[m.branch],before,limit:7});assert.ok(p,'page');got.push(...p.rows.map(r=>r.id));pages++;if(p.next===null)break;before=p.next;assert.ok(pages<200);}
         assert.deepEqual(got,want,`${m.id} ${c} pages equal the full list newest-first`);checked++;
       }
+    }
+    {// rows in another branch stay hidden from a branch-scoped caller, as in the packet
+      const f2=structuredClone(full),mm=f2.members[0],otherBranch=f2.branches.map(b=>b.id).find(b=>b!==mm.branch);
+      const mine=f2.visits.filter(v=>v.member===mm.id);assert.ok(mine.length>=2,'fixture member has visits');mine[0].branch=otherBranch;
+      await db.query('BEGIN');await seed(db,'xb',f2);await db.query('COMMIT');
+      const scoped=await readMemberHistory(backend,'xb',{member:mm.id,collection:'visits',branches:[mm.branch],limit:100}),all=await readMemberHistory(backend,'xb',{member:mm.id,collection:'visits',limit:100});
+      assert.ok(!scoped.rows.some(r=>r.id===mine[0].id),'other-branch visit is not returned to a branch-scoped caller');assert.equal(scoped.rows.length,mine.length-1);assert.equal(all.rows.length,mine.length,'unscoped (all-branch) caller sees every row');
     }
     const other=full.members.find(m=>m.branch!==full.members[0].branch);
     assert.equal(await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',branches:['nonexistent']}),null,'member outside the allowed branches is refused, not returned empty');

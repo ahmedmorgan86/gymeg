@@ -36,6 +36,8 @@ registerHooks({
     if (url.endsWith('/app/lib/firebase-member-auth.ts')) return module('export const memberPortalRef=()=>{throw Error("unexpected Firestore")};export const firebaseMemberLicense=async()=>null;');
     if (url.endsWith('/app/lib/entity-store.ts')) return module('export const persistSpace=async()=>true;');
     if (url.endsWith('/app/lib/domain.ts')) return module('export class RuleError extends Error {} export const applyOperation=()=>({});');
+    // The hot path is default-off and covered at the real POST boundary by workspace-post.integration.mjs; this suite only stubs it out of the import graph.
+    if (url.endsWith('/app/lib/hot-route.ts')) return module('export const tryHotOperation=async()=>null;');
     if (url.endsWith('/app/lib/access.ts')) return module('export const receptionPermitted=()=>true;');
     if (url.endsWith('/app/lib/workspace-error.ts')) return module('export const workspaceUniqueError=()=>null;');
     if (url.endsWith('/app/lib/web-push.ts')) return module('export const sendCommunityPush=async()=>{};');

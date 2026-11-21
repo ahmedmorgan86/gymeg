@@ -20,7 +20,7 @@ export async function readMemberHistory(be:SliceBackend,owner:string,q:{member:s
   const rev=await be.revision(owner);if(rev===null)return null;
   const [m]=await be.entities(owner,{collections:['members'],ids:[q.member],branches:q.branches??null});
   if(!m)return null;
-  const rows=await be.entities(owner,{collections:[q.collection],match:{field:'member',values:[q.member]},desc:true,limit:limit+1,...(q.before!==undefined?{before:q.before}:{})});
+  const rows=await be.entities(owner,{collections:[q.collection],match:{field:'member',values:[q.member]},branches:q.branches??null,desc:true,limit:limit+1,...(q.before!==undefined?{before:q.before}:{})});
   const page=rows.slice(0,limit);
   const after=await be.revision(owner);if(after!==rev)return 'race'; // a write landed between the reads: the caller answers with a retryable status, never 'member missing'
   return{rows:page.map(r=>r.payload as Record<string,unknown>),next:rows.length>limit?Number(page[page.length-1].position):null,revision:rev};

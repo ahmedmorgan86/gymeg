@@ -29,7 +29,7 @@ test('GET member-history: flag, auth, params, role and branch scope, paging, leg
     assert.deepEqual(all,s.visits.filter(v=>v.member===m.id).map(v=>v.id).reverse(),'pages equal the member visit list newest-first');
     assert.equal((await get('A',{member:'nobody',collection:'visits'})).status,404);
     ctx('A',{branches:['zzz']});assert.equal((await get('A',{member:m.id,collection:'visits'})).status,404,'member outside the caller branches: not found, never empty');
-    ctx('A',{branches:[m.branch]});assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200);
+    ctx('A',{branches:[m.branch]});{const r=await get('A',{member:m.id,collection:'visits',limit:'100'});assert.equal(r.status,200);assert.deepEqual((await r.json()).rows.map(x=>x.id),s.visits.filter(v=>v.member===m.id&&v.branch===m.branch).map(v=>v.id).reverse(),'rows scoped by their own branch');}
     ctx('A',{role:'reception'});assert.equal((await get('A',{member:m.id,collection:'payments'})).status,403,'reception without payment grants cannot read payments');assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200,'but can read visits');
     await seed('A',{grants:['payment.add']});ctx('A',{role:'reception'});assert.equal((await get('A',{member:m.id,collection:'payments'})).status,200,'reception with a payment grant can');
     // Cross-tenant: two clubs share member ids but hold different secret payloads.
