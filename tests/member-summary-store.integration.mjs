@@ -7,7 +7,7 @@ registerHooks({
   load(url,ctx,next){if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__hotDb.query(sql,v),release(){}})});export const isFirebaseConfigured=()=>false;`};return next(url,ctx);}
 });
 const {persistSpace}=await import('../app/lib/entity-store.ts');
-const {refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
+const {useGrouped,refreshDirtySummaries,readMemberCandidates,REFRESH_MAX,MEMBER_CANDIDATE_MAX}=await import('../app/lib/member-summary-store.ts');
 const {deriveSummary}=await import('../app/lib/member-summary-model.ts');
 const {memberSummary}=await import('../app/lib/member-console.ts');
 const {splitState}=await import('../app/lib/entity-state.ts');
@@ -68,6 +68,24 @@ test('persistSpace full path (a real write) keeps summaries exact',async()=>{
   await persistSpace('O1',space,next);
   await same('O1','after persistSpace');
 });
+test('grouped bulk path and per-member lookups store identical summaries; the snapshot scope works',async()=>{
+  const {withSnapshotScope}=await import('../app/lib/member-summary-scope.ts');
+  await seed('G1',fixture());
+  const drain=async mode=>{await db.query("SELECT gymos.backfill_member_summaries('G1')");let x;for(let i=0;i<10;i++){x=await withSnapshotScope('G1',c=>refreshDirtySummaries(c,'G1',500,mode));assert.equal(x.status,'ok');if(x.remaining===0)break;}
+    return (await db.query("SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id='G1' ORDER BY 1")).rows;};
+  const a=await drain('lookup'),b=await drain('grouped'),c=await drain('auto');
+  assert.ok(a.length>=10);assert.deepEqual(strip(b),strip(a),'grouped == lookup');assert.deepEqual(strip(c),strip(a),'auto == lookup');
+  // grouped path stays exact for every member against the oracle too
+  await db.query("SELECT gymos.backfill_member_summaries('G1')");
+  const r=await withSnapshotScope('G1',c=>readMemberCandidates(c,'G1',null,{refresh:true,mode:'grouped'}));assert.equal(r.status,'ok');
+  // snapshot scope maps a serialization failure to busy, not an exception
+  await db.query("SELECT gymos.backfill_member_summaries('G1')");
+  const bz=await withSnapshotScope('G1',c=>readMemberCandidates({query:async(s,v)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}return c.query(s,v);}},'G1',null,{refresh:true}));assert.equal(bz.status,'busy');
+});
+test('cost rule: grouped only when expected random pages exceed a sequential pass',()=>{
+  const k={counts:{visits:100000,payments:20000,invoices:20000},bytes:23_000_000};
+  assert.equal(useGrouped(10,k,10000),false);assert.equal(useGrouped(500,k,10000),true);assert.equal(useGrouped(1,{counts:{},bytes:0},0),false);
+});
 test('unready, truncate, beyond-cap and too-many-dirty fail closed without a history read',async()=>{
   await seed('O2',{...fixture(),members:[],visits:[],payments:[],invoices:[]});
   const r=await read('O2');assert.equal(r.status,'ok','fresh empty owner is ready from creation');assert.equal(r.candidates.length,0);
@@ -114,7 +132,12 @@ test('stale owner is read-only without refresh:true (no writes), and refresh wai
   const before=(await db.query("SELECT count(*)::int n FROM gymos.gym_member_summaries WHERE owner_id='R2'")).rows[0].n;
   assert.equal((await read('R2',null,{})).status,'stale');assert.equal((await db.query("SELECT count(*)::int n FROM gymos.gym_member_summaries WHERE owner_id='R2'")).rows[0].n,before,'nothing written');
   // a lock-timeout from a writer holding a row is reported as busy
-  const b=await via('R2',async(c,s,v,phase)=>{if(phase==='before'&&/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('lock');e.code='55P03';throw e;}return null;});assert.equal(b.status,'busy');
+  // a REAL aborted statement (the failing query puts the transaction in the aborted state) then 55P03: busy, the transaction stays usable and lock_timeout does not leak
+  const lt0=(await db.query("SHOW lock_timeout")).rows[0].lock_timeout;let usable=null,lt1=null;
+  const b=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','R2',true)");
+    const st=await readMemberCandidates({query:async(s,v)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){await c.query('SELECT 1/0').catch(()=>{});const e=new Error('lock');e.code='55P03';throw e;}return c.query(s,v);}},'R2',null,{refresh:true});
+    usable=(await c.query('SELECT 1 AS one')).rows[0].one;lt1=(await c.query('SHOW lock_timeout')).rows[0].lock_timeout;return st;});
+  assert.equal(b.status,'busy');assert.equal(usable,1,'transaction still usable after the abort');assert.equal(lt1,lt0,'lock_timeout restored');
   // a writer growing a collection after the counters check is detected, not read without bound
   const rc=await via('R2',async(c,s,v,phase)=>{if(phase==='after'&&/FROM gymos.gym_entity_counters/.test(s)){await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('R2','visits','vgrow',50,'a','{\"id\":\"vgrow\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\"}')");}return null;});
   assert.equal(rc.status,'raced');

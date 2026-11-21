@@ -7,7 +7,7 @@ import {computeStoredSummary,type StoredSummary} from './member-summary-model.ts
 
 type Sql={query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>};
 export const MEMBER_CANDIDATE_MAX=10000; // the cap the operation path and restore enforce; more members fail closed
-export const REFRESH_MAX=500; // dirty members per call (round trips and CPU; the BYTES bound is the counters bound below)
+export const REFRESH_MAX=500; // dirty members per request-side read (round trips and CPU; the BYTES bound is the counters bound below)
 export const CHUNK=20; // members per history query: per-member index lookups keep the natural plan an index scan (a 100-id ANY flips to whole-collection bitmap work)
 export const LOCK_WAIT_MS=1000; // availability guard for row-lock waits; the owner refresh lock is try-lock and never waits
 export type Candidate={member:Member;stored:StoredSummary};
@@ -22,41 +22,78 @@ const refuse=(status:Refusal):{status:Refusal}=>({status});
  * collection, so a writer that grows a collection after this check (the check and the reads are separate READ COMMITTED statements) is detected as 'raced'
  * rather than read without bound. */
 async function bound(c:Sql,owner:string){const k=await readCounters(c,owner);return k&&k.bytes<=STATE_BYTE_LIMIT?k:null;}
-const busy=(e:unknown)=>(e as {code?:string})?.code==='55P03';
+const busy=(e:unknown)=>['55P03','40001'].includes((e as {code?:string})?.code??''); // lock timeout, or a serialization failure under the snapshot scope
+
+type Rows={member_id:string;payload:unknown}[];
+/** Grouped bulk read: ONE statement per collection with no ordering, so the planner may use a sequential scan (an index-ordered keyset pass measured worse than the
+ * whole-collection scan: random heap fetches). Rows are filtered to the wanted members and ordered (position, entity_id) in memory, which is the order the per-member
+ * lookups return. Transfer and memory are bounded by the counters bound (LIMIT counters+1; more rows than the counters said is 'raced'). */
+async function readGrouped(c:Sql,owner:string,coll:string,want:Set<string>,limit:number):Promise<Rows|'raced'>{
+  const rows=(await c.query("SELECT position,entity_id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 LIMIT "+(limit+1),[owner,coll])).rows as {position:number;entity_id:string;payload:{member?:string}}[];
+  if(rows.length>limit)return 'raced';
+  return rows.filter(r=>r.payload.member!==undefined&&want.has(r.payload.member)).sort((x,y)=>x.position-y.position||(x.entity_id<y.entity_id?-1:x.entity_id>y.entity_id?1:0)).map(r=>({member_id:r.payload.member!,payload:r.payload}));
+}
+/** Cost rule, derived from the counters and not tuned: a per-member lookup touches about one random heap page per row, a grouped pass reads about
+ * bytes/8192 pages sequentially. Pick the grouped pass when the expected random pages (dirty members x average history rows per member) exceed the pass. */
+export function useGrouped(n:number,k:{counts:Record<string,number>;bytes:number},members:number){
+  const rows=(k.counts.visits??0)+(k.counts.payments??0)+(k.counts.invoices??0);
+  return members>0&&n*(rows/members)>k.bytes/8192;
+}
 
 /** Recompute the listed members under the owner refresh lock. Re-reads everything the computation depends on (marks, stored rows and the MEMBER rows themselves)
  * after the lock, so a period or profile change committed since the caller's read can never be stored stale with its mark cleared. */
-async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candidate>):Promise<Refusal|null>{
+export type Mode='auto'|'grouped'|'lookup'; // auto is the derived rule; the others exist for differential tests and evidence
+async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candidate>,mode:Mode='auto'):Promise<Refusal|null>{
   if(!need.length)return null;
   const k=await bound(c,owner);if(!k)return 'over-state-bound';
+  // The body runs inside a savepoint: a lock timeout (55P03) or serialization failure (40001) aborts the statement, and only ROLLBACK TO leaves the caller's
+  // transaction usable. lock_timeout is restored afterwards so it never leaks to the caller's later statements.
+  const prev=String((await c.query("SELECT current_setting('lock_timeout') AS v")).rows[0]?.['v' as never]??'0');
+  await c.query('SAVEPOINT msum_refresh');
   try{
     await c.query("SELECT set_config('lock_timeout',$1,true)",[String(LOCK_WAIT_MS)]);
-    if(!(await c.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS ok',[`msum:${owner}`])).rows.some(r=>(r as {ok:boolean}).ok))return 'busy';
+    if(!(await c.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS ok',[`msum:${owner}`])).rows.some(r=>(r as {ok:boolean}).ok)){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}
     const lim=(coll:string)=>(k.counts[coll]??0)+1;
-    for(let i=0;i<need.length;i+=CHUNK){
-      const ids=need.slice(i,i+CHUNK);
-      const gens=new Map((await c.query('SELECT member_id,gen FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows.map(r=>[(r as {member_id:string}).member_id,String((r as {gen:string|number}).gen)] as [string,string]));
-      const members=new Map((await c.query("SELECT entity_id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND entity_id=ANY($2::text[])",[owner,ids])).rows.map(r=>[(r as {entity_id:string}).entity_id,(r as {payload:Member}).payload] as [string,Member]));
-      const have=new Map((await c.query('SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows.map(r=>[(r as {member_id:string}).member_id,(r as {stored:StoredSummary}).stored] as [string,StoredSummary]));
-      const todo:string[]=[];
-      for(const id of ids){const m=members.get(id);if(!m)continue; // deleted meanwhile: not a candidate
-        if(gens.has(id)||!have.has(id))todo.push(id);else out.set(id,{member:m,stored:have.get(id)!});} // refreshed by someone else while we waited
-      if(!todo.length)continue;
-      const rowsOf=async(coll:string)=>{const rows=(await c.query("SELECT m.id AS member_id,x.payload FROM unnest($3::text[]) AS m(id) CROSS JOIN LATERAL (SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=m.id ORDER BY position,entity_id) x LIMIT "+lim(coll),[owner,coll,todo])).rows as {member_id:string;payload:unknown}[];return rows;};
-      const [visits,payments,invoices]=await Promise.all([rowsOf('visits'),rowsOf('payments'),rowsOf('invoices')]);
-      if(visits.length>lim('visits')-1||payments.length>lim('payments')-1||invoices.length>lim('invoices')-1)return 'raced'; // more rows than the counters said: a writer grew it
-      for(const id of todo){
-        const m=members.get(id)!;
-        const local={members:[m],visits:visits.filter(v=>v.member_id===id).map(v=>v.payload),payments:payments.filter(v=>v.member_id===id).map(v=>v.payload),invoices:invoices.filter(v=>v.member_id===id).map(v=>v.payload)} as unknown as GymState;
-        const s=computeStoredSummary(local,m);
-        await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify(s)]);
-        // Rows read above are at least as new as the mark read under the lock; a later writer leaves a newer gen and the member stays dirty.
-        if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
-        out.set(id,{member:m,stored:s});
-      }
+    const gens=new Map<string,string>(),members=new Map<string,Member>(),have=new Map<string,StoredSummary>();
+    for(let i=0;i<need.length;i+=1000){
+      const ids=need.slice(i,i+1000);
+      for(const r of (await c.query('SELECT member_id,gen FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows as {member_id:string;gen:string|number}[])gens.set(r.member_id,String(r.gen));
+      for(const r of (await c.query("SELECT entity_id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND entity_id=ANY($2::text[])",[owner,ids])).rows as {entity_id:string;payload:Member}[])members.set(r.entity_id,r.payload);
+      for(const r of (await c.query('SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows as {member_id:string;stored:StoredSummary}[])have.set(r.member_id,r.stored);
     }
+    const todo:string[]=[];
+    for(const id of need){const m=members.get(id);if(!m)continue; // deleted meanwhile: not a candidate
+      if(gens.has(id)||!have.has(id))todo.push(id);else out.set(id,{member:m,stored:have.get(id)!});} // refreshed by someone else while we waited
+    if(!todo.length){await c.query('RELEASE SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return null;}
+    const total=Number((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members'",[owner])).rows[0]?.['n' as never]??0);
+    const grouped=mode==='auto'?useGrouped(todo.length,k,total):mode==='grouped';
+    const rowsOf=async(coll:string):Promise<Rows|'raced'>=>{
+      if(grouped)return readGrouped(c,owner,coll,new Set(todo),lim(coll)-1);
+      const all:Rows=[];
+      for(let i=0;i<todo.length;i+=CHUNK){
+        const rows=(await c.query("SELECT m.id AS member_id,x.payload FROM unnest($3::text[]) AS m(id) CROSS JOIN LATERAL (SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=m.id ORDER BY position,entity_id) x LIMIT "+lim(coll),[owner,coll,todo.slice(i,i+CHUNK)])).rows as Rows;
+        all.push(...rows);if(all.length>lim(coll)-1)return 'raced'; // more rows than the counters said: a writer grew it
+      }
+      return all;
+    };
+    const visits=await rowsOf('visits'),payments=await rowsOf('payments'),invoices=await rowsOf('invoices');
+    if(visits==='raced'||payments==='raced'||invoices==='raced'){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
+    const by=(rows:Rows)=>{const m=new Map<string,unknown[]>();for(const r of rows){const l=m.get(r.member_id)??[];l.push(r.payload);m.set(r.member_id,l);}return m;};
+    const V=by(visits),P=by(payments),I=by(invoices);
+    for(const id of todo){
+      const m=members.get(id)!;
+      const local={members:[m],visits:V.get(id)??[],payments:P.get(id)??[],invoices:I.get(id)??[]} as unknown as GymState;
+      const s=computeStoredSummary(local,m);
+      await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify(s)]);
+      // Rows read above are at least as new as the marks read under the lock; a later writer leaves a newer gen and the member stays dirty.
+      if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
+      out.set(id,{member:m,stored:s});
+    }
+    await c.query('RELEASE SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);
     return null;
-  }catch(e){if(busy(e))return 'busy';throw e;}
+  }catch(e){
+    if(busy(e)){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}
+    throw e;}
 }
 
 async function ready(c:Sql,owner:string){
@@ -66,36 +103,39 @@ async function ready(c:Sql,owner:string){
 
 /** Candidates for the members screen. Read-only unless the caller passes refresh:true (request-side writes are explicit): without it, any dirty or
  * missing member returns 'stale' and nothing is written. */
-export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|null,opts:{refresh?:boolean}={}):Promise<CandidateResult>{
+export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|null,opts:{refresh?:boolean;mode?:Mode}={}):Promise<CandidateResult>{
   if(!await ready(c,owner))return refuse('unready');
-  const filter=branches?' AND branch=ANY($2::text[])':'';const args=branches?[owner,branches]:[owner];
-  const rows=(await c.query(`SELECT entity_id,payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members'${filter} ORDER BY position,entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member}[];
+  const filter=branches?' AND e.branch=ANY($2::text[])':'';const args=branches?[owner,branches]:[owner];
+  // ONE statement: each member payload, its stored inputs and its dirty mark come from the same snapshot, so a candidate is never an old member paired with newer inputs.
+  const rows=(await c.query(`SELECT e.entity_id,e.payload,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;stored:StoredSummary|null;gen:string|number|null}[];
   if(rows.length>MEMBER_CANDIDATE_MAX)return refuse('too-many-members');
-  const members=rows.filter(r=>!r.payload.archived),ids=members.map(r=>r.entity_id);
-  const dirty=new Set(ids.length?(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows.map(r=>(r as {member_id:string}).member_id):[]);
-  if(dirty.size>REFRESH_MAX)return refuse('too-many-dirty');
-  const stored=new Map<string,StoredSummary>();
-  if(ids.length)for(const r of (await c.query('SELECT member_id,stored FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id=ANY($2::text[])',[owner,ids])).rows as {member_id:string;stored:StoredSummary}[])stored.set(r.member_id,r.stored);
-  const need=ids.filter(id=>dirty.has(id)||!stored.has(id)); // a missing row is never trusted
+  const members=rows.filter(r=>!r.payload.archived);
+  const need=members.filter(r=>r.gen!==null||!r.stored).map(r=>r.entity_id); // a missing row is never trusted
   if(need.length>REFRESH_MAX)return refuse('too-many-dirty');
   const fresh=new Map<string,Candidate>();
   if(need.length){
     if(!opts.refresh)return refuse('stale');
-    const why=await recompute(c,owner,need,fresh);if(why)return refuse(why);
+    const why=await recompute(c,owner,need,fresh,opts.mode);if(why)return refuse(why);
   }
-  const candidates:Candidate[]=[];
-  for(const r of members){const f=fresh.get(r.entity_id);if(f)candidates.push(f);else if(!need.includes(r.entity_id))candidates.push({member:r.payload,stored:stored.get(r.entity_id)!});else return refuse('raced'); /* deleted while refreshing */}
-  return{status:'ok',candidates,refreshed:fresh.size&&need.length?need.length:0};
+  const needSet=new Set(need),candidates:Candidate[]=[];
+  for(const r of members){if(!needSet.has(r.entity_id))candidates.push({member:r.payload,stored:r.stored!});else{const f=fresh.get(r.entity_id);if(!f)return refuse('raced');candidates.push(f);}} // absent: deleted while refreshing
+  return{status:'ok',candidates,refreshed:need.length};
 }
 
 /** Bounded refresher for the (separately gated) backfill and for mass-dirty events such as a restore: recomputes up to `max` dirty members under one bound check and
  * one lock, and reports how many marks are left. Also forgets marks and rows of deleted members. */
-export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX):Promise<RefreshResult>{
+export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,mode:Mode='auto'):Promise<RefreshResult>{
   if(!await ready(c,owner))return refuse('unready');
   await c.query("DELETE FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id)",[owner]);
   await c.query("DELETE FROM gymos.gym_member_summaries s WHERE s.owner_id=$1 AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities e WHERE e.owner_id=s.owner_id AND e.collection='members' AND e.entity_id=s.member_id)",[owner]);
-  const ids=(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2',[owner,max])).rows.map(r=>(r as {member_id:string}).member_id);
-  const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out);if(why)return refuse(why);
+  // Mass dirty (backfill, restore): when the derived cost rule says per-member lookups would cost more than one grouped pass, take ALL dirty members in ONE call, since
+  // a grouped pass per wave would rescan the collections every wave. That call's memory and transfer are bounded by the counters bound (<= 20,000,000 bytes of rows).
+  const D=Number((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0]?.['n' as never]??0);
+  let take=max,resolved:Mode=mode==='auto'?'lookup':mode;
+  if(D>0&&mode!=='lookup'){const k=await bound(c,owner);if(k){const total=Number((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members'",[owner])).rows[0]?.['n' as never]??0);
+    if(mode==='grouped'||useGrouped(D,k,total)){take=MEMBER_CANDIDATE_MAX;resolved='grouped';}}}
+  const ids=(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2',[owner,take])).rows.map(r=>(r as {member_id:string}).member_id);
+  const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out,resolved);if(why)return refuse(why);
   const left=Number((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0]?.['n' as never]??0);
   return{status:'ok',refreshed:ids.length,remaining:left};
 }

@@ -16,8 +16,12 @@ const bufs=t=>[...t.matchAll(/(?:hit|read)=(\d+)/g)].map(m=>+m[1]).reduce((a,b)=
 const explain=async(sql,v)=>{const t=(await db.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v)).rows.map(x=>x['QUERY PLAN']).join('\n');return{buffers:bufs(t),plan:t.split('\n').filter(l=>/Index Scan|Seq Scan|Bitmap Heap/.test(l)).map(l=>l.trim().slice(0,60)).join('|')};};
 const lat="SELECT m.id AS member_id,x.payload FROM unnest($3::text[]) AS m(id) CROSS JOIN LATERAL (SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND payload->>'member'=m.id ORDER BY position,entity_id) x";
 const scope=w=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','E',true)");return w(c);});
-let w=0,t0=performance.now();for(;;){const x=await scope(c=>refreshDirtySummaries(c,'E'));w++;if(x.status!=='ok'){console.log('refresh stopped:',x.status);break;}if(x.remaining===0)break;}
-console.log('backfill via refresher:',{waves:w,ms:Math.round(performance.now()-t0),visits:M*PER-PER+HEAVY});
+const drain=async(mode,max)=>{await db.query("SELECT gymos.backfill_member_summaries('E')");let w=0;const t0=performance.now();for(;;){const x=await scope(c=>refreshDirtySummaries(c,'E',max,mode));w++;if(x.status!=='ok'){console.log('stopped:',x.status);break;}if(x.remaining===0)break;}return{waves:w,ms:Math.round(performance.now()-t0)};};
+let t0;
+console.log('mass refresh, per-member lookups, 500 per wave:',await drain('lookup',500));
+console.log('mass refresh, grouped pass, all members in one call:',await drain('grouped',10000));
+console.log('mass refresh, auto rule (500/wave):',await drain('auto',500));
+console.log('grouped statement, visits (one unordered statement):',await explain("SELECT position,entity_id,payload FROM gymos.gym_entities WHERE owner_id='E' AND collection='visits' LIMIT 100000",[]));
 const ord=Array.from({length:CHUNK},(_,i)=>'m'+(i*37+5)),heavy=['m1'];
 console.log('visits, one chunk of',CHUNK,'ordinary members:',await explain(lat,['E','visits',ord]));
 console.log('visits, the skewed member (',HEAVY+PER,'rows):',await explain(lat,['E','visits',heavy]));
