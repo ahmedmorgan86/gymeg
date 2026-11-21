@@ -15,11 +15,13 @@ export async function readEntitySpace(owner:string){if(isFirebaseConfigured()){r
  */
 export type SliceMode={positions:Record<string,number>;trims:{collection:string;keep:number}[]};
 type Q={query(sql:string,values?:unknown[]):Promise<{rows:unknown[];rowCount?:number|null}>};
+/** A row the slice treats as new already exists in storage but was not loaded: positions would be wrong, so refuse the write (rolled back) and let the caller run the full path. */
+export class SliceConflict extends Error{constructor(){super('slice: existing row absent from loaded positions');}}
 export async function sliceUpserts(client:Q,owner:string,upserts:Entity[],slice:SliceMode):Promise<Entity[]>{
   const key=(e:{collection:string;entity_id:string})=>e.collection+':'+e.entity_id;
   const fresh=upserts.filter(e=>slice.positions[key(e)]===undefined);
   const max:Record<string,number>={};
-  if(fresh.length){const rows=(await client.query('SELECT collection,max(position)::int AS p FROM gymos.gym_entities WHERE owner_id=$1 AND collection=ANY($2::text[]) GROUP BY collection',[owner,[...new Set(fresh.map(e=>e.collection))]])).rows as {collection:string;p:number}[];for(const r of rows)max[r.collection]=r.p;}
+  if(fresh.length){const hit=await client.query('SELECT 1 FROM gymos.gym_entities e JOIN jsonb_to_recordset($2::jsonb) AS x(collection text,entity_id text) ON e.collection=x.collection AND e.entity_id=x.entity_id WHERE e.owner_id=$1 LIMIT 1',[owner,JSON.stringify(fresh.map(e=>({collection:e.collection,entity_id:e.entity_id})))]);if(hit.rows.length)throw new SliceConflict();const rows=(await client.query('SELECT collection,max(position)::int AS p FROM gymos.gym_entities WHERE owner_id=$1 AND collection=ANY($2::text[]) GROUP BY collection',[owner,[...new Set(fresh.map(e=>e.collection))]])).rows as {collection:string;p:number}[];for(const r of rows)max[r.collection]=r.p;}
   return upserts.map(e=>{const known=slice.positions[key(e)];if(known!==undefined)return{...e,position:known};max[e.collection]=(max[e.collection]??-1)+1;return{...e,position:max[e.collection]};});
 }
 export async function sliceTrims(client:Q,owner:string,slice:SliceMode):Promise<Entity[]>{
