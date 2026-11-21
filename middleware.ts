@@ -21,7 +21,6 @@ export async function middleware(request: NextRequest) {
   if (plan.action === 'set') request.cookies.set('gymos_session', plan.value);
   const response = NextResponse.next({ request });
   if (plan.action === 'set') response.cookies.set('gymos_session', plan.value, plan.options);
-  else if (plan.action === 'clear') response.cookies.delete('gymos_session');
   return response;
 }
 

@@ -3,8 +3,7 @@ import { decodeSession, encodeSession, SESSION_COOKIE_MAX_BYTES } from './supaba
 
 export type SupabaseRefreshPlan =
   | { action: 'keep' }
-  | { action: 'set'; value: string; options: typeof sessionCookieOptions }
-  | { action: 'clear' };
+  | { action: 'set'; value: string; options: typeof sessionCookieOptions };
 
 // Access tokens are verified server-side on every authenticated call; decoding
 // the exp claim here is only a freshness check so middleware refreshes the
@@ -41,7 +40,14 @@ export async function planSupabaseSessionRefresh(args: {
   const { url, key, cookie } = args;
   if (!cookie) return { action: 'keep' };
   const session = decodeSession(cookie);
-  if (!session) return { action: 'clear' };
+  // Undecodable cookie: keep it too. "Malformed" is judged from this
+  // request's snapshot — a concurrent fresh sign-in may already have replaced
+  // it, and a stale clear would wipe that new session. An unusable cookie is
+  // harmless; the next successful sign-in overwrites it.
+  if (!session) {
+    logAuthDiagnostic('middleware-refresh', null, 'UNDECODABLE');
+    return { action: 'keep' };
+  }
   const now = Math.floor((args.now ?? Date.now()) / 1000);
   const exp = accessTokenExpiry(session.a);
   if (exp !== null && exp - now > 60) return { action: 'keep' };

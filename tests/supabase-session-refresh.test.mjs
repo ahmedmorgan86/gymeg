@@ -22,7 +22,9 @@ test('middleware refresh plan: keep fresh, rotate expired, clear dead, survive o
   const now = Date.now();
   // No cookie and undecodable cookie.
   assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: undefined }), { action: 'keep' });
-  assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: 'not-a-session' }), { action: 'clear' });
+  // Even a locally undecodable cookie is kept: this request's snapshot may be
+  // stale relative to a concurrent sign-in, and a clear could wipe it.
+  assert.deepEqual(await planSupabaseSessionRefresh({ ...env, cookie: 'not-a-session' }), { action: 'keep' });
   // Fresh access token: no provider call at all.
   global.fetch = async () => { throw new Error('must not be called'); };
   const fresh = encodeSession(jwt(Math.floor(now / 1000) + 3600), 'ref');
