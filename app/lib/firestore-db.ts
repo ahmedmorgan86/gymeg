@@ -61,6 +61,15 @@ export function isFirebaseConfigured(): boolean {
   );
 }
 
+// Persistence backend selector. Firebase env presence historically implied both
+// the auth/FCM provider and the Firestore data backend. A Supabase-backed
+// deployment keeps Firebase Auth/FCM while storing gym data in Postgres by
+// setting GYMOS_DATA_BACKEND=postgres. Auth/session/push-provider code keeps
+// checking isFirebaseConfigured(); data-access code checks this instead.
+export function useFirestorePersistence(): boolean {
+  return isFirebaseConfigured() && process.env.GYMOS_DATA_BACKEND !== 'postgres';
+}
+
 export function getFirestoreDb(): Firestore {
   if (firestoreInstance) return firestoreInstance;
 
