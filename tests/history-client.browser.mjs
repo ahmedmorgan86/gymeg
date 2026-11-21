@@ -14,11 +14,11 @@ const {metadata,entities}=splitState(s);
 await real.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,5,$3)',['A',JSON.stringify({...metadata,_entityStorage:1}),'2026-03-15']);
 for(const e of entities)await real.query('INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,$2,$3,$4,$5,$6)',['A',e.collection,e.entity_id,e.position,e.branch,JSON.stringify(e.payload)]);
 const m=s.members.map(x=>({x,n:s.visits.filter(v=>v.member===x.id).length})).sort((a,b)=>b.n-a.n)[0];
-const b=await esbuild.build({stdin:{contents:`import {createRoot} from 'react-dom/client';import React from 'react';import P from './app/member-visit-pager.tsx';createRoot(document.getElementById('r')).render(React.createElement(P,{member:${JSON.stringify(m.x.id)},owner:'t-A',ar:false,timeZone:'Africa/Cairo',pageSize:5}));`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,format:'iife',define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_HISTORY':'"1"'},jsx:'automatic'});
-const js=b.outputFiles[0].text;let apiCalls=[],failNext=0;
-const server=http.createServer(async(rq,rs)=>{if(rq.url.startsWith('/api/workspace/member-history')){apiCalls.push(rq.url);if(failNext>0){failNext--;rs.writeHead(500);return rs.end('{}');}
+const b=await esbuild.build({stdin:{contents:`import {createRoot} from 'react-dom/client';import React from 'react';import P from './app/member-visit-pager.tsx';createRoot(document.getElementById('r')).render(React.createElement(P,{fallback:window.__fb,member:${JSON.stringify(m.x.id)},owner:'t-A',ar:false,timeZone:'Africa/Cairo',pageSize:5}));`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,format:'iife',define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_HISTORY':'"1"'},jsx:'automatic'});
+const js=b.outputFiles[0].text;let apiCalls=[],failNext=0,forceStatus=0;
+const server=http.createServer(async(rq,rs)=>{if(rq.url.startsWith('/api/workspace/member-history')){apiCalls.push(rq.url);if(forceStatus){rs.writeHead(forceStatus);return rs.end('{}');}if(failNext>0){failNext--;rs.writeHead(500);return rs.end('{}');}
  const r=await GET(new Request('https://example.test'+rq.url,{headers:{'X-GymOS-Tenant':rq.headers['x-gymos-tenant']??''}}));rs.writeHead(r.status,{'content-type':'application/json'});return rs.end(await r.text());}
- if(rq.url==='/app.js'){rs.writeHead(200,{'content-type':'text/javascript'});return rs.end(js);}rs.writeHead(200,{'content-type':'text/html'});rs.end('<!doctype html><meta charset=utf-8><div id=r></div><script src="/app.js"></script>');});
+ if(rq.url==='/app.js'){rs.writeHead(200,{'content-type':'text/javascript'});return rs.end(js);}rs.writeHead(200,{'content-type':'text/html'});const fb=rq.url.includes('fb=1')?JSON.stringify(s.visits.filter(v=>v.member===m.x.id).map(v=>({id:v.id,at:v.at}))):'undefined';rs.end('<!doctype html><meta charset=utf-8><div id=r></div><script>window.__fb='+fb+';</script><script src="/app.js"></script>');});
 await new Promise(r=>server.listen(0,r));const port=server.address().port;
 const browser=await puppeteer.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu'],headless:'new'});
 let ok=true;const check=(c,msg)=>{console.log(c?'PASS':'FAIL',msg);if(!c)ok=false;};
@@ -39,5 +39,9 @@ try{
  apiCalls=[];failNext=1;await page.reload();await page.waitForSelector('[role=alert]');check(true,'server error shows an alert');await page.screenshot({path:'/downloads/history-client-error.png'});
  await (await page.$('[role=alert] button')).click();await page.waitForFunction(()=>document.querySelectorAll('[data-testid=visit-pager] p').length>=5&&!document.querySelector('[role=alert]'));check(true,'retry recovers');
  check(!apiCalls.some(u=>/collection=(payments|invoices)/.test(u)),'no other collection requested');
+ // HTTP 501 (no exact server order): not retryable. With the caller's loaded visits it renders the legacy list; without them it shows an actionable failure, never Retry-forever and never a club-wide refetch.
+ forceStatus=501;apiCalls=[];await page.goto(`http://localhost:${port}/?fb=1`);await page.waitForSelector('[data-mode=legacy]');
+ const lt=await page.$$eval('[data-testid=visit-pager] p',e=>e.map(x=>x.textContent));check(lt.length===m.n&&lt.every((x,i)=>x===fmt(expected[i])),'501 with loaded visits: legacy list, exact legacy order ('+lt.length+' rows)');check(apiCalls.length===1,'501 is not retried: '+apiCalls.length+' request');
+ await page.goto(`http://localhost:${port}/`);await page.waitForSelector('[role=alert]');check(!await page.$('[role=alert] button'),'501 without loaded visits: actionable message, no Retry button');check(apiCalls.length===2,'still no refetch loop: '+apiCalls.length+' requests');await page.screenshot({path:'/downloads/history-client-501.png'});
 }finally{await browser.close();server.close();await real.close();}
 process.exit(ok?0:1);
