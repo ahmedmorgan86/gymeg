@@ -6,7 +6,8 @@
 -- Not applied anywhere.
 CREATE SEQUENCE IF NOT EXISTS gymos.gym_change_seq;
 CREATE TABLE IF NOT EXISTS gymos.gym_owner_version(owner_id text PRIMARY KEY,version bigint NOT NULL);
-ALTER TABLE gymos.gym_owner_version ENABLE ROW LEVEL SECURITY;ALTER TABLE gymos.gym_owner_version FORCE ROW LEVEL SECURITY;
+-- RLS is enabled but NOT forced: the SECURITY DEFINER writers run as the table owner, and a forced policy would make every club write fail unless that owner has BYPASSRLS (proved on PG16 with a NOSUPERUSER NOBYPASSRLS owner). gymos_app is not the owner, so its SELECT policy applies.
+ALTER TABLE gymos.gym_owner_version ENABLE ROW LEVEL SECURITY;
 DO $p$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE schemaname='gymos' AND tablename='gym_owner_version' AND policyname='gym_owner_version_runtime') THEN
  CREATE POLICY gym_owner_version_runtime ON gymos.gym_owner_version FOR SELECT TO gymos_app USING (owner_id=current_setting('app.gym_owner',true)); END IF; END $p$;
 REVOKE ALL ON gymos.gym_owner_version FROM PUBLIC,anon,authenticated;
