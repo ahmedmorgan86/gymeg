@@ -26,11 +26,13 @@ async function current(owner){const r=await db.query("SELECT collection,payload 
 
 const {readTodayVisits}=await import('../app/lib/today-visits.ts');
 const {readAttendance}=await import('../app/lib/attendance-page.ts');
+const {readVisitsByIds}=await import('../app/lib/attendance-page.ts');
+const {pickNewest}=await import('../app/use-attendance.ts');
 const {boundedRead,clearBoundedReadCache}=await import('../app/lib/bounded-read.ts');
 let sd=4242;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
 const scopeOf=()=>(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
 test('attendance differential vs legacy page expressions, fallback on irregular values, cache invalidates on writes',async()=>{
-  let cmp=0;const scope=scopeOf();
+  let cmp=0,irr=0;const scope=scopeOf();
   for(let run=0;run<6;run++){
     const s=fixture();s.branches.push({id:'c',name:'C'});
     for(const m of s.members){m.branch=pick(['a','b','c']);if(rnd()<.2)m.demo=true;if(rnd()<.2)m.archived=true;}
@@ -52,10 +54,18 @@ test('attendance differential vs legacy page expressions, fallback on irregular 
     await db.query("UPDATE gymos.gym_entities SET payload=payload||'{\"at\":\"2026-3-14 10:00\"}'::jsonb WHERE owner_id=$1 AND collection='visits' AND entity_id=(SELECT entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch='a' LIMIT 1)",[owner]);
     const bad=await readAttendance(scope,{owner,branch:'a',day:days[0]});
     const br=(await db.query("SELECT branch FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND payload->>'at'='2026-3-14 10:00'",[owner])).rows[0]?.branch;
-    assert.equal(bad.status,br==='a'?'fallback':'ok');
+    assert.equal(bad.status,br==='a'?'irregular':'ok');
+    if(bad.status==='irregular'){
+      const vs=(await current(owner)).visits.filter(v=>v.branch==='a');
+      assert.equal(bad.todayCount,vs.filter(v=>v.day===days[0]).length);
+      const ids=pickNewest(bad.keys,100);
+      assert.deepEqual(ids,[...vs].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map(v=>v.id),'irregular exact legacy order');
+      const rows=await readVisitsByIds(scope,{owner,branch:'a',ids});assert.deepEqual(rows.map(r=>r.id),ids);
+      assert.equal((await readVisitsByIds(scope,{owner,branch:'b',ids})).length,vs.length&&0,'other branch ids ignored');irr++;
+    }
     const o2=await readAttendance(scope,{owner:'nobody',branch:'a',day:days[0]});assert.equal(o2.status,'ok');assert.equal(o2.rows.length,0);
   }
-  console.log('attendance comparisons',cmp);
+  console.log('attendance comparisons',cmp,'irregular',irr);assert.ok(irr>0);
 });
 test('bounded read: timeout aborts the read; cache serves the same version once',async()=>{
   const scope=scopeOf();clearBoundedReadCache();let runs=0;
