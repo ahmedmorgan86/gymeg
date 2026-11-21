@@ -19,6 +19,7 @@ registerHooks({
       export const sameOrigin=request=>request.headers.get('origin')===new URL(request.url).origin;
       export const context=async()=>globalThis.__hardeningContext;
       export const readSpace=async()=>({state:{members:[{id:'m1',branch:'main',archived:false,demo:false}],branches:[{id:'main'}]},revision:0});
+      export const readSpaceSlice=readSpace;export const readSpaceMeta=readSpace;export const readMemberSpace=readSpace;export const readRevision=async()=>0;export const readSpaceForPacket=async()=>({current:await readSpace(),photoVersions:undefined});
       export const packet=()=>({ok:true});
       export const hash=async value=>value;
       export const administrator=async()=>true;
