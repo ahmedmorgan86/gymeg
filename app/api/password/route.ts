@@ -1,4 +1,5 @@
 import {serverAuth} from '../../lib/auth';
+import {authBackend} from '../../lib/auth-backend';
 import {sameOrigin} from '../../lib/server-workspace';
 import {consumeAuthRateLimit} from '../../lib/auth-rate-limit';
 export const dynamic='force-dynamic';
@@ -30,6 +31,9 @@ export async function POST(request:Request){
    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))return reply({error:'invalid'},400);
    const body=parsed as Record<string,unknown>;
    if(body.action==='reset-info'||body.action==='reset-confirm'||body.action==='verify-email'){
+    // One-time-code actions are Firebase-only. Supabase recovery/confirmation
+    // runs through /auth/callback (token_hash) plus a session-backed update.
+    if(authBackend()==='supabase')return reply({error:'invalid'},400);
     if(!oobValid(body.oobCode))return reply({error:'invalid'},400);
     const limit=await consumeAuthRateLimit('password:'+body.action,request,body.oobCode.slice(0,12),10);
     if(limit.outage){const r=reply({error:'connection'},503);r.headers.set('Retry-After',String(limit.retryAfter));return r;}
@@ -61,7 +65,7 @@ export async function POST(request:Request){
     if(!limit.allowed)return limited(limit.retryAfter);
     // Firebase emails the one-time code; the branded /auth/action handler
     // verifies it and updates the password (custom action URL).
-    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim());
+    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim(),new URL('/auth/callback',request.url).href);
     if(error?.status===429){const r=reply({error:'rate'},429);r.headers.set('Retry-After','60');return r;}
     if(error&&error.status&&error.status>=500)return reply({error:'unavailable'},503);
     return reply({ok:true});

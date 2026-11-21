@@ -17,7 +17,10 @@ export async function GET(request: Request) {
       const auth = await serverAuth();
       const { data, error } = await auth.auth.verifyEmailToken(tokenHash, type);
       if (!error && data.session) {
-        return Response.redirect(new URL('/clubs', url.origin), 303);
+        // Recovery links land on the new-password form (the verified session
+        // authorizes the update); confirmations land signed-in on /clubs.
+        const destination = type === 'recovery' ? '/auth/action?mode=resetPassword' : '/clubs';
+        return Response.redirect(new URL(destination, url.origin), 303);
       }
     } catch {
       // Fall through to the failure redirect.

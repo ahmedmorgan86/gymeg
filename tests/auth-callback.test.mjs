@@ -25,6 +25,9 @@ beforeEach(() => {
       exchangeCodeForSession: async code => code === 'genuine-token'
         ? {data: {session: {access_token: 'session'}}, error: null}
         : {data: {session: null}, error: {message: 'Invalid confirmation code', status: 400}},
+      verifyEmailToken: async (tokenHash, type) => tokenHash === 'genuine-hash'
+        ? {data: {session: {access_token: 'session'}}, error: null}
+        : {data: {session: null}, error: {message: 'Invalid confirmation code', status: 400}},
     },
   };
 });
@@ -46,4 +49,22 @@ test('A3: a genuine token establishes the session and lands on /clubs', async ()
   const response = await GET(new Request('https://gym.example/auth/callback?code=genuine-token'));
   assert.equal(response.status, 303);
   assert.equal(response.headers.get('location'), 'https://gym.example/clubs');
+});
+
+test('A3: a token_hash recovery link lands on the new-password page, not /clubs', async () => {
+  const response = await GET(new Request('https://gym.example/auth/callback?token_hash=genuine-hash&type=recovery'));
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), 'https://gym.example/auth/action?mode=resetPassword');
+});
+
+test('A3: a token_hash signup confirmation lands signed-in on /clubs', async () => {
+  const response = await GET(new Request('https://gym.example/auth/callback?token_hash=genuine-hash&type=signup'));
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), 'https://gym.example/clubs');
+});
+
+test('A3: an invalid token_hash redirects to the confirmation error', async () => {
+  const response = await GET(new Request('https://gym.example/auth/callback?token_hash=garbage&type=recovery'));
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), 'https://gym.example/sign-in?error=confirmation');
 });

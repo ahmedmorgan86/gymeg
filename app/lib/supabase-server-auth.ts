@@ -190,10 +190,12 @@ export function supabaseServerAuth(store: CookieStore) {
         return { data: { session: null }, error: { message: 'Invalid credentials', status: 400 } };
       },
 
-      async signUp({ email, password, name }: { email: string; password: string; name: string }) {
+      async signUp({ email, password, name, redirectTo }: { email: string; password: string; name: string; redirectTo?: string }) {
         const config = supabaseConfig();
         if (!config) return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } };
-        const result = await gotrue(config, '/signup', { body: { email, password, data: { name } } });
+        // redirect_to tells the confirmation email where to send the user; it
+        // must be on the project's redirect allow list.
+        const result = await gotrue(config, '/signup' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), { body: { email, password, data: { name } } });
         if (!result.ok) {
           logAuthDiagnostic('sign-up', result.status, result.code);
           if (result.status >= 500 || result.status === 0) return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } };
@@ -239,10 +241,10 @@ export function supabaseServerAuth(store: CookieStore) {
         return { error: null };
       },
 
-      async resetPasswordForEmail(email: string) {
+      async resetPasswordForEmail(email: string, redirectTo?: string) {
         const config = supabaseConfig();
         if (!config) return { error: UNAVAILABLE };
-        const result = await gotrue(config, '/recover', { body: { email } });
+        const result = await gotrue(config, '/recover' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), { body: { email } });
         if (!result.ok) {
           // Existence is never revealed: only throttling and provider outages
           // surface; every other failure looks like success.

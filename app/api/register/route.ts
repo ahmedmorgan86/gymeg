@@ -21,7 +21,7 @@ export async function POST(request: Request) {
     if (limit.outage) { const response = reply({ error: 'connection' }, 503); response.headers.set('Retry-After', String(limit.retryAfter)); return response; }
     if (!limit.allowed) { const response = reply({ error: 'rate_limit' }, 429); response.headers.set('Retry-After', String(limit.retryAfter)); return response; }
     const auth = await serverAuth();
-    const result = await auth.auth.signUp({ ...credentials, name: name.trim() });
+    const result = await auth.auth.signUp({ ...credentials, name: name.trim(), redirectTo: new URL('/auth/callback', request.url).href });
     if (result.error) return reply({ error: result.error.status === 503 ? 'connection' : 'auth_failed' }, result.error.status === 503 ? 503 : 400);
     return reply({ ok: true }, 200);
   } catch { return reply({ error: 'connection' }, 503); }

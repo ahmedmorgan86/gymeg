@@ -65,7 +65,9 @@ test('A14: repeated password-reset requests hit 429 with Retry-After and stop em
   assert.equal((await blocked.json()).error, 'rate');
   assert.equal(globalThis.__resetCalls.length, 5);
   assert.equal(globalThis.__resetCalls[0].email, 'owner@example.test');
-  assert.equal(globalThis.__resetCalls[0].options, undefined);
+  // The route hands the provider its own callback URL as redirect target;
+  // the Firebase provider ignores it (it builds its own action URL).
+  assert.equal(globalThis.__resetCalls[0].options, 'https://gym.example/auth/callback');
 });
 
 test('A14: reset buckets are keyed by email and IP', async () => {
@@ -90,4 +92,17 @@ test('A14: oversized password bodies are rejected before reaching Supabase', asy
   const response = await POST(passwordRequest({action: 'request', email: 'owner@example.test', pad: 'x'.repeat(3000)}));
   assert.equal(response.status, 413);
   assert.equal(globalThis.__resetCalls.length, 0);
+});
+
+test('A14: one-time-code actions are Firebase-only and rejected under the Supabase backend', async () => {
+  process.env.GYMOS_AUTH_BACKEND = 'supabase';
+  try {
+    for (const action of ['reset-info', 'reset-confirm', 'verify-email']) {
+      const response = await POST(passwordRequest({action, oobCode: 'a'.repeat(32), password: 'a-valid-password'}));
+      assert.equal(response.status, 400, action);
+      assert.equal((await response.json()).error, 'invalid', action);
+    }
+  } finally {
+    delete process.env.GYMOS_AUTH_BACKEND;
+  }
 });

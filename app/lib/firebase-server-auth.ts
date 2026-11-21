@@ -156,7 +156,7 @@ export function firebaseServerAuth(store: CookieStore) {
         }
       },
 
-      async signUp({ email, password, name }: { email: string; password: string; name: string }) {
+      async signUp({ email, password, name }: { email: string; password: string; name: string; redirectTo?: string }) {
         const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
         if (!apiKey || !isFirebaseConfigured()) return { data: { session: null }, error: { message: 'Auth unavailable', status: 503 } };
         const endpoint = 'https://identitytoolkit.googleapis.com/v1/accounts:';
@@ -225,7 +225,7 @@ export function firebaseServerAuth(store: CookieStore) {
         return { error: null };
       },
 
-      async resetPasswordForEmail(email: string) {
+      async resetPasswordForEmail(email: string, _redirectTo?: string) {
         const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
         if (!apiKey || !isFirebaseConfigured()) return { error: { message: 'Auth unavailable', status: 503 } };
         try {
