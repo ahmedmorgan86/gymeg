@@ -149,3 +149,34 @@ test('differential against the REAL consoleIndex(branch): cross-branch rows, bot
   for(let c=0;c<15;c++)scenario(normalize(randomClub()),'club'+c);
   console.log('CONSOLE-INDEX differential checks',checked,'refused before horizon',nulls);assert.ok(checked>2000);
 });
+
+test('list layer: rows, summary fields and the exact search string equal consoleIndex(state,branch,now); unknown cases fall back',async()=>{
+  const {consoleIndex}=await import('../app/lib/member-console.ts');
+  const {consoleIndexFromCandidates,CandidateCache}=await import('../app/lib/member-console-candidates.ts');
+  let rows=0,fallbacks=0;
+  const fields=['period','issue','remaining','debt','status','used','visitsRemaining','paid','plan'];
+  // the screen reads only id/at/activeAt of the current visit and id/at of the last one
+  const cur=x=>x?{id:x.id,at:x.at,activeAt:x.activeAt}:null,lst=x=>x?{id:x.id,at:x.at}:null;
+  const eq=(x,y,m)=>assert.equal(JSON.stringify(x)??'undefined',JSON.stringify(y)??'undefined',m);
+  const one=(s,label)=>{
+    s.plans=[{id:'pl',name:'شهري Monthly',price:100}];
+    for(const asOf of ['2026-01-01T00:00:00.000Z','2026-03-14T23:30:00.000Z','2026-12-01T00:00:00.000Z'])
+    for(const now of ['2026-03-15T08:00:00.000Z','2026-03-20T22:30:00.000Z','2027-01-02T10:00:00.000Z'])
+    for(const branch of ['a','b']){
+      const want=consoleIndex(s,branch,now);
+      const cands=s.members.map(m=>({member:m,stored:strip(computeStoredSummary(s,m,asOf))}));
+      const got=consoleIndexFromCandidates(cands,{settings:s.settings,plans:s.plans},branch,now);
+      if(got.status==='fallback'){fallbacks++;assert.ok(want.length>=0);continue;}
+      assert.deepEqual(got.rows.map(r=>r.m.id),want.map(r=>r.m.id),`${label} ${branch}: same members, same order`);
+      got.rows.forEach((r,i)=>{for(const k of fields)eq(r.summary[k],want[i].summary[k],`${label} ${branch} ${r.m.id} ${k}`);eq(cur(r.summary.current),cur(want[i].summary.current),`${label} ${r.m.id} current`);eq(lst(r.summary.last),lst(want[i].summary.last),`${label} ${r.m.id} last`);assert.equal(r.search,want[i].search,`${label} ${r.m.id}: search string`);rows++;});
+    }
+  };
+  one(fixture(),'fixture');for(let c=0;c<10;c++)one(normalize(randomClub()),'club'+c);
+  console.log('LIST-LAYER rows compared',rows,'fallback calls',fallbacks);assert.ok(rows>500&&fallbacks>0);
+  // a v1 row or a stale version never answers
+  const s=fixture();const cands=s.members.map(m=>({member:m,stored:{...strip(computeStoredSummary(s,m,'2026-03-10T00:00:00.000Z')),v:1}}));
+  assert.equal(consoleIndexFromCandidates(cands,{settings:s.settings},'a','2026-03-15T08:00:00.000Z').status,'fallback');
+  // revision-aware cache
+  const cache=new CandidateCache();cache.put('o','a',5,cands);
+  assert.equal(cache.get('o','a',5),cands);assert.equal(cache.get('o','a',6),null,'newer revision is a miss');assert.equal(cache.get('o','b',5),null,'other branch is a miss');assert.equal(cache.get('p','a',5),null,'other owner is a miss');
+});
