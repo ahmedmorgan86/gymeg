@@ -62,18 +62,27 @@ test('bulk invoice: intermediate data per payment is only its own allocations; n
   // two payments in different branches share the same payload id 'dup' (entity ids differ)
   s.payments.push({id:'dup',member:m1.id,branch:'a',minor:700,day:'2026-03-06',method:'cash',voided:false});
   s.invoices.push({id:'bulk',member:m1.id,title:'T',total:9e6,due:'2026-03-20',branch:'a',allocations:[...s.payments.slice(0,3000).map(p=>({payment:p.id,minor:10,note:'x'.repeat(200)})),{payment:'dup',minor:25,note:'y'}],category:'coaching',voided:false});
-  s.invoices.push({id:'other',member:m2.id,title:'T',total:100,due:'2026-03-20',branch:'b',allocations:[{payment:'dup',minor:5}]});
+  s.invoices.push({id:'other',member:m2.id,title:'T',total:100,due:'2026-03-20',branch:'b',allocations:[{payment:'dup',minor:5}],category:'coaching',voided:false});
   await seed('B1',s);
   // entity ids are unique per owner but a payload id can repeat across rows/branches (legacy matches by payload id only): add a second row with payload id 'dup' in branch b
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('B1','payments','dup-b',99999,'b',$1)",[JSON.stringify({id:'dup',member:m2.id,branch:'b',minor:900,day:'2026-03-06',method:'card',voided:false})]);
   const cur=await current('B1');
-  let maxLen=0;const spy=(o,work)=>scope(o,c=>work({query:async(sql,v)=>{const r=await c.query(sql,v);if(/jsonb_agg/.test(sql))for(const row of r.rows)maxLen=Math.max(maxLen,JSON.stringify(row.invoices).length);return r;}}));
+  let maxLen=0;const spy=(o,work)=>scope(o,c=>work({query:async(sql,v)=>{const r=await c.query(sql,v);if(/jsonb_object_agg/.test(sql))for(const row of r.rows)maxLen=Math.max(maxLen,JSON.stringify(row).length);return r;}}));
   const full={...cur};
   for(const branch of ['a','b']){
     const r=await readReportPayments(spy,{owner:'B1',branch,branches:null,from:'2026-03-01',to:'2026-03-31'});assert.equal(r.status,'ok');
     for(const x of r.rows){const p=cur.payments.find(p=>p.id===x.payment.id&&p.branch===branch&&p.member===x.payment.member);assert.deepEqual(x.breakdown,paymentBreakdown(full,p),x.payment.id+branch);}
   }
-  assert.ok(maxLen<600,'intermediate per payment stays small: '+maxLen); // the bulk invoice payload is ~700KB; only the matching allocation travels
+  { // branch-limited caller: legacy runs over ITS packet (invoices of its branches only), so a branch-b invoice never reaches a branch-a row
+    const lim={...cur,invoices:cur.invoices.filter(i=>i.branch==='a')};
+    const r=await readReportPayments(scope,{owner:'B1',branch:'a',branches:['a'],from:'2026-03-01',to:'2026-03-31'});assert.equal(r.status,'ok');
+    for(const x of r.rows){const p=cur.payments.find(p=>p.id===x.payment.id&&p.branch==='a'&&p.member===x.payment.member);assert.deepEqual(x.breakdown,paymentBreakdown(lim,p),'restricted '+x.payment.id);}
+    const day6=async b=>(await readReportPayments(scope,{owner:'B1',branch:'a',branches:b,from:'2026-03-06',to:'2026-03-06'})).rows.find(x=>x.payment.id==='dup');
+    const dup=await day6(['a']),full2=await day6(null);assert.ok(dup&&full2);
+    assert.deepEqual(dup.breakdown,paymentBreakdown(lim,cur.payments.find(p=>p.id==='dup'&&p.branch==='a')));
+    assert.notDeepEqual(dup.breakdown,full2.breakdown);
+  }
+  assert.ok(maxLen>0&&maxLen<150000,'candidate row carries only the page payments allocations (no notes): '+maxLen); // the bulk invoice payload is ~700KB with 200-char notes; elements are reduced to {payment,minor}
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{name}','5') WHERE owner_id='B1' AND collection='members' AND entity_id=$1".replace('$1',"'"+m1.id+"'"));
   assert.deepEqual(await readReportPayments(scope,{owner:'B1',branch:'a',branches:null,from:'2026-03-01',to:'2026-03-31'}),{status:'unavailable',reason:'member-name'});
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{name}','null') WHERE owner_id='B1' AND collection='members' AND entity_id=$1".replace('$1',"'"+m1.id+"'"));
