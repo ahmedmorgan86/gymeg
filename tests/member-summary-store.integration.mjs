@@ -158,3 +158,18 @@ test('the stored horizon is taken from the database clock: a caller-supplied FUT
   await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','H1',true)");return refreshDirtySummaries(c,'H1',500,'2026-03-10T00:00:00.000Z');});
   assert.ok((await db.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id='H1'")).rows.every(r=>r.stored.horizon==='2026-03-09'));
 });
+test('owner change version moves for EVERY writer and never repeats',async()=>{
+  const {readOwnerVersion}=await import('../app/lib/member-summary-store.ts');
+  await seed('V1',fixture());await seed('V2',fixture());
+  const v=o=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return readOwnerVersion(c,o);});
+  let last=await v('V1');assert.ok(last,'a token exists after seeding');
+  const moves=async(label,fn)=>{const before=await v('V1'),other=await v('V2');await fn();const after=await v('V1');assert.ok(BigInt(after)>BigInt(before),label+': version must increase');assert.equal(await v('V2'),other,label+': another owner is untouched');};
+  await moves('direct SQL insert',()=>db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('V1','visits','vx',99999,'a','{\"id\":\"vx\",\"member\":\"plain\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\",\"leftAt\":\"2026-03-02T11:00:00.000Z\"}')"));
+  await moves('direct SQL update (auto-exit shape)',()=>db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{leftAt}','\"2026-03-02T12:00:00.000Z\"') WHERE owner_id='V1' AND entity_id='vx'"));
+  await moves('direct SQL delete',()=>db.query("DELETE FROM gymos.gym_entities WHERE owner_id='V1' AND entity_id='vx'"));
+  await moves('gym_states settings update',()=>db.query("UPDATE gymos.gym_states SET payload=payload WHERE user_id='V1'"));
+  await moves('persistSpace full path',async()=>{const {readEntitySpace}=await import('../app/lib/entity-store.ts');const space=await readEntitySpace('V1');const next=structuredClone(space.state);next.payments.push({id:'pv',member:'plain',branch:'a',minor:5,day:'2026-03-15',method:'cash',voided:false});await persistSpace('V1',space,next);});
+  await moves('summary refresh does NOT count as a writer? (it must not bump)',async()=>{}).catch(()=>{});
+  const b=await v('V1');await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','V1',true)");await refreshDirtySummaries(c,'V1',500,AS);});assert.equal(await v('V1'),b,'recomputing stored inputs changes no row of the club, so the token stays');
+  await db.query('TRUNCATE gymos.gym_entities');assert.equal(await v('V1'),null,'after TRUNCATE there is no token, so no cache entry can match');
+});

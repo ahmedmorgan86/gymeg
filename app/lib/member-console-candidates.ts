@@ -27,11 +27,14 @@ export function consoleIndexFromCandidates(cands:ConsoleCandidate[],ctx:ListCont
   return{status:'ok',rows};
 }
 
-/** Revision-aware cache for a candidate set. A hit requires the SAME owner, branch and workspace revision; any other revision is a miss and the set is refetched.
- * It never serves a set across revisions, so list data cannot be older than the revision the page was told about. */
+/** Cache for a candidate set, keyed by owner, branch AND the caller's permission scope (role, financial visibility, branch list). A hit also requires the SAME owner
+ * change version (migration 20261121190000: moves for every writer). Only member rows and stored inputs are cached: status, presence, remaining days and policy
+ * effects are re-derived on every use. Call clear() on sign-out and tenant/branch switch. */
 export class CandidateCache{
-  private entry:{owner:string;branch:string;revision:number;cands:ConsoleCandidate[]}|null=null;
-  get(owner:string,branch:string,revision:number){const e=this.entry;return e&&e.owner===owner&&e.branch===branch&&e.revision===revision?e.cands:null;}
-  put(owner:string,branch:string,revision:number,cands:ConsoleCandidate[]){this.entry={owner,branch,revision,cands};}
+  private entry:{owner:string;branch:string;scope:string;version:string;cands:ConsoleCandidate[]}|null=null;
+  get(owner:string,branch:string,scope:string,version:string){const e=this.entry;return e&&e.owner===owner&&e.branch===branch&&e.scope===scope&&e.version===version?e.cands:null;}
+  /** Version the cached entry was taken at, to send as ?since= (only for the same owner, branch and scope). */
+  versionFor(owner:string,branch:string,scope:string){const e=this.entry;return e&&e.owner===owner&&e.branch===branch&&e.scope===scope?e.version:null;}
+  put(owner:string,branch:string,scope:string,version:string,cands:ConsoleCandidate[]){this.entry={owner,branch,scope,version,cands};}
   clear(){this.entry=null;}
 }

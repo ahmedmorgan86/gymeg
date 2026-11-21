@@ -127,3 +127,11 @@ export async function readMemberCandidatesSnapshot(owner:string,branches:string[
   const {withSnapshotScope}=await import('./member-summary-scope.ts');
   return withSnapshotScope(owner,c=>readMemberCandidates(c,owner,branches,opts));
 }
+
+/** The owner's change version (see migration 20261121190000): strictly increasing across every writer. null when the migration is absent or the owner has no token
+ * (after a TRUNCATE): such a token never matches a cache entry. */
+export async function readOwnerVersion(c:Sql,owner:string):Promise<string|null>{
+  if(!(await c.query("SELECT to_regclass('gymos.gym_owner_version') IS NOT NULL AS ok")).rows.some(r=>(r as {ok:boolean}).ok))return null;
+  const r=(await c.query('SELECT version FROM gymos.gym_owner_version WHERE owner_id=$1',[owner])).rows[0] as {version:string|number}|undefined;
+  return r?String(r.version):null;
+}

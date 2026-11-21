@@ -176,7 +176,10 @@ test('list layer: rows, summary fields and the exact search string equal console
   // a v1 row or a stale version never answers
   const s=fixture();const cands=s.members.map(m=>({member:m,stored:{...strip(computeStoredSummary(s,m,'2026-03-10T00:00:00.000Z')),v:1}}));
   assert.equal(consoleIndexFromCandidates(cands,{settings:s.settings},'a','2026-03-15T08:00:00.000Z').status,'fallback');
-  // revision-aware cache
-  const cache=new CandidateCache();cache.put('o','a',5,cands);
-  assert.equal(cache.get('o','a',5),cands);assert.equal(cache.get('o','a',6),null,'newer revision is a miss');assert.equal(cache.get('o','b',5),null,'other branch is a miss');assert.equal(cache.get('p','a',5),null,'other owner is a miss');
+  // version-aware cache: owner, branch, permission scope and version must all match
+  const cache=new CandidateCache();cache.put('o','a','admin',"5",cands);
+  assert.equal(cache.get('o','a','admin','5'),cands);assert.equal(cache.versionFor('o','a','admin'),'5');
+  assert.equal(cache.get('o','a','admin','6'),null,'newer version is a miss');assert.equal(cache.get('o','b','admin','5'),null,'other branch');assert.equal(cache.get('p','a','admin','5'),null,'other owner');
+  assert.equal(cache.get('o','a','reception-nofin','5'),null,'other permission scope is a miss');assert.equal(cache.versionFor('o','a','reception-nofin'),null);
+  cache.clear();assert.equal(cache.get('o','a','admin','5'),null,'cleared on sign-out/tenant switch');
 });
