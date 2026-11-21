@@ -1,6 +1,6 @@
 # Hosted schema execution plan (HELD, review only, never applied)
 
-Scope: the unapplied demand-loading schema on `gymos.gym_entities`: 020000 (executor: 3 stored generated columns, 3 indexes, one function ALTER) and 030000 (this branch: refs tables/triggers, 4 stored generated columns in ONE ALTER, 8 indexes on gym_entities plus refs indexes). Nothing here is authorized to run. No hosted activation, no flag-on.
+Scope: the unapplied demand-loading schema on `gymos.gym_entities`: 020000 (executor: 3 stored generated columns, 3 indexes, one function ALTER) and 030000 (this branch: refs tables/triggers, 4 stored generated columns in ONE ALTER, 6 indexes on gym_entities plus refs indexes (main counted 8 nonconcurrent builds across both migrations)). Nothing here is authorized to run. No hosted activation, no flag-on.
 
 ## What rewrites the table
 - 020000: one `ALTER TABLE ... ADD COLUMN x3 ... STORED` (one rewrite).
@@ -16,7 +16,7 @@ Scope: the unapplied demand-loading schema on `gymos.gym_entities`: 020000 (exec
 6. Rollback: drop the new indexes, then the generated columns (one ALTER DROP COLUMN each set), readers default OFF so no reader depends on them.
 
 ## Local index build times (scratch, same 180k rows, after the columns exist)
-pay_day 77 ms, pay_day_odd 13 ms, visit_odd 12 ms, visit canonical order 72 ms, member-odd 16 ms. Plain (blocking) builds; CONCURRENTLY is slower and was not timed.
+pay_day 77 ms, pay_day_odd 13 ms, visit_odd 12 ms, visit canonical order 72 ms, member-odd 16 ms (the visit day-count index was not timed separately). Plain (blocking) builds; CONCURRENTLY is slower and was not timed.
 
 ## Not measured / open
-Write amplification of the generated columns and 8+ indexes on insert/update at production concurrency; backfill duration on real data; replica lag; CONCURRENTLY build time; behavior under the pooler.
+Write amplification of the generated columns and the new indexes on insert/update at production concurrency; backfill duration on real data; replica lag; CONCURRENTLY build time; behavior under the pooler.
