@@ -195,3 +195,17 @@ test('list source: candidates fetched for an older state are never mixed with a 
   assert.equal(chooseRows(true,cands,s1,'a','o2','admin:fin',stamp).source,'legacy','tenant switch');assert.equal(chooseRows(true,cands,s1,'a','o','reception:nofin',stamp).source,'legacy','permission change');
   assert.equal(chooseRows(false,cands,s1,'a','o','admin:fin',stamp).source,'legacy','flag off is always legacy');
 });
+test('detail source: only a detail fetched for this state, member and tenant is used; otherwise the exact legacy summary',async()=>{
+  const {chooseDetail}=await import('../app/use-member-detail.ts');const {emptyState}=await import('../app/lib/domain.ts');const {normalize}=await import('../app/lib/extensions.ts');
+  const {computeStoredSummary}=await import('../app/lib/member-summary-model.ts');const {memberSummary}=await import('../app/lib/member-console.ts');
+  const s=normalize(emptyState());s.branches=[{id:'a',name:'A'},{id:'b',name:'B'}];
+  const m={id:'m1',name:'X Y',phone:'01000000001',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'p1',plan:'pl',start:'2026-01-01',end:'2026-12-31',visits:3}]};s.members=[m];
+  s.visits=[{id:'v1',member:'m1',branch:'b',day:'2026-03-01',at:'2026-03-01T10:00:00.000Z',leftAt:'2026-03-01T11:00:00.000Z'},{id:'v2',member:'m1',branch:'a',day:'2026-03-02',at:'2026-03-02T10:00:00.000Z',leftAt:'2026-03-02T11:00:00.000Z'}];
+  const now='2026-03-15T12:00:00.000Z',stored=computeStoredSummary(s,m,'2026-03-10T00:00:00.000Z',{allBranches:true});
+  const d={owner:'o',member:'m1',forState:s,stored,invoices:[],payments:[]};
+  const got=chooseDetail(true,d,s,m,'o',now),want=memberSummary(s,m,now);
+  assert.equal(got.source,'detail');assert.equal(got.visitCount,2,'all-branch visit count');
+  for(const k of ['used','remaining','status','issue','visitsRemaining','debt','paid'])assert.deepEqual(got.x[k],want[k],k);
+  const s2=structuredClone(s);assert.equal(chooseDetail(true,d,s2,m,'o',now).source,'legacy','state changed');assert.equal(chooseDetail(true,d,s,m,'o2',now).source,'legacy','tenant');assert.equal(chooseDetail(false,d,s,m,'o',now).source,'legacy','flag off');
+  assert.equal(chooseDetail(true,d,s,m,'o','2026-03-05T12:00:00.000Z').source,'legacy','screen clock before the stored horizon: legacy, never a wrong answer');
+});

@@ -214,3 +214,23 @@ test('candidate member rows equal the packet member minus health/vitals/measurem
   }
 });
 import {createHash} from 'node:crypto';function require_hash(x){return createHash('sha256').update(x).digest('hex').slice(0,16);}
+test('member detail source: equals memberSummary(packet-like state) for every member and clock, all-branch view, finance gated, bounded to the member',async()=>{
+  const {readMemberDetail}=await import('../app/lib/member-detail-source.ts');
+  const s=fixture();await seed('D1',s);const cur=await current('D1');
+  const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
+  let n=0;
+  for(const m of cur.members){
+    const out=await readMemberDetail(scope,{owner:'D1',member:m.id,branches:null,financial:true,settings:cur.settings,asOf:AS});assert.equal(out.status,'ok',m.id);
+    for(const now of NOWS){const want=memberSummary(cur,m,now),got=deriveSummary(strip(out.stored),m,cur.settings,now);
+      for(const k of ['period','issue','remaining','debt','status','used','visitsRemaining','paid'])assert.deepEqual(strip(got[k]),strip(want[k]),`${m.id} @ ${now}: ${k}`);
+      assert.equal(got.current?.id,want.current?.id);assert.equal(got.last?.id,want.last?.id);n++;}
+    assert.equal(out.stored.visitCount,cur.visits.filter(v=>v.member===m.id).length,'visit count is the all-branch count the panel shows');
+    assert.deepEqual(strip(out.invoices),strip(memberSummary(cur,m,NOWS[0]).invoices),'invoices: non-voided, legacy order');
+    assert.deepEqual(strip(out.payments),strip(cur.payments.filter(p=>p.member===m.id)),'payments in legacy order');
+  }
+  assert.ok(n>0);
+  const m0=cur.members[0];
+  const nofin=await readMemberDetail(scope,{owner:'D1',member:m0.id,branches:null,financial:false,settings:cur.settings,asOf:AS});assert.deepEqual([nofin.payments,nofin.invoices,nofin.stored.debt,nofin.stored.paid],[[],[],0,0]);
+  assert.equal((await readMemberDetail(scope,{owner:'D1',member:m0.id,branches:['zz'],financial:true,settings:cur.settings})).status,'notFound','member outside the caller branches');
+  assert.equal((await readMemberDetail(scope,{owner:'D1',member:'nope',branches:null,financial:true,settings:cur.settings})).status,'notFound');
+});
