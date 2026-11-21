@@ -29,12 +29,16 @@ for (const role of ['members','management']) {
     assert.ok(!main.includes('private String oauthVerifier'), 'no lost-on-recreation in-memory-only verifier');
     assert.ok(main.indexOf('OAUTH_CLIENT.equals(client)') < main.indexOf('final String verifier=readPendingVerifier()'), 'validation precedes proof read');
     assert.ok(main.includes(`CALLBACK_PATH="/auth/mobile/callback/${role}"`), 'app handles only its own return path');
-    // Duplicate-callback races: a response is used only while its attempt
-    // still owns the pending proof; losers neither install cookies nor
-    // navigate away after another attempt succeeded.
-    assert.ok(main.includes('attemptCurrent(verifier)'), 'attempt ownership check present');
-    assert.ok(main.indexOf('if(!attemptCurrent(verifier))return;CookieManager') > main.indexOf('status==204'), 'cookie install guarded by attempt ownership');
-    assert.ok((main.match(/if\(attemptCurrent\(verifier\)\)web\.loadUrl/g) || []).length >= 2, 'failure and exception navigation guarded');
+    // Explicit attempt phases close the duplicate-callback races. These
+    // assertions pin the mechanism; runtime interleaving proof is owed on a
+    // device, not claimed from source.
+    assert.ok(main.includes('private String inflightVerifier,installingVerifier;'), 'attempt phase fields');
+    assert.ok(main.includes('if(inflightVerifier!=null||installingVerifier!=null)return;'), 'new flow serialized against active phases');
+    assert.ok(main.includes('if(inflightVerifier!=null)return true;inflightVerifier=verifier;exchange(code,verifier)'), 'single exchange per pending attempt');
+    assert.ok((main.match(/if\(!verifier\.equals\(inflightVerifier\)\)return;inflightVerifier=null;/g) || []).length === 3, 'stale exchange responses ignored in all three outcomes');
+    assert.ok(main.includes('installingVerifier=verifier;CookieManager.getInstance().setCookie("https://"+HOST,cookie'), 'cookie install owns the installing phase');
+    assert.ok(main.includes('if(!verifier.equals(installingVerifier))return;installingVerifier=null;'), 'stale cookie completion ignored');
+    assert.ok(main.includes('}else if(attemptCurrent(verifier)){web.loadUrl("https://"+HOST+"/sign-in?error=google_failed");'), 'rejected cookie navigates only while attempt current');
     assert.ok(main.indexOf('setCookie("https://"+HOST,cookie') < main.indexOf('clearPendingVerifierIfMatches(verifier)'), 'clear after bound exchange');
     assert.ok(!main.includes('takePendingVerifier'), 'no delete-on-read proof');
     // The proof file is explicitly excluded from backup and device transfer.

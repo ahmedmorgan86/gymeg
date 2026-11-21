@@ -18,7 +18,7 @@ this build's artifacts rather than a reproducible-build guarantee.
 | google-services.json | src/freshtest/google-services.json | src/freshtest/google-services.json |
 | App label | GymEG أعضاء (تجريبي) | GymEG إدارة (تجريبي) |
 | Signing cert SHA-256 (debug, freshtest scope only) | D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8 | same |
-| APK sha256 (this commit's build) | 7814cea4726b786a155529fc28e966b5a8b99469bb63903538de782664b6ad80 | 46e4352cbccd17e3f60000080401bc4265557d4a5079be6eb865d91b1c9c8f4e |
+| APK sha256 (this commit's build) | 9c929d5323b984ff5d1a9a2d16c228eae1541dc86ef51dcb804a08812a0f98ed | 6664097210d935915110c26297b47b8b7993989e38ea9603df7c96c84d410a6b |
 
 The debug certificate above is a fresh-test identity only. It is NOT a
 production package identity and must never be registered as one; production

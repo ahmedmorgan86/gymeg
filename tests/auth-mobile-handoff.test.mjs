@@ -150,6 +150,15 @@ test('exchange validates body shapes', async () => {
   }
 });
 
+test('per-app handoff fallback pages exist and never read the code', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const app of ['members', 'management']) {
+    const page = readFileSync(new URL(`../app/auth/mobile/callback/${app}/page.tsx`, import.meta.url), 'utf8');
+    assert.match(page, /force-dynamic/);
+    assert.ok(!/searchParams|useSearchParams|useParams|get\(['"]code/.test(page), `${app} fallback never reads query params`);
+  }
+});
+
 test('callback rejects a partial android marker in the state cookie', async () => {
   mockFetch();
   store.jar.set('gymos_google_state', 'STATE123.c.android-members');
