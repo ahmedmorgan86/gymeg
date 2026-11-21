@@ -13,7 +13,7 @@ export const HISTORY_PAGE_MAX=100;
 export type HistoryPage={rows:Record<string,unknown>[];/** Pass as `before` for the next page; null when there is no older row. */next:number|null;revision:number};
 /** True for the entity layout. A legacy single-payload club has no rows to page, so callers must answer 501, not an empty or 404 result. */
 export async function isEntityLayout(be:SliceBackend,owner:string){const m=await be.meta(owner);return !!m&&m.metadata._entityStorage===1;}
-export async function readMemberHistory(be:SliceBackend,owner:string,q:{member:string;collection:HistoryCollection;branches?:string[]|null;before?:number;limit?:number}):Promise<HistoryPage|null>{
+export async function readMemberHistory(be:SliceBackend,owner:string,q:{member:string;collection:HistoryCollection;branches?:string[]|null;before?:number;limit?:number}):Promise<HistoryPage|null|'race'>{
   if(!HISTORY_COLLECTIONS.includes(q.collection)||!q.member)return null;
   const limit=Math.max(1,Math.min(HISTORY_PAGE_MAX,Math.floor(q.limit??50)));
   if(!await isEntityLayout(be,owner))return null;
@@ -22,7 +22,7 @@ export async function readMemberHistory(be:SliceBackend,owner:string,q:{member:s
   if(!m)return null;
   const rows=await be.entities(owner,{collections:[q.collection],match:{field:'member',values:[q.member]},desc:true,limit:limit+1,...(q.before!==undefined?{before:q.before}:{})});
   const page=rows.slice(0,limit);
-  const after=await be.revision(owner);if(after!==rev)return null; // a write landed between the reads: caller retries or falls back
+  const after=await be.revision(owner);if(after!==rev)return 'race'; // a write landed between the reads: the caller answers with a retryable status, never 'member missing'
   return{rows:page.map(r=>r.payload as Record<string,unknown>),next:rows.length>limit?Number(page[page.length-1].position):null,revision:rev};
 }
 

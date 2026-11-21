@@ -6,8 +6,8 @@ const {splitState}=await import('../app/lib/entity-state.ts');
 const {club}=await import('./hot-ops-fixture.mjs');
 const license={mode:'perpetual',status:'active',starts_at:'2026-01-01T00:00:00Z',ends_at:null,maintenance_until:null};
 const ctx=(owner,x={})=>{globalThis.__qaContext={owner,tenantId:'t-'+owner,role:'owner',branches:null,license,user:{userId:'staff',displayName:'tester'},...x};};
-async function seed(owner,{legacy=false,grants}={}){
-  const s=club(1);const seen=new Set();for(const v of s.visits){if(v.leftAt)continue;if(seen.has(v.member))v.leftAt=v.at.slice(0,11)+'23:00:00.000Z';else seen.add(v.member);}
+async function seed(owner,{legacy=false,grants,mark}={}){
+  const s=club(1);if(mark)for(const c of ['visits','payments','invoices'])for(const r of s[c])r.secret=mark;const seen=new Set();for(const v of s.visits){if(v.leftAt)continue;if(seen.has(v.member))v.leftAt=v.at.slice(0,11)+'23:00:00.000Z';else seen.add(v.member);}
   if(grants)s.settings.receptionGrants={staff:grants};
   const {metadata,entities}=splitState(s);
   for(const t of ['gym_entities','gym_states'])await real.query(`DELETE FROM gymos.${t} WHERE ${t==='gym_states'?'user_id':'owner_id'}=$1`,[owner]);
@@ -32,7 +32,13 @@ test('GET member-history: flag, auth, params, role and branch scope, paging, leg
     ctx('A',{branches:[m.branch]});assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200);
     ctx('A',{role:'reception'});assert.equal((await get('A',{member:m.id,collection:'payments'})).status,403,'reception without payment grants cannot read payments');assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200,'but can read visits');
     await seed('A',{grants:['payment.add']});ctx('A',{role:'reception'});assert.equal((await get('A',{member:m.id,collection:'payments'})).status,200,'reception with a payment grant can');
-    ctx('B');await seed('B');ctx('A');assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200);
+    // Cross-tenant: two clubs share member ids but hold different secret payloads.
+    await seed('A',{mark:'A-secret'});await seed('B',{mark:'B-secret'});
+    for(const o of ['A','B'])for(const c of ['visits','payments','invoices']){ctx(o);const r=await get(o,{member:m.id,collection:c,limit:'100'});assert.equal(r.status,200);const j=await r.json();assert.ok(j.rows.length>0||c!=='visits');assert.ok(j.rows.every(x=>x.secret===o+'-secret'),`${o} ${c} only its own rows`);assert.ok(!JSON.stringify(j).includes((o==='A'?'B':'A')+'-secret'));}
+    ctx('A');const mismatch=await get('B',{member:m.id,collection:'visits'});assert.notEqual(mismatch.status,200,'tenant header for another club is refused');assert.ok(!(await mismatch.text()).includes('B-secret'));
+    ctx('A',{support:true});assert.equal((await get('A',{member:m.id,collection:'visits'})).status,200,'support session reads like the packet GET');
+    ctx('A',{support:true,role:'reception'});assert.equal((await get('A',{member:m.id,collection:'payments'})).status,403,'support with a reception-scoped role gets no payments');
+    ctx('A');
     await seed('L',{legacy:true});ctx('L');assert.equal((await get('L',{member:m.id,collection:'visits'})).status,501,'legacy layout: unsupported, not empty');
   }finally{delete process.env.GYMOS_MEMBER_HISTORY;}
 });

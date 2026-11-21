@@ -17,6 +17,7 @@ export async function GET(request:Request){try{
  const meta=await readSpaceMeta(ctx.owner);
  const scope=historyScope(ctx,meta.state.settings,collection);if(!scope.allowed)return reply({error:'forbidden'},403);
  const page=await readMemberHistory(be,ctx.owner,{member,collection,branches:scope.branches,before,limit});
- if(!page)return reply({error:'notFound'},404); // unknown member, member outside the caller's branches, a write race, or a legacy layout
+ if(page==='race')return reply({error:'retry'},409); // a write landed between the reads
+ if(!page)return reply({error:'notFound'},404); // unknown member or member outside the caller's branches
  return reply(page);
  }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);console.error('[Member History Error]:',e);return reply({error:'unavailable'},503);}}

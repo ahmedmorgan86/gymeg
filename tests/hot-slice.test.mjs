@@ -93,6 +93,7 @@ test('Member history pages newest-first and equals the full filtered list; scope
     assert.equal(await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',branches:['nonexistent']}),null,'member outside the allowed branches is refused, not returned empty');
     assert.equal(await readMemberHistory(backend,'h',{member:'nobody',collection:'visits'}),null);
     assert.equal(await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'members'}),null,'only history collections');
+    {const racing={...backend,revision:(()=>{let n=0;return async o=>{n++;return n===1?1:2;};})(),meta:backend.meta,entities:backend.entities};assert.equal(await readMemberHistory(racing,'h',{member:full.members[0].id,collection:'visits'}),'race','a revision change between reads is reported as a race, not as a missing member');}
     const big=await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',limit:100000});assert.ok(big.rows.length<=100,'page size capped');
     stat.queries=0;stat.rows=0;await readMemberHistory(backend,'h',{member:full.members[0].id,collection:'visits',branches:[full.members[0].branch],limit:10});
     console.log('MEMBER-HISTORY pages checked',checked,'one page cost',stat.queries,'queries',stat.rows,'rows');assert.ok(stat.rows<=12);
