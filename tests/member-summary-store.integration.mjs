@@ -83,14 +83,11 @@ test('unready, truncate, beyond-cap and too-many-dirty fail closed without a his
   await db.query('TRUNCATE gymos.gym_entities');
   assert.equal(await read('O1'),'unready');assert.equal(await read('O2'),'unready');
 });
-test('a member over the history work guard fails closed, is remembered, and costs no further probing until a write',async()=>{
-  const {MEMBER_HISTORY_ROWS_MAX}=await import('../app/lib/member-summary-store.ts');
-  await seed('O3',{...fixture(),members:[{id:'big',branch:'a',joined:'2026-01-01',expires:'2026-12-31'},{id:'small',branch:'a',joined:'2026-01-01',expires:'2026-12-31'}],visits:[],payments:[],invoices:[]});
-  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT 'O3','visits','b'||g,g,'a',jsonb_build_object('id','b'||g,'member','big','branch','a','day','d'||g,'at','2026-01-01T00:00:00.000Z','leftAt','2026-01-01T01:00:00.000Z') FROM generate_series(1,$1) g",[MEMBER_HISTORY_ROWS_MAX+1]);
-  assert.equal(await read('O3'),'heavy-member');
-  const seen=[];const r2=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O3',true)");return readMemberCandidates({query:(s,v)=>{seen.push(s);return c.query(s,v);}},'O3',null);});
-  assert.equal(r2,'heavy-member');assert.ok(!seen.some(s=>/LATERAL/.test(s)),'no history probe on the second read');
-  assert.equal(await read('O3',['zz']).then(x=>typeof x==='object'?x.candidates.length:x),0,'a branch without the heavy member still works');
-  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='O3' AND collection='visits' AND entity_id LIKE 'b1%'"); // a write re-marks it; still over or under, it is re-evaluated
-  const dirty=(await db.query("SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id='O3'")).rows.map(r=>r.member_id);assert.deepEqual(dirty,['big']);
+test('an owner whose counters are unready or beyond the 20,000,000-byte rule is refused before any history row is read',async()=>{
+  await seed('O3',{...fixture(),members:[{id:'a1',branch:'a',joined:'2026-01-01',expires:'2026-12-31'}],visits:[],payments:[],invoices:[]});
+  const probe=async()=>{const seen=[];const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','O3',true)");return readMemberCandidates({query:(s,v)=>{seen.push(s);return c.query(s,v);}},'O3',null);});return {r,history:seen.some(s=>/'visits'|'payments'|'invoices'/.test(s)&&/payload->>'member'/.test(s))};};
+  await db.query("UPDATE gymos.gym_entity_counters SET payload_bytes=20000001 WHERE owner_id='O3' AND collection='members'");
+  let x=await probe();assert.equal(x.r,'over-state-bound');assert.equal(x.history,false);
+  await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='O3' AND collection='_ready'");
+  x=await probe();assert.equal(x.r,'over-state-bound');assert.equal(x.history,false);
 });
