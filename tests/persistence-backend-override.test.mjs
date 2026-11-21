@@ -47,8 +47,9 @@ test('persistence backend selector follows GYMOS_DATA_BACKEND independently of F
 
 test('only auth-provider code keeps calling isFirebaseConfigured; data paths use the persistence selector',()=>{
   const files=[];
-  const walk=dir=>{for(const name of readdirSync(dir)){const p=join(dir,name);if(statSync(p).isDirectory())walk(p);else if(p.endsWith('.ts'))files.push(p);}};
-  walk(join(import.meta.dirname,'..','app'));
+  const roots=['app','components','hooks','lib','scripts'];
+  const walk=dir=>{for(const name of readdirSync(dir)){const p=join(dir,name);if(statSync(p).isDirectory())walk(p);else if(/\.(ts|tsx|mjs)$/.test(p))files.push(p);}};
+  for(const root of roots){const abs=join(import.meta.dirname,'..',root);try{walk(abs);}catch{/* root absent */}}
   const allowed=new Set([
     join('app','lib','auth.ts'),           // Firebase Auth provider (session, sign-in, OAuth)
     join('app','lib','firestore-db.ts'),   // predicate definitions
