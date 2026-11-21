@@ -49,7 +49,9 @@ export async function firestoreReadRevision(owner: string): Promise<number> {
 
 // Firestore rejects undefined values inside documents; entity payloads carry
 // optional fields, so strip them before writing (JSON round-trip).
-const sanitize = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+function sanitize<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
 
 export function isFirebaseConfigured(): boolean {
   return Boolean(
