@@ -40,6 +40,15 @@ await run('wide range (Jan-Jun) first page, branch b','R',B({branch:'b',branches
 await run('many-owner skew: small owner S150 among 300','S150',B({branch:'a',branches:null}));
 await run('virgin owner V1 (no state row) fallback','V1',B({}));
 await run('unready owner V2 (state row, not completed)','V2',B({}));
+// member-credit payment-reference lookup (allocatingInvoicesFromRefs) through the same driver and role
+{const {allocatingInvoicesFromRefs}=await import('/tmp/gymint/app/lib/member-credit-refs.ts');
+ for(const [label,owner,n] of [['member-credit lookup: 20 creditable payments, owner R','R',20],['member-credit lookup: 500 payment ids, owner R','R',500],['member-credit lookup: owner S150','S150',5]]){
+  await cl.query("SELECT set_config('app.gym_owner',$1,false)",[owner]);const log=[];
+  const c={query:async(sql,v)=>{log.push([sql,v]);return cl.query(sql,v);}};
+  const ids=Array.from({length:n},(_,i)=>'p'+(1+i*7));const t0=Date.now();const out=await allocatingInvoicesFromRefs(c,owner,ids);const ms=Date.now()-t0;
+  txt+=`=== ${label}: status ${out.status}${out.reason?' '+out.reason:''} invoices ${out.invoices?.length??'-'} total-ms ${ms}\n`;let seq=[];
+  for(const [sql,v] of log){const r=await cl.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v);const lines=r.rows.map(x=>x['QUERY PLAN']);for(const l of lines)if(/Seq Scan on (gym_entities|invoice_allocation_refs)\b/.test(l)&&!/never executed/.test(l))seq.push(l.trim());txt+='-- bound '+JSON.stringify(v).slice(0,120)+'\n'+lines.join('\n')+'\n';}
+  txt+='\n';summary.push({label,status:out.status,rows:out.invoices?.length??null,ms,statements:log.length,bigSeqScans:seq});}}
 fs.writeFileSync('/downloads/refs-driver-plans-matrix.txt',txt);
 console.log(JSON.stringify(summary,null,1));
 await cl.query('RESET ROLE');await cl.end();
