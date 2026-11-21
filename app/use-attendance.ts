@@ -14,11 +14,12 @@ type Got={owner:string;branch:string;day:string;forState:GymState;data:Attendanc
 export function chooseAttendance(on:boolean,got:Got|null,state:GymState,owner:string,branch:string,day:string):AttendanceView|null{
   return on&&got&&got.owner===owner&&got.branch===branch&&got.day===day&&got.forState===state?got.data:null;
 }
-export type Cand={p:Visit;pos:number};
+export type Cand={p:Visit;pos:number;id:string};
+const posOrder=(a:Cand,b:Cand)=>a.pos-b.pos||(a.id<b.id?-1:a.id>b.id?1:0);
 /** The page's own legacy comparator over candidates in position order (stable); null when a value is not a string (legacy would throw). Returns the newest n, kept in position order. */
 export function mergeNewest(cands:Cand[],n:number):Cand[]|null{
   if(cands.some(k=>typeof k.p.day!=='string'||typeof k.p.at!=='string'))return null;
-  const byPos=[...cands].sort((a,b)=>a.pos-b.pos);
+  const byPos=[...cands].sort(posOrder);
   const keep=new Set([...byPos].sort((a,b)=>b.p.day.localeCompare(a.p.day)||b.p.at.localeCompare(a.p.at)).slice(0,n));
   return byPos.filter(c=>keep.has(c));
 }
@@ -31,22 +32,26 @@ export function useAttendance(active:boolean,state:GymState|undefined,owner:stri
   const retry=useCallback(()=>setBump(n=>n+1),[]);
   useEffect(()=>{
     if(!ATTENDANCE_ON||!active||!owner||!state)return;const ac=new AbortController();
-    const get=async(qs:string)=>{const r=await fetch('/api/workspace/attendance?branch='+encodeURIComponent(branch)+'&day='+encodeURIComponent(day)+qs,{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});return r.ok?await r.json() as {status?:string;todayCount?:number;rows?:Visit[];canonical?:Cand[];candidates?:Cand[];next?:number|null}:null;};
+    const get=async(qs:string)=>{const r=await fetch('/api/workspace/attendance?branch='+encodeURIComponent(branch)+'&day='+encodeURIComponent(day)+qs,{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});return r.ok?await r.json() as {status?:string;todayCount?:number;rows?:Visit[];canonical?:Cand[];candidates?:Cand[];next?:{pos:number;id:string}|null;version?:string}:null;};
     const fail=()=>{if(!ac.signal.aborted){setGot(null);setFailedFor(state);}};
-    const timer=setTimeout(()=>{(async()=>{try{
+    const attemptRead=async(attempt:number):Promise<void>=>{try{
       const d=await get('');
+      if(d&&d.status==='stale'){if(attempt<2)return void(await attemptRead(attempt+1));return fail();}
       if(d&&d.status==='ok'&&typeof d.todayCount==='number'&&Array.isArray(d.rows)){setGot({owner,branch,day,forState:state,data:{todayCount:d.todayCount,rows:d.rows}});setFailedFor(null);return;}
       if(d&&d.status==='irregular'&&typeof d.todayCount==='number'&&Array.isArray(d.canonical)&&Array.isArray(d.candidates)){
-        let run=mergeNewest([...d.canonical,...d.candidates],100),next=d.next??null;
+        let run=mergeNewest([...d.canonical,...d.candidates],100),next=d.next??null,stale=false;
         while(run&&next!==null){
-          const pg=await get('&after='+next);
-          if(!pg||pg.status!=='irregular'||!Array.isArray(pg.candidates)||pg.candidates.some(c=>c.pos<=next!))return fail();
+          const pg=await get('&after='+next.pos+'&afterId='+encodeURIComponent(next.id)+'&ver='+encodeURIComponent(String(d.version)));
+          if(pg&&pg.status==='stale'){stale=true;break;}
+          if(!pg||pg.status!=='irregular'||!Array.isArray(pg.candidates)||pg.version!==d.version||pg.candidates.some(c=>posOrder({p:c.p,pos:c.pos,id:c.id},{p:c.p,pos:next!.pos,id:next!.id})<=0))return fail();
           run=mergeNewest([...run,...pg.candidates],100);next=pg.next??null;
         }
+        if(stale){if(attempt<2)return void(await attemptRead(attempt+1));return fail();} // the owner changed between pages: restart from page 1 (bounded to 3 attempts), then the failure state
         if(run){setGot({owner,branch,day,forState:state,data:{todayCount:d.todayCount,rows:pickNewest(run,100)!}});setFailedFor(null);return;}
       }
       fail();
-    }catch{fail();}})();},bump?0:REFETCH_DEBOUNCE_MS);
+    }catch{fail();}};
+    const timer=setTimeout(()=>{void attemptRead(0);},bump?0:REFETCH_DEBOUNCE_MS);
     return()=>{clearTimeout(timer);ac.abort();};
   },[active,owner,branch,day,state,bump]);
   return{view:state?chooseAttendance(ATTENDANCE_ON&&active,got,state,owner??'',branch,day):null,failed:ATTENDANCE_ON&&active&&failedFor!==null&&failedFor===state,retry};
