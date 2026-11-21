@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import { serverAuth } from '../../../../lib/auth';
+import { authBackend } from '../../../../lib/auth-backend';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,8 +25,7 @@ export async function GET(request: Request) {
 
   const clientId = process.env.GYMEG_GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GYMEG_GOOGLE_CLIENT_SECRET;
-  const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
-  if (!clientId || !clientSecret || !apiKey) return fail(url.origin, 'google_unavailable');
+  if (!clientId || !clientSecret) return fail(url.origin, 'google_unavailable');
   const redirectUri = new URL('/api/auth/google/callback', url.origin).href;
 
   try {
@@ -46,6 +46,19 @@ export async function GET(request: Request) {
     const tokens = await tokenResponse.json() as { id_token?: string };
     if (!tokens.id_token) return fail(url.origin, 'google_failed');
 
+    // Supabase backend: the Google ID token is exchanged at the auth server
+    // directly (id_token grant); no Firebase web API key is involved.
+    if (authBackend() === 'supabase') {
+      const auth = await serverAuth();
+      const result = await auth.auth.signInWithIdToken('google', tokens.id_token);
+      if (result.error || !result.data.session) {
+        return fail(url.origin, result.error && 'code' in result.error && result.error.code === 'email_not_confirmed' ? 'email_not_confirmed' : 'google_failed');
+      }
+      return Response.redirect(new URL(target, url.origin), 303);
+    }
+
+    const apiKey = process.env.FIREBASE_WEB_API_KEY || process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+    if (!apiKey) return fail(url.origin, 'google_unavailable');
     const firebaseResponse = await fetch('https://identitytoolkit.googleapis.com/v1/accounts:signInWithIdp?key=' + encodeURIComponent(apiKey), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

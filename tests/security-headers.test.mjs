@@ -19,7 +19,7 @@ test('All routes receive baseline defense-in-depth security headers',async()=>{
 
 test('Password recovery uses Firebase hosted action without an untrusted redirect',async()=>{
  const route=await readFile(new URL('../app/api/password/route.ts',import.meta.url),'utf8');
- const auth=await readFile(new URL('../app/lib/auth.ts',import.meta.url),'utf8');
+ const auth=await readFile(new URL('../app/lib/firebase-server-auth.ts',import.meta.url),'utf8');
  assert.match(route,/resetPasswordForEmail\(body\.email\.trim\(\)\)/);
  assert.match(auth,/requestType: 'PASSWORD_RESET', email/);
  assert.doesNotMatch(auth,/continueUrl:.*redirectTo/);

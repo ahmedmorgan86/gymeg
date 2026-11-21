@@ -51,7 +51,7 @@ test('only auth-provider code keeps calling isFirebaseConfigured; data paths use
   const walk=dir=>{for(const name of readdirSync(dir)){const p=join(dir,name);if(statSync(p).isDirectory())walk(p);else if(/\.(ts|tsx|mjs)$/.test(p))files.push(p);}};
   for(const root of roots){const abs=join(import.meta.dirname,'..',root);try{walk(abs);}catch{/* root absent */}}
   const allowed=new Set([
-    join('app','lib','auth.ts'),           // Firebase Auth provider (session, sign-in, OAuth)
+    join('app','lib','firebase-server-auth.ts'), // Firebase Auth provider (session, sign-in, OAuth)
     join('app','lib','firestore-db.ts'),   // predicate definitions
     join('app','lib','auth-rate-limit.ts'),// comment reference only
   ]);
