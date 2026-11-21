@@ -7,29 +7,36 @@ import pg from 'pg';
 export const DEFAULTS={batch:500,maxBatches:200,lockMs:2000,stmtMs:15000,connectMs:5000,idleMs:5000,deadlineMs:600000};
 const code=e=>e&&e.code;
 class Timeout extends Error{constructor(w){super('client timeout: '+w);this.client=true;}}
-const race=(p,ms,what,onTimeout)=>{let t;return Promise.race([p,new Promise((_,rej)=>{t=setTimeout(()=>{onTimeout?.();rej(new Timeout(what));},ms);})]).finally(()=>clearTimeout(t));};
-export async function connect(url,o){const c=new pg.Client({connectionString:url,connectionTimeoutMillis:o.connectMs});await race(c.connect(),o.connectMs+500,'connect',()=>c.end().catch(()=>{}));c.on('error',()=>{});return c;}
-const dispose=async c=>{try{c.connection?.stream?.destroy();}catch{}try{await Promise.race([c.end(),new Promise(r=>setTimeout(r,500))]);}catch{}};
-// one transaction: BEGIN; SET LOCAL timeouts (separate completed commands); work; COMMIT. Any failure: ROLLBACK (bounded) and dispose the connection.
+// ONE absolute deadline (o.deadlineAt, epoch ms) caps EVERY awaited phase: each phase gets min(its own budget, time remaining); no remaining time fails before starting the phase.
+const rem=o=>o.deadlineAt-Date.now();
+const race=(o,p,ms,what,onTimeout)=>{const r=rem(o);if(r<=0){onTimeout?.();p.catch?.(()=>{});return Promise.reject(new Timeout(what+' (deadline)'));}
+  let t;return Promise.race([p,new Promise((_,rej)=>{t=setTimeout(()=>{onTimeout?.();rej(new Timeout(what));},Math.max(1,Math.min(ms,r)));})]).finally(()=>clearTimeout(t));};
+export async function connect(url,o){if(o.deadlineAt==null)o={...o,deadlineAt:Date.now()+o.deadlineMs};
+  const c=new pg.Client({connectionString:url,connectionTimeoutMillis:Math.max(1,Math.min(o.connectMs,rem(o)))});c.on('error',()=>{});
+  const kill=()=>{try{c.connection?.stream?.destroy();}catch{}};
+  await race(o,c.connect(),o.connectMs,'connect',kill);return c;}
+const dispose=async c=>{try{c.connection?.stream?.destroy();}catch{}};  // destroying the socket ends the backend; never waits on the server
+// one transaction: BEGIN; SET LOCAL timeouts (separate completed commands, server bounds also capped by the remaining deadline); work; COMMIT. Any failure: connection destroyed (server rolls back the open transaction) after a bounded ROLLBACK attempt.
 async function tx(url,o,work){
   const c=await connect(url,o);let killed=false;const kill=()=>{killed=true;try{c.connection?.stream?.destroy();}catch{}};
   try{
-    await race(c.query('BEGIN'),o.stmtMs,'begin',kill);
-    await race(c.query(`SET LOCAL lock_timeout=${Number(o.lockMs)}`),o.stmtMs,'set lock_timeout',kill);
-    await race(c.query(`SET LOCAL statement_timeout=${Number(o.stmtMs)}`),o.stmtMs,'set statement_timeout',kill);
-    await race(c.query(`SET LOCAL idle_in_transaction_session_timeout=${Number(o.idleMs)}`),o.stmtMs,'set idle timeout',kill); // server-side guard if this client dies holding the completion SHARE lock
-    const out=await work(q=>race(c.query(q.text,q.values),o.stmtMs+2000,'query',kill));
-    await race(c.query('COMMIT'),o.stmtMs,'commit',kill);
+    const sv=()=>Math.max(1,Math.min(Number(o.stmtMs),rem(o)));
+    await race(o,c.query('BEGIN'),o.stmtMs,'begin',kill);
+    await race(o,c.query(`SET LOCAL lock_timeout=${Math.max(1,Math.min(Number(o.lockMs),rem(o)))}`),o.stmtMs,'set lock_timeout',kill);
+    await race(o,c.query(`SET LOCAL statement_timeout=${sv()}`),o.stmtMs,'set statement_timeout',kill);
+    await race(o,c.query(`SET LOCAL idle_in_transaction_session_timeout=${Number(o.idleMs)}`),o.stmtMs,'set idle timeout',kill); // server-side guard if this client dies holding the completion SHARE lock
+    const out=await work(q=>race(o,c.query(q.text,q.values),o.stmtMs+2000,'query',kill));
+    await race(o,c.query('COMMIT'),o.stmtMs,'commit',kill);
     return out;
   }catch(e){
-    if(!killed)try{await race(c.query('ROLLBACK'),2000,'rollback',kill);}catch{}
+    if(!killed&&rem(o)>0)try{await race(o,c.query('ROLLBACK'),Math.min(2000,Math.max(1,rem(o))),'rollback',kill);}catch{}
     e.disposed=true;throw e;
   }finally{await dispose(c);}
 }
-const classify=e=>code(e)==='57014'?'statement-timeout':code(e)==='55P03'?'lock-timeout':e.client?'client-timeout':'error';
+const classify=e=>code(e)==='57014'?'statement-timeout':code(e)==='55P03'?'lock-timeout':(e.client||/timeout expired|connection timeout/i.test(String(e.message)))?'client-timeout':'error';
 export async function readyOwner(url,owner,opts={}){
-  const o={...DEFAULTS,...opts};const hooks=o.hooks||{};
-  const t0=Date.now();const left=()=>{if(Date.now()-t0>o.deadlineMs)throw Object.assign(new Error('absolute deadline exceeded'),{client:true});};
+  const o={...DEFAULTS,...opts};const hooks=o.hooks||{};o.deadlineAt=Date.now()+o.deadlineMs;
+  const left=()=>{if(rem(o)<=0)throw new Timeout('absolute deadline');};
   let generation=o.resume?.generation,after=o.resume?.cursor??null;
   try{
     // 1) exact generation text, captured once, before the first rebuild batch (never resampled)
@@ -45,7 +52,7 @@ export async function readyOwner(url,owner,opts={}){
       const next=await tx(url,o,async q=>(await q({text:"SELECT gymos.invoice_allocation_refs_rebuild($1,$2,$3) AS a",values:[owner,after,o.batch]})).rows[0].a);
       n++;if(next===null)break;after=next;
     }
-    await hooks.beforeComplete?.();left();
+    await race(o,Promise.resolve(hooks.beforeComplete?.()),o.deadlineMs,'hook');left();
     // 3) completion bound to the captured generation
     const ok=await tx(url,o,async q=>(await q({text:'SELECT gymos.invoice_allocation_refs_complete($1,$2) AS x',values:[owner,generation]})).rows[0].x);
     if(ok)return{status:'ready',owner,generation,batches:n};
@@ -59,7 +66,7 @@ export async function readyOwner(url,owner,opts={}){
 }
 // owners that need work: have invoices without a ready row, or are tombstoned. Bounded by `limit`.
 export async function pendingOwners(url,limit=100,opts={}){
-  const o={...DEFAULTS,...opts};
+  const o={...DEFAULTS,...opts};o.deadlineAt=Date.now()+o.deadlineMs;
   return tx(url,o,async q=>(await q({text:`SELECT owner_id FROM (
       SELECT DISTINCT i.owner_id FROM gymos.gym_entities i WHERE i.collection='invoices' AND NOT EXISTS (SELECT 1 FROM gymos.invoice_allocation_refs_state s WHERE s.owner_id=i.owner_id AND s.ready)
       UNION SELECT owner_id FROM gymos.invoice_allocation_refs_state WHERE NOT ready) x ORDER BY owner_id LIMIT $1`,values:[limit]})).rows.map(r=>r.owner_id));

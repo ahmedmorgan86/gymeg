@@ -28,21 +28,41 @@ assert.equal(r.status,'generation-changed',JSON.stringify(r));assert.equal(await
 const H=new pg.Client({connectionString:url});await H.connect();await H.query("BEGIN");await H.query("SELECT 1 FROM gymos.gym_states WHERE user_id=$1 FOR UPDATE",[O]);
 let t0=Date.now();r=await readyOwner(url,O,T);const el=Date.now()-t0;await H.query("ROLLBACK");await H.end();
 assert.equal(r.status,'lock-timeout',JSON.stringify(r));assert.ok(el<2500,'returned in '+el+'ms');assert.equal(await ready(),false);assert.equal(await locks(),0);assert.ok(await free());
-// 5) actual statement timeout on a really long-running completion: slow the scan (scratch DB only), run with a 1.5s statement bound
+// 5) real long-running COMPLETE: rebuild runs at full speed; the slow function is injected only AFTER rebuild (beforeComplete hook). Assert, from another connection, that the backend is executing complete() holding the owner SHARE lock BEFORE the timeout, then that it stops, releases, leaves no backend, and a retry succeeds.
 await seed(400);await q("UPDATE gymos.gym_states SET payload='{\"generation\":\"g1\"}',revision=2 WHERE user_id=$1",[O]);
 const orig=(await q("SELECT pg_get_functiondef('gymos.invoice_allocation_ref_rows(text,text,integer,text,jsonb)'::regprocedure) d")).rows[0].d;
-await q(`CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_rows(p_owner text,p_invoice text,p_position integer,p_branch text,p_payload jsonb)
+const slow=async()=>q(`CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_rows(p_owner text,p_invoice text,p_position integer,p_branch text,p_payload jsonb)
  RETURNS TABLE(owner_id text,invoice_id text,ord integer,payment_id text,payment_key text,has_minor boolean,minor jsonb,invoice_position integer,invoice_branch text) LANGUAGE plpgsql STABLE AS $$ BEGIN PERFORM pg_sleep(0.02);
  RETURN QUERY SELECT p_owner,p_invoice,(a.ord-1)::integer,a.v->>'payment',md5(a.v->>'payment'),(a.v ? 'minor'),a.v->'minor',p_position,p_branch FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'allocations')='array' THEN p_payload->'allocations' ELSE '[]'::jsonb END) WITH ORDINALITY a(v,ord) WHERE jsonb_typeof(a.v)='object' AND jsonb_typeof(a.v->'payment')='string'; END $$`);
+const running=async()=>(await q("SELECT pid,state,wait_event FROM pg_stat_activity WHERE datname=current_database() AND pid<>pg_backend_pid() AND state='active' AND query ILIKE '%invoice_allocation_refs_complete%' AND query NOT ILIKE '%pg_stat_activity%'")).rows;
+const rowShared=async()=>!(await free()); // FOR UPDATE NOWAIT fails while SHARE is held
+let seen=null;
 try{
-  t0=Date.now();r=await readyOwner(url,O,{...T,batch:1000,stmtMs:1500});const el2=Date.now()-t0;
-  assert.ok(['statement-timeout','client-timeout'].includes(r.status),JSON.stringify(r));assert.ok(el2<6000,'bounded: '+el2+'ms');
-  assert.equal(await ready(),false);assert.equal(await locks(),0,'no leftover backend');assert.ok(await free(),'completion SHARE lock released');
-  console.log('long-running call stopped as',r.status,'after',el2,'ms');
+  t0=Date.now();
+  const pr=readyOwner(url,O,{...T,stmtMs:2500,lockMs:700,hooks:{beforeComplete:slow}});
+  let tries=0;while(!seen&&tries++<60){await new Promise(r=>setTimeout(r,50));const rr=await running();if(rr.length&&await rowShared())seen=rr[0];}
+  assert.ok(seen,'complete() was executing with the owner SHARE lock before the timeout');
+  r=await pr;const el2=Date.now()-t0;
+  assert.equal(r.status,'statement-timeout',JSON.stringify(r));assert.ok(el2<7000,'bounded: '+el2+'ms');
+  assert.equal(await ready(),false);assert.equal((await running()).length,0,'no abandoned backend running complete');assert.equal(await locks(),0);assert.ok(await free(),'completion SHARE lock released');
+  console.log('complete() observed executing with SHARE (pid',seen.pid,') ; stopped as',r.status,'after',el2,'ms');
+  // absolute deadline: 100ms total must not enter a 15s query; returns promptly, nothing left
+  t0=Date.now();r=await readyOwner(url,O,{...T,stmtMs:15000,deadlineMs:100,hooks:{beforeComplete:slow}});const el3=Date.now()-t0;
+  assert.ok(el3<1500,'100ms deadline returned in '+el3+'ms');assert.ok(['client-timeout','statement-timeout','lock-timeout'].includes(r.status),JSON.stringify(r));console.log('100ms deadline ->',r.status,el3,'ms');assert.equal(await ready(),false);
+  await new Promise(r=>setTimeout(r,300));assert.equal((await running()).length,0);assert.ok(await free());
+  // deadline that expires DURING complete (rebuild done, ~600ms budget left): stops by the deadline, not by the 15s statement bound
+  t0=Date.now();r=await readyOwner(url,O,{...T,stmtMs:15000,lockMs:700,deadlineMs:1500,hooks:{beforeComplete:slow}});const el4=Date.now()-t0;
+  assert.ok(el4<3500,'deadline during complete: '+el4+'ms');assert.ok(['client-timeout','statement-timeout'].includes(r.status),JSON.stringify(r));
+  await new Promise(r=>setTimeout(r,400));assert.equal((await running()).length,0);assert.ok(await free());assert.equal(await ready(),false);
 }finally{await q(orig);}
-// 6) after the slow function is restored the same owner can complete
+// 6) after the slow function is restored the same owner can complete (retry)
 r=await readyOwner(url,O,T);assert.equal(r.status,'ready',JSON.stringify(r));
-// 7) a connection that stalls: unreachable server is bounded by connect timeout
-t0=Date.now();r=await readyOwner('postgresql://postgres@127.0.0.1:1/x',O,{...T,connectMs:800});assert.ok(Date.now()-t0<3000);assert.ok(r.status==='client-timeout'||r.status==='error');
+// 7) controlled STALLED connection: a TCP server that accepts and never answers; a short total deadline bounds connect
+import net from 'node:net';
+const stall=net.createServer(sk=>{sk.on('error',()=>{});});await new Promise(r=>stall.listen(0,'127.0.0.1',r));
+t0=Date.now();r=await readyOwner('postgresql://postgres@127.0.0.1:'+stall.address().port+'/x',O,{...T,connectMs:30000,deadlineMs:700});const el5=Date.now()-t0;
+assert.equal(r.status,'client-timeout',JSON.stringify(r));assert.ok(el5<2000,'stalled connect bounded by total deadline: '+el5+'ms');stall.close();
+// (refused connection is a different case: immediate error)
+r=await readyOwner('postgresql://postgres@127.0.0.1:1/x',O,{...T,deadlineMs:800});assert.ok(['client-timeout','error'].includes(r.status));
 await q("DELETE FROM gymos.gym_entities WHERE owner_id=$1",[O]);await q("DELETE FROM gymos.gym_states WHERE user_id=$1",[O]);await q("DELETE FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1",[O]);await S.end();
 console.log('READY WORKFLOW PASS');
