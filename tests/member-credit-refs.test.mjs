@@ -145,3 +145,18 @@ test('refs transfer is bounded in SQL before the matching elements are fetched o
   async function _(){}
 });
 function await_text(a){return '['+a.map(x=>'{"payment": '+JSON.stringify(x.payment)+', "minor": '+JSON.stringify(x.minor)+'}').join(', ')+']';}
+test('same-statement aggregate budget includes every voided value and emits no payload on refusal',async()=>{
+ const owner='XQ9';await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[owner]);
+ for(let n=0;n<2;n++)await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,payload) VALUES($1,'invoices',$2,$3,$4)",[owner,'large'+n,n,JSON.stringify({allocations:[{payment:'p',minor:1}],voided:'x'.repeat(600000)})]);
+ await db.query('SELECT gymos.invoice_allocation_refs_complete($1,NULL)',[owner]);
+ const payloadReads=[];const spy={query:async(sql,v)=>{const r=await db.query(sql,v);if(sql.includes('WITH matched AS MATERIALIZED'))payloadReads.push(r.rows);return r;}};
+ assert.deepEqual(await allocatingInvoicesFromRefs(spy,owner,['p'],{maxBytes:1024*1024}),{status:'unavailable',reason:'transfer-byte-cap'});
+ assert.equal(payloadReads.length,1);assert.equal(payloadReads[0].length,1);assert.equal(payloadReads[0][0].kind,null);assert.equal(payloadReads[0][0].voided,null);assert.equal(payloadReads[0][0].minor,null);
+ const ok=await allocatingInvoicesFromRefs(db,owner,['p'],{maxBytes:2*1024*1024});assert.equal(ok.status,'ok');assert.equal(ok.invoices.length,2);assert.ok(ok.invoices.every(i=>i.voided.length===600000));
+ assert.equal((await allocatingInvoicesFromRefs(db,owner,['p'],{maxBytes:NaN})).reason,'transfer-byte-cap');assert.equal((await allocatingInvoicesFromRefs(db,owner,['p'],{maxBytes:-1})).reason,'transfer-byte-cap');
+});
+test('writer enlargement at the payload-read boundary is measured with the payload in one snapshot',async()=>{
+ const owner='XQ10';await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[owner]);await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,payload) VALUES($1,'invoices','i',0,$2)",[owner,JSON.stringify({allocations:[{payment:'p',minor:1}],voided:false})]);await db.query('SELECT gymos.invoice_allocation_refs_complete($1,NULL)',[owner]);
+ let calls=0;const spy={query:async(sql,v)=>{if(sql.includes('WITH matched AS MATERIALIZED')){calls++;await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{voided}',to_jsonb($2::text)) WHERE owner_id=$1 AND entity_id='i'",[owner,'x'.repeat(2200000)]);}return db.query(sql,v);}};
+ assert.equal((await allocatingInvoicesFromRefs(spy,owner,['p'])).reason,'transfer-byte-cap');assert.equal(calls,1);
+});

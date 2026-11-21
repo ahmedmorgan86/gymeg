@@ -31,25 +31,39 @@ async function inner(c:Q,owner:string,paymentIds:unknown[],version:string,maxByt
   // any odd-shape invoice of the owner (every branch: the legacy ledger scans all invoices) makes the legacy filter throw or ignore an element: refuse (voided odd invoices too, conservatively)
   const odd=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.invoice_allocation_odd WHERE owner_id=$1) AS x`,[owner])).rows[0] as {x:boolean};
   if(odd.x)return{status:'unavailable',reason:'unsupported-allocation-shape'};
-  const ELEN="octet_length((jsonb_build_object('payment',payment_id)||CASE WHEN has_minor THEN jsonb_build_object('minor',minor) ELSE '{}'::jsonb END)::text)+2";
-  const keys=[ids.map(id=>createHash('md5').update(id).digest('hex')),ids];
-  let preBytes=0;
-  if(maxBytes!==undefined){
-    // Bound BEFORE transferring or decoding the matching elements. Text size of each element as jsonb renders it (the fold's budget measures allocations::text; n elements cost sum(len)+2n = brackets and ", " separators), at most
-    // floor(maxBytes/17)+1 rows are examined (17 = the smallest possible element, {"payment": ""} plus its separator), 64 bytes per invoice as in the fold budget. The voided text is checked after the invoice read, still within the same maxBytes.
-    const lim=Math.floor(maxBytes/17)+1;
-    const pre=(await c.query(`SELECT count(*)::int AS n,coalesce(sum(len),0)::bigint AS bytes,count(DISTINCT invoice_id)::int AS invs FROM (SELECT invoice_id,${ELEN} AS len FROM gymos.invoice_allocation_refs WHERE owner_id=$1 AND payment_key=ANY($2::text[]) AND payment_id=ANY($3::text[]) LIMIT ${lim}) t`,[owner,...keys])).rows[0] as {n:number;bytes:string;invs:number};
-    if(pre.n>=lim||Number(pre.bytes)+64*pre.invs>maxBytes)return{status:'unavailable',reason:'transfer-byte-cap'};
-    preBytes=Number(pre.bytes);
-  }
-  const els=(await c.query(`SELECT invoice_id,invoice_position,ord,payment_id,has_minor,minor FROM gymos.invoice_allocation_refs WHERE owner_id=$1 AND payment_key=ANY($2::text[]) AND payment_id=ANY($3::text[]) ORDER BY invoice_position,invoice_id,ord${maxBytes!==undefined?` LIMIT ${Math.floor(maxBytes/17)+1}`:''}`,[owner,...keys])).rows as {invoice_id:string;invoice_position:number;ord:number;payment_id:string;has_minor:boolean;minor:unknown}[];
+  // A safe default preserves existing internal callers. Invalid budgets refuse rather than silently disable admission.
+  const cap=maxBytes??2*1024*1024;if(!Number.isSafeInteger(cap)||cap<=0||cap>64*1024*1024)return{status:'unavailable',reason:'transfer-byte-cap'};
+  const lim=Math.floor(cap/17)+1;
+  // One READ COMMITTED statement snapshot owns both size admission and emitted data. Separate precheck/fetch queries allow an ordinary concurrent writer to enlarge data in between.
+  // Invoice voided values are budgeted in aggregate, emitted once per invoice, and never replaced with NULL to hide an oversized truthy value.
+  const result=(await c.query(`WITH matched AS MATERIALIZED (
+    SELECT invoice_id,invoice_position,ord,payment_id,has_minor,minor,
+      octet_length((jsonb_build_object('payment',payment_id)||CASE WHEN has_minor THEN jsonb_build_object('minor',minor) ELSE '{}'::jsonb END)::text)+2 AS alen
+    FROM gymos.invoice_allocation_refs WHERE owner_id=$1 AND payment_key=ANY($2::text[]) AND payment_id=ANY($3::text[]) LIMIT ${lim}
+  ), wanted AS MATERIALIZED (SELECT DISTINCT invoice_id FROM matched), invoices AS MATERIALIZED (
+    SELECT e.entity_id AS invoice_id,e.position,e.payload->'voided' AS voided
+    FROM wanted w JOIN gymos.gym_entities e ON e.owner_id=$1 AND e.collection='invoices' AND e.entity_id=w.invoice_id
+  ), budget AS MATERIALIZED (
+    SELECT (SELECT count(*) FROM matched) AS refs_count,
+      (SELECT count(*) FROM wanted) AS wanted_count,(SELECT count(*) FROM invoices) AS invoice_count,
+      coalesce((SELECT sum(alen) FROM matched),0) AS alloc_bytes,
+      coalesce((SELECT sum(alen+octet_length(invoice_id)+64) FROM matched),0)+
+      coalesce((SELECT sum(coalesce(octet_length(voided::text),0)+octet_length(invoice_id)+64) FROM invoices),0) AS transfer_bytes
+  )
+  SELECT b.*,p.* FROM budget b LEFT JOIN LATERAL (
+    SELECT 'ref'::text AS kind,invoice_id,invoice_position AS position,ord,payment_id,has_minor,minor,NULL::jsonb AS voided FROM matched
+    UNION ALL
+    SELECT 'invoice',invoice_id,position,NULL::integer,NULL::text,NULL::boolean,NULL::jsonb,voided FROM invoices
+  ) p ON b.refs_count<${lim} AND b.transfer_bytes<=${cap}
+  ORDER BY p.kind,p.position,p.invoice_id,p.ord`,[owner,ids.map(id=>createHash('md5').update(id).digest('hex')),ids])).rows as Array<{refs_count:string;wanted_count:string;invoice_count:string;alloc_bytes:string;transfer_bytes:string;kind:string|null;invoice_id:string;position:number;ord:number;payment_id:string;has_minor:boolean;minor:unknown;voided:unknown}>;
+  const budget=result[0];if(!budget||Number(budget.refs_count)>=lim||!Number.isFinite(Number(budget.transfer_bytes))||Number(budget.transfer_bytes)>cap)return{status:'unavailable',reason:'transfer-byte-cap'};
+  if(Number(budget.wanted_count)!==Number(budget.invoice_count))return{status:'unavailable',reason:'refs-drift'};
+  const preBytes=Number(budget.alloc_bytes);
+  const els=result.filter(r=>r.kind==='ref').map(r=>({...r,invoice_position:r.position}));
   if(!els.length)return{status:'ok',version,invoices:[],allocBytes:0};
-  // The legacy sum is `sum + invoice.allocations.filter(...).reduce((n,a)=>n+a.minor,0)` over EVERY non-voided invoice. With a string/array/object minor the partial sum becomes a string and each non-matching invoice then appends
-  // "0" (concatenation), so the result depends on invoices the lookup does not return: not representable, refuse. number/null/boolean/missing stay numeric, where the non-matching invoices add exactly 0.
   for(const e of els)if(e.has_minor&&e.minor!==null&&(typeof e.minor==='string'||typeof e.minor==='object'))return{status:'unavailable',reason:'non-numeric-minor'};
-  const invIds=[...new Set(els.map(e=>e.invoice_id))];
   const inv=new Map<string,{voided:unknown;position:number}>();
-  for(const i of (await c.query(`SELECT entity_id,position,CASE WHEN octet_length((payload->'voided')::text)<=${maxBytes??1048576} THEN payload->'voided' END AS voided,octet_length((payload->'voided')::text) AS vlen FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices' AND entity_id=ANY($2::text[])`,[owner,invIds])).rows as {entity_id:string;position:number;voided:unknown;vlen:number}[]){if(maxBytes!==undefined&&Number(i.vlen)>maxBytes)return{status:'unavailable',reason:'transfer-byte-cap'};inv.set(i.entity_id,{voided:i.voided,position:Number(i.position)});}
+  for(const i of result.filter(r=>r.kind==='invoice'))inv.set(i.invoice_id,{voided:i.voided,position:Number(i.position)});
   for(const e of els){const s=inv.get(e.invoice_id);if(!s||s.position!==Number(e.invoice_position))return{status:'unavailable',reason:'refs-drift'};}
   const groups=new Map<string,{pos:number;id:string;allocations:RefsSlice['allocations']}>();
   for(const e of els){let g=groups.get(e.invoice_id);if(!g)groups.set(e.invoice_id,g={pos:Number(e.invoice_position),id:e.invoice_id,allocations:[]});g.allocations.push({payment:e.payment_id,...(e.has_minor?{minor:e.minor}:{})});}
