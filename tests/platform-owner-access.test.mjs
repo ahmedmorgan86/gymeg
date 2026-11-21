@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {platformOwnerClub} from '../app/lib/platform-owner-access.ts';
 import {PLATFORM_OWNER_ACCOUNT_ID} from '../app/lib/platform-owner-license.ts';
+process.env.GYMOS_PLATFORM_OWNER_ACCOUNT_ID=PLATFORM_OWNER_ACCOUNT_ID;
 const target={id:'club-a',storage_key:'tenant:club-a',name:'Existing club'};
 test('Cross-club access requires both the fixed owner identity and live platform authority',async()=>{
  const client={query(){throw Error('Must not read another tenant');}};
