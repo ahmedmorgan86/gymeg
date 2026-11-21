@@ -6,3 +6,8 @@
 CREATE INDEX IF NOT EXISTS gym_entities_owner_member_rows
   ON gymos.gym_entities(owner_id,collection,(payload->>'member'),position)
   WHERE collection IN ('visits','payments','invoices','trainingAssignments','coaching');
+
+-- Guard for hot-operation slices: finds, in O(1), a club that already has a member with more than 1000 freezes.
+CREATE INDEX IF NOT EXISTS gym_entities_oversized_freezes
+  ON gymos.gym_entities(owner_id)
+  WHERE collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000;

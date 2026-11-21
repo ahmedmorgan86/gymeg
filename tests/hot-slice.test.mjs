@@ -56,3 +56,19 @@ test('Hot hydration cost: member history scales with that member only, stale ope
     assert.ok(HOT_OPEN_CAP<2400);
   }finally{await db.close();}
 });
+
+test('A club with a member over 1000 freezes is refused (full path decides); counts come from the same snapshot',async()=>{
+  const db=await bootstrapDb();
+  try{
+    const dd=x=>{const seen=new Set();for(const v of x.visits){if(v.leftAt)continue;if(seen.has(v.member))v.leftAt=v.at.slice(0,11)+'23:00:00.000Z';else seen.add(v.member);}return x;};
+    const s=dd(club(2));s.members[0].freezes=Array.from({length:1001},(_,i)=>({from:'2025-01-01',to:'2025-01-02',id:'z'+i}));
+    await db.query('BEGIN');await seed(db,'big',s);await db.query('COMMIT');
+    const {backend}=counted(db);
+    assert.equal(await readHotSlice(backend,'big',{branch:'a',member:'m1'},normalize),null,'oversized freezes: fall back');
+    const ok=dd(club(2));await db.query('BEGIN');await seed(db,'ok',ok);await db.query('COMMIT');
+    const got=await readHotSlice(backend,'ok',{branch:'a',member:'m1'},normalize);
+    assert.equal(got.counts.members,ok.members.length);assert.equal(got.counts.visits,ok.visits.length);
+    const plan=await db.query("EXPLAIN SELECT 1 FROM gymos.gym_entities WHERE owner_id='ok' AND collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000 LIMIT 1");
+    console.log('FREEZE-GUARD plan',plan.rows.map(r=>r['QUERY PLAN']).slice(0,3).join(' | '));
+  }finally{await db.close();}
+});

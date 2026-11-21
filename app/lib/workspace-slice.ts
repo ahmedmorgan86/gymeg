@@ -34,6 +34,8 @@ export interface SliceBackend{
   /** member id -> first 16 hex chars of sha256(photo content), the cache-busting version the packet puts in photo URLs. */
   photoVersions(owner:string):Promise<Record<string,string>>;
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
+  /** True when some member row has more than 1000 freezes (the full path rejects every operation on such a club). Postgres answers from a tiny partial index. */
+  hasOversizedFreezes(owner:string):Promise<boolean>;
 }
 export const MAX_SLICE=500;
 export function checkQuery(q:SliceQuery){
@@ -71,6 +73,7 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     },
     async photo(owner,memberId){return scope(owner,async c=>{const r=(await c.query('SELECT content FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,memberId])).rows[0] as {content:string}|undefined;return r?.content??null;});},
     async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
+    async hasOversizedFreezes(owner){return scope(owner,async c=>((await c.query("SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000 LIMIT 1",[owner])).rows.length>0));},
     async count(owner,collection,branches){return scope(owner,async c=>{const r=(await c.query(branches?'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2 AND branch=ANY($3::text[])':'SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection=$2',branches?[owner,collection,branches]:[owner,collection])).rows[0] as {n:number};return Number(r.n);});},
   };
 }
@@ -114,6 +117,7 @@ export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):Slic
     },
     async photo(owner,memberId){const s=await getDb().collection('gym_photos').doc(`${owner}_${memberId}`).get();return s.exists?String((s.data() as {content:string}).content):null;},
     async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
+    async hasOversizedFreezes(){return true;}, // fail closed: Firestore never takes the hot path
     async count(owner,collection,branches){
       const db=getDb();let total=0;
       const groups=branches?Array.from({length:Math.ceil(branches.length/30)},(_,i)=>branches.slice(i*30,i*30+30)):[null];
@@ -140,7 +144,7 @@ export async function consistently<T>(be:SliceBackend,owner:string,work:(meta:Me
   return null;
 }
 
-export type Sliced={state:GymState;revision:number;partial:true;/** Stored position of every loaded row, key `collection:entity_id`. Only readHotSlice fills it. */positions?:Record<string,number>};
+export type Sliced={state:GymState;revision:number;partial:true;/** Stored position of every loaded row, key `collection:entity_id`. Only readHotSlice fills it. */positions?:Record<string,number>;/** Global row counts read in the same revision-checked snapshot. Only readHotSlice fills it. */counts?:{members:number;visits:number;invoices:number;plans:number;followUps:number}};
 /** Revision only: one row / one document. null when the club has no state yet. */
 export const readRevisionOnly=(be:SliceBackend,owner:string)=>be.revision(owner);
 /**
@@ -218,6 +222,7 @@ export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:str
       const v=await be.entities(owner,{collections:['visits'],ids:[String(plan.visit)],branches:[plan.branch]});
       member=v[0]?String(v[0].payload.member):undefined;
     }
+    if(await be.hasOversizedFreezes(owner))return null;
     const open=await pagedAll(be,owner,{collections:['visits'],open:true},HOT_OPEN_CAP);
     if(!open)return null;
     const rows:Entity[]=[...open];
@@ -229,7 +234,8 @@ export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:str
     }
     rows.push(...await be.entities(owner,{collections:['plans','shifts'],branches:[plan.branch]}));
     const seen=new Set<string>(),unique=rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
-    return{state:normalizeState(assembleState(meta.metadata,unique,{})),positions:Object.fromEntries(unique.map(e=>[e.collection+':'+e.entity_id,Number(e.position)]))};
+    const counts={members:await be.count(owner,'members'),visits:await be.count(owner,'visits'),invoices:await be.count(owner,'invoices'),plans:await be.count(owner,'plans'),followUps:await be.count(owner,'followUps')};
+    return{counts,state:normalizeState(assembleState(meta.metadata,unique,{})),positions:Object.fromEntries(unique.map(e=>[e.collection+':'+e.entity_id,Number(e.position)]))};
   });
-  return got&&got.value?{state:got.value.state,positions:got.value.positions,revision:got.revision,partial:true}:null;
+  return got&&got.value?{state:got.value.state,positions:got.value.positions,counts:got.value.counts,revision:got.revision,partial:true}:null;
 }
