@@ -17,6 +17,9 @@ test('Remote database connections verify TLS certificates and keep SSL parameter
  const effective=client.connectionParameters.ssl;
  assert.equal(effective.rejectUnauthorized,true);
  assert.ok(Array.isArray(effective.ca)&&effective.ca.length>1,'CA chain must survive pg connection-string parsing');
+ // The bundled Supabase CA chain rides with the system roots: the pooler's
+ // private-CA certificate must verify without relaxing rejectUnauthorized.
+ assert.match(String(effective.ca[effective.ca.length-1]),/BEGIN CERTIFICATE/);
 });
 
 test('Production refuses localhost and unconfigured databases instead of serving mock data',()=>{
