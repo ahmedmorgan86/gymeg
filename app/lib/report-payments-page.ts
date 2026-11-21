@@ -51,3 +51,49 @@ export async function readReportPayments(scope:Scope,q:{owner:string;branch:stri
     return{status:'ok',version:ver,rows:out,next:more?{day:last.payload.day,pos:Number(last.position),id:last.entity_id}:null} as const;
   },o=>o.status==='ok'));
 }
+
+// Candidate reader over the held plain-column keys (migration 20261122030000: pay_day / pay_day_odd on payments, gymos.invoice_allocation_refs). Selected by GYMOS_REPORT_PAYMENTS_REFS=1 (default OFF, only after the migration,
+// its backfill and the zero-mismatch readiness are in place; it answers 'unavailable' until invoice_allocation_refs_state says complete). Every predicate is a plain column compare (texteq/ordering, leakproof), so under FORCE RLS they can be
+// Index Cond. Same results as readReportPayments: page of payments by (pay_day C, position, entity_id); member names by entity_id = ANY(page members); allocation elements of the page's payment ids from the refs (exact payment_id equality
+// repeated on top of the md5 key), the invoices' voided/category by pkey = ANY; per payment the invoices in (position, entity_id) order with their elements in source order.
+export async function readReportPaymentsRefs(scope:Scope,q:{owner:string;branch:string;branches?:string[]|null;from:string;to:string;after?:Cursor;ver?:string}):Promise<ReportPayments>{
+  if(!q.branch||q.branch.length>200||!DAY.test(q.from)||!DAY.test(q.to)||(q.after!==undefined&&(!DAY.test(q.after.day)||!Number.isSafeInteger(q.after.pos)||!q.after.id||q.after.id.length>200||typeof q.ver!=='string')))throw new RangeError('invalid');
+  const bl=q.branches??null;
+  return scope(q.owner,c=>boundedRead(c,q.owner,'repayR\u0000'+q.branch+'\u0000'+JSON.stringify(bl)+'\u0000'+q.from+'\u0000'+q.to+'\u0000'+(q.after?q.after.day+'\u0000'+q.after.pos+'\u0000'+q.after.id+'\u0000'+q.ver:''),async()=>{
+    const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable',reason:'no-version'} as const;
+    if(q.after&&q.ver!==ver)return{status:'stale'} as const;
+    const ready=(await c.query(`SELECT (EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1 AND ready) OR (NOT EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1) AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'))) AS x`,[q.owner])).rows[0] as {x:boolean};
+    if(!ready.x)return{status:'unavailable',reason:'refs-not-ready'} as const;
+    // a visible (branch-scoped) invoice with an unsupported allocation shape makes the legacy ledger throw: refuse explicitly (hidden-branch ones do not block). Voided invoices with such a shape are refused too (conservative).
+    const oddInv=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.invoice_allocation_odd WHERE owner_id=$1 AND ($2::text[] IS NULL OR invoice_branch IS NULL OR invoice_branch=ANY($2::text[]))) AS x`,[q.owner,bl])).rows[0] as {x:boolean};
+    if(oddInv.x)return{status:'unavailable',reason:'unsupported-allocation-shape'} as const;
+    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND branch=$2 AND pay_day_odd) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
+    if(odd.x)return{status:'unavailable',reason:'non-canonical-day'} as const;
+    const args:unknown[]=[q.owner,q.branch,q.from,q.to];let after='';
+    if(q.after){args.push(q.after.day,q.after.pos,q.after.id);after=` AND (pay_day,position,entity_id) > ($5::text COLLATE "C",$6::integer,$7::text)`;}
+    const rows=(await c.query(`SELECT payload,position,entity_id,pay_day FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND pay_day >= $3::text COLLATE "C" AND pay_day <= $4::text COLLATE "C"${after} ORDER BY pay_day,position,entity_id LIMIT ${REPORT_PAGE+1}`,args)).rows as {payload:Payment;position:number;entity_id:string}[];
+    const more=rows.length>REPORT_PAGE,page=more?rows.slice(0,REPORT_PAGE):rows;
+    for(const r of page)if(typeof r.payload.id!=='string')return{status:'unavailable',reason:'payment-id'} as const;
+    const ids=[...new Set(page.map(r=>r.payload.id))],members=[...new Set(page.map(r=>r.payload.member).filter((m):m is string=>typeof m==='string'))];
+    const names=new Map<string,{n:string|null;t:string|null}>();
+    if(members.length)for(const m of (await c.query(`SELECT entity_id,payload->>'name' AS n,jsonb_typeof(payload->'name') AS t FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND entity_id=ANY($2::text[]) AND ($3::text[] IS NULL OR branch=ANY($3::text[]))`,[q.owner,members,bl])).rows as {entity_id:string;n:string|null;t:string|null}[])names.set(m.entity_id,{n:m.n,t:m.t});
+    const els=ids.length?(await c.query(`SELECT invoice_id,invoice_position,ord,payment_id,has_minor,minor FROM gymos.invoice_allocation_refs WHERE owner_id=$1 AND payment_key=ANY($2::text[]) AND payment_id=ANY($3::text[]) AND ($4::text[] IS NULL OR invoice_branch=ANY($4::text[])) ORDER BY invoice_position,invoice_id,ord`,[q.owner,ids.map(id=>createHash('md5').update(id).digest('hex')),ids,bl])).rows as {invoice_id:string;invoice_position:number;ord:number;payment_id:string;has_minor:boolean;minor:unknown}[]:[];
+    const invIds=[...new Set(els.map(e=>e.invoice_id))];
+    const inv=new Map<string,{voided:unknown;category:unknown;position:number;branch:string|null}>();
+    if(invIds.length)for(const i of (await c.query(`SELECT entity_id,position,branch,payload->'voided' AS voided,payload->'category' AS category FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices' AND entity_id=ANY($2::text[])`,[q.owner,invIds])).rows as {entity_id:string;position:number;branch:string|null;voided:unknown;category:unknown}[])inv.set(i.entity_id,{voided:i.voided,category:i.category,position:Number(i.position),branch:i.branch});
+    for(const e of els){const s=inv.get(e.invoice_id);if(!s||s.position!==Number(e.invoice_position)||(bl!==null&&!(s.branch!==null&&bl.includes(s.branch))))return{status:'unavailable',reason:'refs-drift'} as const;}
+    const byPay=new Map<string,Map<string,{pos:number;id:string;allocations:unknown[]}>>();
+    for(const e of els){let m=byPay.get(e.payment_id);if(!m)byPay.set(e.payment_id,m=new Map());let g=m.get(e.invoice_id);if(!g)m.set(e.invoice_id,g={pos:e.invoice_position,id:e.invoice_id,allocations:[]});g.allocations.push({payment:e.payment_id,...(e.has_minor?{minor:e.minor}:{})});}
+    const out:ReportPaymentRow[]=[];
+    for(const r of page){
+      const nm=typeof r.payload.member==='string'?names.get(r.payload.member):undefined;
+      if(nm&&nm.t!==null&&nm.t!=='null'&&nm.t!=='string')return{status:'unavailable',reason:'member-name'} as const;
+      const invs=[...(byPay.get(r.payload.id)?.values()??[])].sort((a,b)=>a.pos-b.pos||(a.id<b.id?-1:a.id>b.id?1:0)).map(g=>({voided:inv.get(g.id)!.voided,category:inv.get(g.id)!.category,allocations:g.allocations}));
+      const breakdown=paymentBreakdown({invoices:invs} as unknown as GymState,r.payload);
+      out.push({payment:{id:r.payload.id,day:r.payload.day,member:r.payload.member,method:r.payload.method,voided:r.payload.voided},name:nm&&nm.t==='string'?nm.n:null,breakdown});
+    }
+    if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
+    const last=page[page.length-1];
+    return{status:'ok',version:ver,rows:out,next:more?{day:last.payload.day,pos:Number(last.position),id:last.entity_id}:null} as const;
+  },o=>o.status==='ok'));
+}
