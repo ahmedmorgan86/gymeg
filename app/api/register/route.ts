@@ -18,6 +18,7 @@ export async function POST(request: Request) {
     const name = (parsed as { name?: unknown } | null)?.name;
     if (!credentials || credentials.password.length < 12 || typeof name !== 'string' || !name.trim() || name.length > 100) return reply({ error: 'invalid' }, 400);
     const limit = await consumeAuthRateLimit('session:register', request, credentials.email, 5);
+    if (limit.outage) { const response = reply({ error: 'connection' }, 503); response.headers.set('Retry-After', String(limit.retryAfter)); return response; }
     if (!limit.allowed) { const response = reply({ error: 'rate_limit' }, 429); response.headers.set('Retry-After', String(limit.retryAfter)); return response; }
     const auth = await serverAuth();
     const result = await auth.auth.signUp({ ...credentials, name: name.trim() });

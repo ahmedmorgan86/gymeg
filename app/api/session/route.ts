@@ -25,6 +25,7 @@ export async function POST(request:Request){
   let parsed:unknown;try{parsed=JSON.parse(raw);}catch{return reply({error:'invalid'},400);}
   const credentials=loginCredentials(parsed);if(!credentials)return reply({error:'invalid_credentials'},400);
   const limit=await consumeAuthRateLimit('session:login',request,credentials.email,10);
+  if(limit.outage){const r=reply({error:'connection'},503);r.headers.set('Retry-After',String(limit.retryAfter));return r;}
   if(!limit.allowed)return limited(limit.retryAfter);
   const auth=await serverAuth();const result=await auth.auth.signInWithPassword(credentials);
   // Preserve server-side auth failures as 503 instead of masking them as 400,

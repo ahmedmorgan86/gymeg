@@ -13,12 +13,28 @@ export type RateLimitStore = 'firestore' | 'postgres' | 'local';
 // the per-process Map regardless of backend envs.
 export function rateLimitStoreFor(env: Record<string, string | undefined> = process.env): RateLimitStore {
   if (env.NODE_ENV === 'test') return 'local';
+  // Mirror useFirestorePersistence(): only unset/empty or "postgres" is a
+  // valid GYMOS_DATA_BACKEND. Anything else is a typo or drift and must stop
+  // the process, never silently pick a backend.
+  const backend = env.GYMOS_DATA_BACKEND;
+  if (backend !== undefined && backend !== '' && backend !== 'postgres') {
+    throw new Error('GYMOS_DATA_BACKEND must be "postgres" or unset');
+  }
+  if (backend === 'postgres') {
+    if (env.DATABASE_URL) return 'postgres';
+    // Explicit Postgres without a connection string must not degrade to a
+    // per-process Map in production, where counters would stop being shared.
+    if (env.NODE_ENV === 'production') {
+      throw new Error('GYMOS_DATA_BACKEND=postgres requires DATABASE_URL');
+    }
+    return 'local';
+  }
   const firebase = Boolean(
     env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
     env.FIREBASE_PROJECT_ID ||
     env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
   );
-  if (firebase && env.GYMOS_DATA_BACKEND !== 'postgres') return 'firestore';
+  if (firebase) return 'firestore';
   if (env.DATABASE_URL) return 'postgres';
   return 'local';
 }
@@ -36,15 +52,15 @@ export function rateLimitStoreFor(env: Record<string, string | undefined> = proc
 // Postgres deployments) so every serverless instance enforces the same limit.
 // Without a shared store (local development and tests) a per-process Map is
 // used, which is sufficient for a single Node instance.
-// A store outage fails open (logged): identity providers apply their own
-// server-side throttling, and blocking all sign-ins because the counter
-// store is down is the worse failure.
+// A store outage fails closed but retryable (logged): the decision carries
+// outage=true and routes answer 503 with Retry-After, so a counter-store
+// outage never silently disables rate limiting.
 
 const WINDOW_MS = 15 * 60 * 1000;
 const MAX_ENTRIES = 5000;
 const IP_LIMIT = 30;
 
-export type RateLimitDecision = { allowed: boolean; retryAfter: number };
+export type RateLimitDecision = { allowed: boolean; retryAfter: number; outage?: boolean };
 
 type Bucket = { hits: number; resetAt: number };
 const buckets = new Map<string, Bucket>();
@@ -95,43 +111,36 @@ async function consumeShared(key: string, limit: number, windowMs: number, now: 
 async function consumePostgres(key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
   const { getPool } = await import('./database.ts');
   const id = docId(key);
-  const client = await getPool().connect();
-  try {
-    await client.query('BEGIN');
-    const row = (await client.query('SELECT hits, reset_at FROM gymos.auth_rate_limits WHERE key_hash=$1 FOR UPDATE', [id])).rows[0] as { hits: number; reset_at: string } | undefined;
-    const resetAt = row ? Date.parse(row.reset_at) : 0;
-    if (!row || !Number.isFinite(resetAt) || now >= resetAt) {
-      await client.query(
-        'INSERT INTO gymos.auth_rate_limits(key_hash,hits,reset_at) VALUES($1,1,$2) ON CONFLICT(key_hash) DO UPDATE SET hits=1,reset_at=excluded.reset_at',
-        [id, new Date(now + windowMs).toISOString()],
-      );
-      await client.query('COMMIT');
-      return { allowed: true, retryAfter: 0 };
-    }
-    const hits = row.hits + 1;
-    await client.query('UPDATE gymos.auth_rate_limits SET hits=$2 WHERE key_hash=$1', [id, hits]);
-    await client.query('COMMIT');
-    if (hits > limit) return { allowed: false, retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)) };
-    return { allowed: true, retryAfter: 0 };
-  } catch (error) {
-    await client.query('ROLLBACK');
-    throw error;
-  } finally {
-    client.release();
-  }
+  // One atomic upsert. INSERT ... ON CONFLICT takes the row lock, so
+  // concurrent first attempts serialize; the CASE increments inside the
+  // current window and rolls hits/reset_at over only once the stored window
+  // has expired. No separate SELECT FOR UPDATE, no lost concurrent hits.
+  const result = await getPool().query(
+    `INSERT INTO gymos.auth_rate_limits(key_hash,hits,reset_at)
+     VALUES($1,1,$2::timestamptz)
+     ON CONFLICT(key_hash) DO UPDATE SET
+       hits = CASE WHEN gymos.auth_rate_limits.reset_at <= $3::timestamptz THEN 1 ELSE gymos.auth_rate_limits.hits + 1 END,
+       reset_at = CASE WHEN gymos.auth_rate_limits.reset_at <= $3::timestamptz THEN excluded.reset_at ELSE gymos.auth_rate_limits.reset_at END
+     RETURNING hits, reset_at`,
+    [id, new Date(now + windowMs).toISOString(), new Date(now).toISOString()],
+  );
+  const row = result.rows[0] as { hits: number; reset_at: string };
+  const resetAt = Date.parse(row.reset_at);
+  if (row.hits > limit) return { allowed: false, retryAfter: Math.max(1, Math.ceil((resetAt - now) / 1000)) };
+  return { allowed: true, retryAfter: 0 };
 }
 
 // Store parameter is explicit so outage behavior is testable without a live
-// backend: any shared-store failure fails OPEN (logged), since blocking all
-// sign-ins because the counter store is down is the worse failure.
+// backend: any shared-store failure fails CLOSED and retryable (logged) —
+// routes answer 503 with Retry-After instead of allowing the request.
 export async function consumeWithStore(store: 'firestore' | 'postgres' | null, key: string, limit: number, windowMs: number, now: number): Promise<RateLimitDecision> {
   const shared = store === 'firestore' ? consumeShared : store === 'postgres' ? consumePostgres : null;
   if (shared) {
     try {
       return await shared(key, limit, windowMs, now);
     } catch (error) {
-      console.error('[gymeg-rate-limit] shared store unavailable, allowing request', error instanceof Error ? error.message : error);
-      return { allowed: true, retryAfter: 0 };
+      console.error('[gymeg-rate-limit] shared store unavailable, failing closed', error instanceof Error ? error.message : error);
+      return { allowed: false, retryAfter: 30, outage: true };
     }
   }
   return consumeLocal(key, limit, windowMs, now);

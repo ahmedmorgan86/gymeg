@@ -32,6 +32,7 @@ export async function POST(request:Request){
    if(body.action==='reset-info'||body.action==='reset-confirm'||body.action==='verify-email'){
     if(!oobValid(body.oobCode))return reply({error:'invalid'},400);
     const limit=await consumeAuthRateLimit('password:'+body.action,request,body.oobCode.slice(0,12),10);
+    if(limit.outage){const r=reply({error:'connection'},503);r.headers.set('Retry-After',String(limit.retryAfter));return r;}
     if(!limit.allowed)return limited(limit.retryAfter);
     if(body.action==='reset-info'){
      const response=await identity('accounts:resetPassword',{oobCode:body.oobCode});
@@ -56,6 +57,7 @@ export async function POST(request:Request){
    if(body.action==='request'){
     if(typeof body.email!=='string'||body.email.length>254||!/^\S+@\S+\.\S+$/.test(body.email.trim()))return reply({error:'invalid'},400);
     const limit=await consumeAuthRateLimit('password:request',request,body.email,5);
+    if(limit.outage){const r=reply({error:'connection'},503);r.headers.set('Retry-After',String(limit.retryAfter));return r;}
     if(!limit.allowed)return limited(limit.retryAfter);
     // Firebase emails the one-time code; the branded /auth/action handler
     // verifies it and updates the password (custom action URL).
@@ -68,6 +70,7 @@ export async function POST(request:Request){
     if(typeof body.password!=='string'||body.password.length<12||body.password.length>128)return reply({error:'invalid'},400);
     const user=await auth.auth.getUser();if(user.error||!user.data.user)return reply({error:'auth'},401);
     const limit=await consumeAuthRateLimit('password:update',request,user.data.user.email??user.data.user.id,5);
+    if(limit.outage){const r=reply({error:'connection'},503);r.headers.set('Retry-After',String(limit.retryAfter));return r;}
     if(!limit.allowed)return limited(limit.retryAfter);
     const result=await auth.auth.updateUser({password:body.password});
     if(result.error)return reply({error:'invalid'},400);
