@@ -20,9 +20,9 @@ CREATE INDEX IF NOT EXISTS invoice_allocation_refs_payment ON gymos.invoice_allo
 -- Invoices whose allocations have a shape the refs cannot represent (payload.allocations present but not an array, or any element that is not an object with a string payment). A consumer that must refuse unsupported shapes
 -- (member-credit) checks this table (an owner-prefix probe); the Reports reader needs no refusal because such elements cannot match a string payment id.
 CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_odd(owner_id text NOT NULL, invoice_id text NOT NULL, odd_elements integer NOT NULL, invoice_branch text, PRIMARY KEY(owner_id,invoice_id));
--- Per-owner readiness: a row means every invoice of that owner has exact refs/odd rows (set by invoice_allocation_refs_complete after a zero-mismatch check, only; an owner with no state row and no invoices is treated as ready by the reader, an owner with invoices and no ready row is not).
+-- Per-owner readiness: a row with ready=true means every invoice of that owner has exact refs/odd rows (set only by invoice_allocation_refs_complete after a zero-mismatch check; ready=false is a tombstone; an owner with no state row and no invoices is treated as ready by the reader, an owner with invoices and no ready row is not).
 CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_refs_state(owner_id text PRIMARY KEY, set_at timestamptz NOT NULL DEFAULT now(), ready boolean NOT NULL DEFAULT true);
--- ready=false is a TOMBSTONE written when a restore generation changes (or the metadata row is deleted): it blocks the first-invoice shortcut for that owner until the migration-authorized rebuild+complete flips it.
+-- ready=false is a TOMBSTONE written when a restore generation changes (or the metadata row is deleted): it keeps the owner unready (and no write path can re-ready it) until the migration-authorized rebuild+complete flips it.
 
 -- the single definition of "which refs does this invoice have", used by the trigger, the backfill and the verification
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_rows(p_owner text,p_invoice text,p_position integer,p_branch text,p_payload jsonb)
@@ -94,9 +94,9 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_mismatches(p_owner text
   + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload) OR EXISTS (SELECT 1 FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id AND o.invoice_branch IS DISTINCT FROM i.branch))
   + (SELECT count(DISTINCT x.invoice_id) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=x.invoice_id)) $$;
 
--- Readiness is per owner (no global flag). Marking an owner complete: only after the batched rebuild finished and a zero-mismatch check, both under one advisory lock so the first-invoice claim cannot interleave. Triggers must be installed
+-- Readiness is per owner (no global flag). Marking an owner complete: only after the batched rebuild finished and a zero-mismatch check, both under one advisory lock so two completions cannot interleave. Triggers must be installed
 -- BEFORE the backfill: any invoice write committing during the backfill maintains its own refs in its transaction, so only pre-existing rows can be missing and the mismatch check covers exactly those. A restore/replace of gym_entities that
--- bypasses triggers must TRUNCATE (clears state) or DELETE the owner's state row and repeat rebuild + complete.
+-- bypasses triggers must set the owner's state to ready=false (or rely on the generation tombstone) and repeat rebuild + complete.
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text) RETURNS boolean LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||p_owner));
