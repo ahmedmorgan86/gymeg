@@ -1,5 +1,7 @@
 'use client';
 
+import { authFlowOrigin } from './auth-flow-origin';
+
 async function sameOriginSignIn(email: string, password: string) {
   try {
     const r = await fetch('/api/session', {
@@ -26,6 +28,13 @@ export function getBrowserSupabase() {
 export const authClient = {
   signIn: {
     email: ({ email, password }: { email: string; password: string }) => sameOriginSignIn(email, password),
+    // Full-page redirect through the server-side Google OAuth flow; during a
+    // domain migration the flow must start on the approved auth origin.
+    google: (returnTo: '/clubs' | '/platform' = '/clubs') => {
+      const target = '/api/auth/google?returnTo=' + encodeURIComponent(returnTo);
+      const origin = authFlowOrigin();
+      location.assign(origin && origin !== location.origin ? origin + target : target);
+    },
   },
   signUp: {
     email: async ({ email, password, name }: { email: string; password: string; name: string; returnTo?: string }) => {
