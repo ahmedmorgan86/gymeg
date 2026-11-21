@@ -6,7 +6,7 @@ import {normalize} from './extensions.ts';
 import {dayAt} from './domain.ts';
 import {dueMessages,type WhatsAppRule} from './whatsapp.ts';
 import {readOwnerVersion} from './member-summary-store.ts';
-import {budgetGuard,READ_TIMEOUT_MS} from './bounded-read.ts';
+import {budgetGuard,READ_TIMEOUT_MS,indexProbe} from './bounded-read.ts';
 import type {Scope} from './member-console-source.ts';
 export const WHATSAPP_MEMBER_PAGE=250;
 export type WhatsAppCursor={position:number;id:string};
@@ -31,7 +31,7 @@ export async function readWhatsAppJobPage(scope:Scope,q:{owner:string;rule:Whats
    const ids=partial.members.map(m=>m.id),today=dayAt(q.now,state.settings.timezone);
    // This matches the held irregular-day/at partial index. It is stricter than
    // the oracle needs, so odd data takes the exact legacy fallback, not a guess.
-   const odd=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.rule.branch])).rows[0] as {x:boolean};
+   const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.rule.branch]))).rows[0] as {x:boolean};
    if(odd.x)return{status:'fallback',reason:'visit-day'};
    // At most one indexed reverse-day probe per selected member. Requires held
    // 20261121230000 index; actual hash collisions still receive exact equality.

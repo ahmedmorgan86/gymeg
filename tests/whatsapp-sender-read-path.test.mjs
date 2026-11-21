@@ -20,11 +20,15 @@ function setup(mode){
  const state=emptyState();state.settings.timezone='Africa/Cairo';state.members=[{id:'synthetic',name:'Synthetic',branch:'main',phone:'+201000000001',joined:day,expires:day,whatsapp:{enabled:true}}];
  const w=globalThis.__wa={state,full:0,pages:[],ids:new Set(),claimed:false,status:null};
  const due={member:'synthetic',occurrence:day,to:'201000000001',parameters:[]};
- w.page=q=>({status:'ok',version:'1',next:null,jobs:q.memberId?(mode==='phone'?[{...due,to:'201000000002'}]:mode==='consent'?[]:[due]):[due]});
+ w.page=q=>q.memberId&&mode==='unavailable'?{status:'fallback',reason:'visit-day'}:({status:'ok',version:'1',next:null,jobs:q.memberId?(mode==='phone'?[{...due,to:'201000000002'}]:mode==='consent'?[]:[due]):[due]});
  w.query=async(sql,p)=>{
+  if(sql.includes('statement_timeout'))return{rows:[]};
+  if(sql.includes("to_regclass('gymos.whatsapp_scan_cursor')")||sql.includes('pg_try_advisory_xact_lock'))return{rows:[{ok:true}]};
+  if(sql.startsWith('SELECT cursor'))return{rows:[]};
+  if(sql.startsWith('INSERT INTO gymos.whatsapp_scan_cursor'))return{rows:[]};
   if(sql.includes('tenant_licenses'))return{rows:[]};
-  if(sql.startsWith('SELECT payload FROM gymos.whatsapp_rules'))return{rows:[{payload:sql.includes('id=$2')&&mode==='rule-disabled'?{...rule,enabled:false}:sql.includes('id=$2')&&mode==='rule-branch'?{...rule,branch:'foreign'}:rule}]};
-  if(sql.startsWith('INSERT INTO gymos.whatsapp_outbox')){w.ids.add(p[1]);if(mode==='legacy-consent')w.state.members[0].whatsapp.enabled=false;return{rows:[]};}
+  if(sql.startsWith('SELECT payload FROM gymos.whatsapp_rules')||sql.startsWith('SELECT r.payload FROM gymos.whatsapp_rules'))return{rows:[{payload:sql.includes('id=$2')&&mode==='rule-disabled'?{...rule,enabled:false}:sql.includes('id=$2')&&mode==='rule-branch'?{...rule,branch:'foreign'}:rule}]};
+  if(sql.startsWith('INSERT INTO gymos.whatsapp_outbox')){if(sql.includes('jsonb_to_recordset'))for(const j of JSON.parse(p[3]))w.ids.add(j.id);else w.ids.add(p[1]);if(mode==='legacy-consent')w.state.members[0].whatsapp.enabled=false;return{rows:[]};}
   if(sql.includes('FOR UPDATE SKIP LOCKED')){if(w.claimed)return{rows:[]};w.claimed=true;return{rows:[{id:'pending-synthetic',branch:'main',member_id:'synthetic',rule_id:rule.id,occurrence:day,payload:{to:due.to}}]};}
   if(sql.includes('FROM gymos.whatsapp_connections'))return{rows:[{api_version:'v99.0',phone_id:'never-contact',token_cipher:'not-a-secret'}]};
   if(sql.includes('whatsapp_opted_out'))return{rows:[{out:mode==='optout'}]};
@@ -39,6 +43,6 @@ test('default-OFF sender retains full read and fresh consent cancellation; enabl
  try{
   delete process.env.GYMOS_WHATSAPP_READS;const legacy=setup('legacy-consent');assert.deepEqual(await runWhatsApp('synthetic-owner','main'),{sent:0});assert.equal(legacy.status,'cancelled');assert.equal(legacy.full,2);assert.equal(legacy.pages.length,0);
   process.env.GYMOS_WHATSAPP_READS='1';
-  for(const mode of ['consent','phone','optout','rule-disabled','rule-branch']){const w=setup(mode);assert.deepEqual(await runWhatsApp('synthetic-owner','main'),{sent:0},mode);assert.equal(w.status,'cancelled',mode);assert.equal(w.full,0,mode);assert.equal(w.ids.size,1,mode);if(mode!=='rule-branch')assert.equal(w.pages[1].memberId,'synthetic');}
+  for(const mode of ['consent','phone','optout','rule-disabled','rule-branch','unavailable']){const w=setup(mode);assert.deepEqual(await runWhatsApp('synthetic-owner','main'),{sent:0,deferred:mode==='unavailable'},mode);assert.equal(w.status,mode==='unavailable'?'pending':'cancelled',mode);assert.equal(w.full,0,mode);assert.equal(w.ids.size,1,mode);if(mode!=='rule-branch')assert.equal(w.pages[1].memberId,'synthetic');}
  }finally{globalThis.fetch=fetch;if(prior===undefined)delete process.env.GYMOS_WHATSAPP_READS;else process.env.GYMOS_WHATSAPP_READS=prior;}
 });
