@@ -2,7 +2,7 @@ import {context, reply} from '../../../lib/server-workspace';
 import {CommercialError} from '../../../lib/licensing';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {withScope} from '../../../lib/database';
-import {isFirebaseConfigured, firestoreReadSpace} from '../../../lib/firestore-db';
+import {isFirebaseConfigured, firestoreReadRevision, getFirestoreDb} from '../../../lib/firestore-db';
 
 export async function GET(request: Request) {
   try {
@@ -31,13 +31,95 @@ export async function GET(request: Request) {
     }
 
     if (isFirebaseConfigured()) {
-      const {revision} = await firestoreReadSpace(ctx.owner);
+      // Revision check costs a single document read; when the client is
+      // current, no entity document is touched at all.
+      const revision = await firestoreReadRevision(ctx.owner);
+      if (after >= revision) {
+        return reply({
+          requiresSnapshot: false,
+          fromRevision: after,
+          toRevision: revision,
+          hasMore: false,
+          events: []
+        });
+      }
+
+      // Pull the per-revision delta documents written by persist. Every
+      // revision in (after, revision] must have one; a gap means that change
+      // was not delta-expressible (or predates deltas) and the client must
+      // re-download a full snapshot.
+      const limit = 250;
+      const snap = await getFirestoreDb().collection('gym_workspace_deltas')
+        .where('owner_id', '==', ctx.owner)
+        .where('revision', '>', after)
+        .orderBy('revision', 'asc')
+        .limit(limit + 1)
+        .get();
+      const docs = snap.docs.map(d => d.data() as {
+        revision: number;
+        upserts?: {collection: string; entity_id: string; branch: string | null; payload: unknown}[];
+        removed?: {collection: string; entity_id: string; branch: string | null}[];
+        settings?: unknown;
+      });
+      const hasMore = docs.length > limit;
+      const usable = hasMore ? docs.slice(0, limit) : docs;
+      const lastCovered = usable.length ? usable[usable.length - 1].revision : after;
+      if (usable.length !== lastCovered - after) {
+        return reply({
+          requiresSnapshot: true,
+          fromRevision: after,
+          toRevision: revision,
+          hasMore: false,
+          events: []
+        });
+      }
+
+      const financial = ctx.role !== 'reception';
+      const events: Record<string, unknown>[] = [];
+      for (const doc of usable) {
+        for (const up of doc.upserts ?? []) {
+          if (ctx.branches && up.branch && !ctx.branches.includes(up.branch)) continue;
+          let payload = up.payload;
+          if (!financial && up.collection === 'invoices' && payload && typeof payload === 'object') {
+            payload = {...(payload as Record<string, unknown>), pricing: undefined, total: undefined};
+          }
+          events.push({
+            id: `${doc.revision}:${up.collection}:${up.entity_id}`,
+            revision: doc.revision,
+            eventType: 'entity.upsert',
+            collection: up.collection,
+            entityId: up.entity_id,
+            branch: up.branch,
+            payload
+          });
+        }
+        for (const rem of doc.removed ?? []) {
+          if (ctx.branches && rem.branch && !ctx.branches.includes(rem.branch)) continue;
+          events.push({
+            id: `${doc.revision}:${rem.collection}:${rem.entity_id}:del`,
+            revision: doc.revision,
+            eventType: 'entity.delete',
+            collection: rem.collection,
+            entityId: rem.entity_id,
+            branch: rem.branch
+          });
+        }
+        if (doc.settings) {
+          events.push({
+            id: `${doc.revision}:settings`,
+            revision: doc.revision,
+            eventType: 'metadata.update',
+            payload: {settings: doc.settings}
+          });
+        }
+      }
+
       return reply({
-        requiresSnapshot: after < revision,
+        requiresSnapshot: false,
         fromRevision: after,
-        toRevision: revision,
-        hasMore: false,
-        events: []
+        toRevision: lastCovered,
+        hasMore,
+        events
       });
     }
 
