@@ -29,6 +29,14 @@ test('The Supabase CA is scoped to Supabase hosts only',()=>{
  const other=databaseSecurityConfig('postgresql://u:p@db.example.com:5432/postgres','production');
  assert.equal(other.ssl.ca.length,supabase.ssl.ca.length-1,'other hosts get system roots only');
  assert.ok(!other.ssl.ca.some((c)=>String(c).includes('BEGIN CERTIFICATE')&&String(c)===String(supabase.ssl.ca[supabase.ssl.ca.length-1])));
+ // Uppercase hostnames still match (PostgreSQL URL parsing preserves case).
+ const upper=databaseSecurityConfig('postgresql://u:p@AWS-0-EU-CENTRAL-1.POOLER.SUPABASE.COM:5432/postgres','production');
+ assert.equal(upper.ssl.ca.length,supabase.ssl.ca.length,'uppercase supabase host gets the bundled root');
+ // Suffix spoofs do not: the anchor must require a real .supabase.* boundary.
+ for(const spoof of ['supabase.co.evil.example','notsupabase.co','xsupabase.com']){
+   const s=databaseSecurityConfig('postgresql://u:p@'+spoof+':5432/postgres','production');
+   assert.equal(s.ssl.ca.length,other.ssl.ca.length,spoof+' gets system roots only');
+ }
 });
 
 test('Production refuses localhost and unconfigured databases instead of serving mock data',()=>{

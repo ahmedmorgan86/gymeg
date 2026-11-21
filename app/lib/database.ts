@@ -31,7 +31,7 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
   // Supabase-managed hosts (the pooler's certificate chains to it). The PEM
   // is an imported module so the serverless bundle always includes it - a
   // cwd-relative file read is not guaranteed to be packaged.
-  const isSupabase=/\.supabase\.(co|com)$/.test(url.hostname);
+  const isSupabase=/\.supabase\.(co|com)$/.test(url.hostname.toLowerCase());
   const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:isSupabase?[...rootCertificates,SUPABASE_CA_CHAIN]:[...rootCertificates]};
   return {url,ssl};
 }
