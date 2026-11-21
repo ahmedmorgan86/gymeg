@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 // Bounded read for the Reports "Collections & receipts" payment rows: the branch's payments of a day range with each payment's allocation breakdown and the member's name.
 // Legacy (reports-page): for p of s.payments (branch) -> paymentBreakdown(s,p) loops EVERY invoice of the packet and every allocation, keeps categories with amount>0, name = member found among the
 // packet's members, then day>=from&&day<=to. Here: the payments of the range in keyset pages of REPORT_PAGE ordered (day C, position, entity_id); per payment ONLY the invoices whose allocations
@@ -13,6 +14,7 @@ export const REPORT_PAGE=500; // transfer chunk (judgment), not a limit
 export type Cursor={day:string;pos:number;id:string};
 export type ReportPaymentRow={payment:{id:string;day:string;member:string;method:unknown;voided:unknown};name:string|null;breakdown:{membership:number;coaching:number;credit:number}};
 export type ReportPayments={status:'ok';version:string;rows:ReportPaymentRow[];next:Cursor|null}|{status:'stale'}|{status:'unavailable';reason?:string};
+export const REPORT_CAND_SQL=`SELECT c.eid,c.position,c.voided,c.category,c.hits,(SELECT jsonb_object_agg(x.pay,x.arr) FROM (SELECT y.pay,jsonb_agg(y.elem ORDER BY y.ord) AS arr FROM (SELECT a.v->>'payment' AS pay,a.ord,jsonb_build_object('payment',a.v->'payment') || CASE WHEN a.v ? 'minor' THEN jsonb_build_object('minor',a.v->'minor') ELSE '{}'::jsonb END AS elem FROM jsonb_array_elements(c.al) WITH ORDINALITY a(v,ord) WHERE jsonb_typeof(a.v)='object' AND jsonb_typeof(a.v->'payment')='string' AND a.v->>'payment'=ANY($4::text[])) y GROUP BY y.pay) x) AS al\n  FROM (SELECT i.entity_id AS eid,i.position,i.payload->'voided' AS voided,i.payload->'category' AS category,i.payload->'allocations' AS al,ARRAY(SELECT k FROM unnest(gymos.invoice_alloc_keys(i.owner_id,i.payload)) k WHERE k=ANY($3::text[])) AS hits\n    FROM gymos.gym_entities i WHERE i.owner_id=$1 AND i.collection='invoices' AND i.entity_id IN (SELECT DISTINCT g.entity_id FROM (SELECT array_agg(u.k) AS k FROM unnest($3::text[]) WITH ORDINALITY u(k,ord) GROUP BY (u.ord-1)/20) k CROSS JOIN LATERAL (SELECT x.entity_id FROM gymos.gym_entities x WHERE x.owner_id=$1 AND x.collection='invoices' AND jsonb_typeof(x.payload->'allocations')='array' AND ($2::text[] IS NULL OR x.branch=ANY($2::text[])) AND gymos.invoice_alloc_keys(x.owner_id,x.payload) && k.k OFFSET 0) g)) c ORDER BY c.position,c.eid`;
 const DAY=/^\d{4}-\d\d-\d\d$/;
 export async function readReportPayments(scope:Scope,q:{owner:string;branch:string;branches?:string[]|null;from:string;to:string;after?:Cursor;ver?:string}):Promise<ReportPayments>{
   if(!q.branch||q.branch.length>200||!DAY.test(q.from)||!DAY.test(q.to)||(q.after!==undefined&&(!DAY.test(q.after.day)||!Number.isSafeInteger(q.after.pos)||!q.after.id||q.after.id.length>200||typeof q.ver!=='string')))throw new RangeError('invalid');
@@ -24,12 +26,19 @@ export async function readReportPayments(scope:Scope,q:{owner:string;branch:stri
     if(odd.x)return{status:'unavailable',reason:'non-canonical-day'} as const;
     const args:unknown[]=[q.owner,q.branch,q.from,q.to,bl];let after='';
     if(q.after){args.push(q.after.day,q.after.pos,q.after.id);after=` AND ((p.payload->>'day') COLLATE "C",p.position,p.entity_id) > ($6::text COLLATE "C",$7::bigint,$8::text)`;}
-    const rows=(await c.query(`SELECT p.payload,p.position,p.entity_id,m.payload->>'name' AS mname,jsonb_typeof(m.payload->'name') AS mtype,(m.entity_id IS NOT NULL) AS mfound,
-      COALESCE((SELECT jsonb_agg(jsonb_build_object('voided',i.payload->'voided','category',i.payload->'category','allocations',(SELECT COALESCE(jsonb_agg(jsonb_build_object('payment',a->'payment') || CASE WHEN a ? 'minor' THEN jsonb_build_object('minor',a->'minor') ELSE '{}'::jsonb END),'[]'::jsonb) FROM jsonb_array_elements(i.payload->'allocations') a WHERE jsonb_typeof(a)='object' AND a->'payment' = p.payload->'id')) ORDER BY i.position,i.entity_id) FROM gymos.gym_entities i WHERE i.owner_id=p.owner_id AND i.collection='invoices' AND gymos.invoice_alloc_keys(i.owner_id,i.payload) @> ARRAY[md5(p.owner_id||'|'||(p.payload->>'id'))] AND jsonb_typeof(i.payload->'allocations')='array' AND ($5::text[] IS NULL OR i.branch=ANY($5::text[]))),'[]'::jsonb) AS invoices
+    // Two reads on the same scope. (1) the page of payments. (2) the invoices any page payment may touch, each EXPANDED ONCE: the candidate set is deduplicated across the page by the owner-keyed GIN probe (branch scope as in the caller's packet),
+    // and from each invoice's allocation array only the elements whose payment id is on the page (a hashed ANY over the page ids) travel, grouped by payment id with their original order. The page's invoices are re-assembled per payment
+    // in (position, entity_id) order in JS, so every payment's input to paymentBreakdown is what the former per-payment probe produced.
+    const rows=(await c.query(`SELECT p.owner_id,p.payload,p.position,p.entity_id,m.payload->>'name' AS mname,jsonb_typeof(m.payload->'name') AS mtype,(m.entity_id IS NOT NULL) AS mfound
       FROM gymos.gym_entities p LEFT JOIN gymos.gym_entities m ON m.owner_id=p.owner_id AND m.collection='members' AND m.entity_id=p.payload->>'member' AND ($5::text[] IS NULL OR m.branch=ANY($5::text[]))
       WHERE p.owner_id=$1 AND p.collection='payments' AND p.branch=$2 AND p.payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND (p.payload->>'day') COLLATE "C" >= ($3::text COLLATE "C") AND (p.payload->>'day') COLLATE "C" <= ($4::text COLLATE "C")${after}
       ORDER BY (p.payload->>'day') COLLATE "C",p.position,p.entity_id LIMIT ${REPORT_PAGE+1}`,args)).rows as {payload:Payment;position:number;entity_id:string;mname:string|null;mtype:string|null;mfound:boolean;invoices:unknown[]}[];
     const more=rows.length>REPORT_PAGE,page=more?rows.slice(0,REPORT_PAGE):rows;
+    for(const r of page)if(typeof r.payload.id!=='string')return{status:'unavailable',reason:'payment-id'} as const;
+    const ids=[...new Set(page.map(r=>r.payload.id))],keyOf=(id:string)=>createHash('md5').update(q.owner+'|'+id).digest('hex');
+    const keys=ids.map(keyOf);
+    const cand=ids.length===0?[]:(await c.query(REPORT_CAND_SQL,[q.owner,bl,keys,ids])).rows as {eid:string;position:number;voided:unknown;category:unknown;hits:string[];al:Record<string,unknown[]>|null}[];
+    for(const r of page)(r as {invoices:unknown[]}).invoices=cand.filter(x=>x.hits.includes(keyOf(r.payload.id))).map(x=>({voided:x.voided,category:x.category,allocations:(x.al&&Object.prototype.hasOwnProperty.call(x.al,r.payload.id)?x.al[r.payload.id]:[])}));
     const out:ReportPaymentRow[]=[];
     for(const r of page){
       if(typeof r.payload.id!=='string')return{status:'unavailable',reason:'payment-id'} as const;
