@@ -3,6 +3,7 @@
 // used only when fetched for THIS state object, owner, branch and day; null otherwise (caller uses the legacy expression).
 import {useEffect,useState} from 'react';
 import type {GymState} from './lib/domain';
+export const REFETCH_DEBOUNCE_MS=400; // collapses bursts of state changes into one read (judgment)
 export const TODAY_ON=process.env.NEXT_PUBLIC_GYMOS_TODAY_VISITS==='1';
 export type TodayData={count:number;latest:{id:string;member:string;at:string;activeAt?:string;name:string|null}[]};
 type Got={owner:string;branch:string;day:string;forState:GymState;data:TodayData};
@@ -13,12 +14,12 @@ export function useTodayVisits(state:GymState,owner:string|undefined,branch:stri
   const [got,setGot]=useState<Got|null>(null);
   useEffect(()=>{
     if(!TODAY_ON||!owner)return;const ac=new AbortController();
-    (async()=>{try{
+    const timer=setTimeout(()=>{(async()=>{try{
       const r=await fetch('/api/workspace/today-visits?branch='+encodeURIComponent(branch)+'&day='+encodeURIComponent(day),{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});
       const d=r.ok?await r.json() as {status?:string}&Partial<TodayData>:null;
       if(d&&d.status==='ok'&&typeof d.count==='number'&&d.latest)setGot({owner,branch,day,forState:state,data:{count:d.count,latest:d.latest}});else setGot(null);
-    }catch{if(!ac.signal.aborted)setGot(null);}})();
-    return()=>ac.abort();
+    }catch{if(!ac.signal.aborted)setGot(null);}})();},REFETCH_DEBOUNCE_MS);
+    return()=>{clearTimeout(timer);ac.abort();};
   },[owner,branch,day,state]);
   return chooseToday(TODAY_ON,got,state,owner??'',branch,day);
 }
