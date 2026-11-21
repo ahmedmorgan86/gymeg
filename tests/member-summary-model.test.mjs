@@ -209,3 +209,21 @@ test('detail source: only a detail fetched for this state, member and tenant is 
   const s2=structuredClone(s);assert.equal(chooseDetail(true,d,s2,m,'o',now).source,'legacy','state changed');assert.equal(chooseDetail(true,d,s,m,'o2',now).source,'legacy','tenant');assert.equal(chooseDetail(false,d,s,m,'o',now).source,'legacy','flag off');
   assert.equal(chooseDetail(true,d,s,m,'o','2026-03-05T12:00:00.000Z').source,'legacy','screen clock before the stored horizon: legacy, never a wrong answer');
 });
+test('detail clock: only a screen clock within one day behind the server is honored (instants, not strings)',async()=>{
+  const {detailAsOf,ASOF_MAX_SKEW_MS}=await import('../app/lib/member-detail-source.ts');
+  const now=Date.parse('2026-03-15T12:00:00.000Z'),N=new Date(now).toISOString();
+  assert.equal(detailAsOf(undefined,now),N);assert.equal(detailAsOf('',now),N);
+  assert.equal(detailAsOf('2026-03-15T10:00:00.000Z',now),'2026-03-15T10:00:00.000Z');
+  assert.equal(detailAsOf(new Date(now-ASOF_MAX_SKEW_MS).toISOString(),now),new Date(now-ASOF_MAX_SKEW_MS).toISOString(),'exactly one day behind is honored');
+  for(const bad of ['2000-01-01T00:00:00.000Z','2026-03-14T11:59:59.999Z','2026-03-16T00:00:00.000Z','2099-01-01T00:00:00.000Z','garbage','2026-13-45T00:00:00Z','1','0','-1','Infinity'])assert.equal(detailAsOf(bad,now),N,'ignored: '+bad);
+  assert.equal(detailAsOf('2026-03-15',now),'2026-03-15T00:00:00.000Z','a date-only value is the instant at midnight UTC, 12h behind: honored');
+  assert.equal(detailAsOf('2026-03-15T14:00:00+02:00',now),'2026-03-15T12:00:00.000Z','offset form is compared as an instant and re-serialized canonically');
+  assert.equal(detailAsOf('2026-03-15T15:00:00+02:00',now),N,'an instant later than the server clock (13:00Z) written with an offset is not honored');
+});
+test('today visits: server data is used only for the same state, tenant, branch and day',async()=>{
+  const {chooseToday}=await import('../app/use-today-visits.ts');const s={};const s2={};
+  const got={owner:'o',branch:'a',day:'2026-03-15',forState:s,data:{count:3,latest:[]}};
+  assert.equal(chooseToday(true,got,s,'o','a','2026-03-15')?.count,3);
+  for(const [st,o,b,d] of [[s2,'o','a','2026-03-15'],[s,'p','a','2026-03-15'],[s,'o','b','2026-03-15'],[s,'o','a','2026-03-16']])assert.equal(chooseToday(true,got,st,o,b,d),null);
+  assert.equal(chooseToday(false,got,s,'o','a','2026-03-15'),null,'flag off');
+});

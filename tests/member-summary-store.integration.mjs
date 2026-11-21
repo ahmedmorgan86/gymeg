@@ -234,3 +234,22 @@ test('member detail source: equals memberSummary(packet-like state) for every me
   assert.equal((await readMemberDetail(scope,{owner:'D1',member:m0.id,branches:['zz'],financial:true,settings:cur.settings})).status,'notFound','member outside the caller branches');
   assert.equal((await readMemberDetail(scope,{owner:'D1',member:'nope',branches:null,financial:true,settings:cur.settings})).status,'notFound');
 });
+test('today visits source equals the legacy expressions for every branch/day (archived, demo, other-branch members, missing members)',async()=>{
+  const {readTodayVisits}=await import('../app/lib/today-visits.ts');
+  const s=fixture();s.members.push({...s.members[0],id:'arch',archived:true},{...s.members[0],id:'demo1',demo:true},{...s.members[0],id:'otherb',branch:'b'});
+  const days=[...new Set(s.visits.map(v=>v.day))];
+  s.visits.push({id:'t1',member:'arch',branch:'a',day:days[0],at:days[0]+'T08:00:00.000Z'},{id:'t2',member:'demo1',branch:'a',day:days[0],at:days[0]+'T08:05:00.000Z'},{id:'t3',member:'ghost',branch:'a',day:days[0],at:days[0]+'T08:06:00.000Z'},{id:'t4',member:'otherb',branch:'a',day:days[0],at:days[0]+'T08:07:00.000Z',activeAt:days[0]+'T08:08:00.000Z'});
+  for(let i=0;i<15;i++)s.visits.push({id:'many'+i,member:'plain',branch:'a',day:days[0],at:days[0]+'T09:'+String(10+i)+':00.000Z',leftAt:days[0]+'T23:00:00.000Z'});
+  await seed('TV',s);const cur=await current('TV');
+  const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
+  let n=0;
+  for(const branch of ['a','b','zz'])for(const day of [...days,'2030-01-01']){
+    const got=await readTodayVisits(scope,{owner:'TV',branch,day});
+    const dm=cur.members.filter(m=>m.branch===branch&&!m.archived&&!m.demo),om=cur.members.filter(m=>m.branch===branch&&!m.archived);
+    const wantCount=cur.visits.filter(v=>v.branch===branch&&v.day===day&&dm.some(m=>m.id===v.member)).length;
+    const wantLatest=cur.visits.filter(v=>v.branch===branch&&v.day===day).slice(-12).reverse().map(v=>({id:v.id,member:v.member,at:v.at,...(v.activeAt!==undefined?{activeAt:v.activeAt}:{}),name:om.find(m=>m.id===v.member)?.name??null}));
+    assert.equal(got.count,wantCount,`count ${branch} ${day}`);assert.deepEqual(got.latest,wantLatest,`latest ${branch} ${day}`);n++;
+  }
+  assert.ok(n>=9);
+  await assert.rejects(()=>readTodayVisits(scope,{owner:'TV',branch:'a',day:"2026-01-01' OR 1=1"}),RangeError);
+});

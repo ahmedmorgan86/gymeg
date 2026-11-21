@@ -33,3 +33,15 @@ export async function readMemberDetail(scope:Scope,q:Q):Promise<DetailResponse>{
     return{status:'ok',stored,invoices:(invoices as Invoice[]).filter(i=>!i.voided),payments:payments as Payment[]} as const;
   });
 }
+
+/** The clock a detail summary is computed at. The caller's screen clock may only move it back by one day (the stored horizon is a UTC day, so a screen at most a day
+ * behind the server still derives exactly); anything older, later, malformed or non-canonical is ignored and the server clock is used, which keeps the stored
+ * tail (and the response) bounded to the recent day instead of a client-chosen amount of history. Timestamps are compared as instants, never as strings. */
+export const ASOF_MAX_SKEW_MS=86400000;
+export function detailAsOf(asOf:string|undefined|null,nowMs:number):string{
+  const now=new Date(nowMs).toISOString();
+  if(!asOf)return now;
+  const t=Date.parse(asOf);
+  if(!Number.isFinite(t)||t>nowMs||nowMs-t>ASOF_MAX_SKEW_MS)return now;
+  return new Date(t).toISOString();
+}

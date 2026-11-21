@@ -22,7 +22,7 @@ for(const {f} of defs)for(const who of ['gymos_app','anon','authenticated']){
 }
 assert.equal((await q("SELECT has_function_privilege('gymos_app','gymos.backfill_member_summaries(text)','EXECUTE') AS x"))[0].x,false);
 console.log('PASS definer functions: none executable by anon/authenticated; arbitrary-owner backfill not executable by gymos_app');
-await c.query('DELETE FROM gymos.gym_owner_version WHERE true');
+await c.query("DELETE FROM gymos.gym_member_summaries WHERE owner_id LIKE 'tr-%'");await c.query('DELETE FROM gymos.gym_owner_version WHERE true');
 await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner','tr-1',true)");
 await c.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('tr-1','{}',1,'x')");
 await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('tr-1','members','m',0,'a','{}')");
@@ -30,6 +30,17 @@ const tok=(await q("SELECT version FROM gymos.gym_owner_version"));const dirty=(
 assert.equal(tok.length,1);assert.equal(dirty,1);
 await c.query("SELECT set_config('app.gym_owner','tr-2',true)");assert.equal((await q("SELECT count(*)::int AS n FROM gymos.gym_owner_version"))[0].n,0,'another owner sees no token');
 await assert.rejects(()=>c.query("INSERT INTO gymos.gym_owner_version VALUES('tr-1',1)"),/permission denied|row-level security/);
+// WITH CHECK: as runtime for owner tr-1, writing summary rows or marks for ANOTHER owner is rejected, and another owner's rows are neither updatable nor deletable
 await c.query('ROLLBACK');
+await c.query("INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES('tr-2','m','{}')");
+for(const [label,sql] of [["insert summary for another owner","INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES('tr-2','m2','{}')"],["insert dirty mark for another owner","INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) VALUES('tr-2','m',1)"],["insert ready row for another owner","INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES('tr-2')"]]){
+  await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner','tr-1',true)");
+  await assert.rejects(()=>c.query(sql),/row-level security|permission denied/,label);await c.query('ROLLBACK');
+}
+await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner','tr-1',true)");
+assert.equal((await c.query("UPDATE gymos.gym_member_summaries SET stored='{\"x\":1}' WHERE owner_id='tr-2'")).rowCount,0,'update of another owner row touches nothing');
+assert.equal((await c.query("DELETE FROM gymos.gym_member_summaries WHERE owner_id='tr-2'")).rowCount,0,'delete of another owner row touches nothing');
+await c.query('ROLLBACK');await c.query("DELETE FROM gymos.gym_member_summaries WHERE owner_id='tr-2'");
+console.log('PASS WITH CHECK: cross-owner summary insert rejected by WITH CHECK, dirty/ready inserts refused (no grant); cross-owner update/delete affect no row');
 console.log('PASS runtime writes bump token and dirty marks via definers; cross-owner read empty; direct token write refused');
 await c.query("DELETE FROM gymos.gym_entities WHERE owner_id='tr-1'");await c.query("DELETE FROM gymos.gym_states WHERE user_id='tr-1'");await c.end();
