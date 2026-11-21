@@ -1,24 +1,25 @@
 # Freshtest flavor (rehearsal target)
 
 Reproducible mapping for the fresh-Supabase rehearsal build. Everything here
-is committed source: `gradle :members:assembleFreshtestDebug` and
-`gradle :manager:assembleFreshtestDebug` rebuild both artifacts from this tree with no uncommitted
+is committed source: `gradle :members:assembleFreshtestDebug`,
+`gradle :manager:assembleFreshtestDebug` and
+`gradle :support:assembleFreshtestDebug` (module dir android-support) rebuild all three artifacts from this tree with no uncommitted
 patches. Byte-for-byte identity is NOT claimed: the toolchain (JDK 17,
 Gradle 8.13, Android SDK platform/build-tools 36.0.0) and the debug signing
 key are environment properties, not pinned in this repo, so hashes identify
 this build's artifacts rather than a reproducible-build guarantee.
 
-| | Members | Management |
-|---|---|---|
-| Package | com.pushtorq.members.freshtest | com.pushtorq.management.freshtest |
-| Version | 1.1.8 (10), debug-signed | 1.1.9 (11), debug-signed |
-| Origin (BuildConfig.WEB_HOST) | gymeg-supabase.vercel.app | gymeg-supabase.vercel.app |
-| Firebase project | gymeg-mobile-notifications | gymeg-mobile-notifications |
-| Firebase app id | 1:744394281001:android:2dbd9d9f5a883ef04b8c38 | 1:744394281001:android:73a8a567658818404b8c38 |
-| google-services.json | src/freshtest/google-services.json | src/freshtest/google-services.json |
-| App label | GymEG أعضاء (تجريبي) | GymEG إدارة (تجريبي) |
-| Signing cert SHA-256 (debug, freshtest scope only) | D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8 | same |
-| APK sha256 (this commit's build) | 42379530e365e2a2991cbbea0c38bf4a5dbb7c15e7f817f2e281a71e0f543c64 | 48552efe9c6988fabea2e7bd6598e4599a3dbcfe3302c23da9f61af72cc533b6 |
+| | Members | Management | Support |
+|---|---|---|---|
+| Package | com.pushtorq.members.freshtest | com.pushtorq.management.freshtest | com.gymos.support.freshtest |
+| Version | 1.1.8 (10), debug-signed | 1.1.9 (11), debug-signed | 1.0.7 (8), debug-signed |
+| Origin (BuildConfig.WEB_HOST) | gymeg-supabase.vercel.app | gymeg-supabase.vercel.app | gymeg-supabase.vercel.app (HOST BuildConfig field in MainActivity/NotificationBridge) |
+| Firebase project | gymeg-mobile-notifications | gymeg-mobile-notifications | gymeg-mobile-notifications (placeholder config, see below) |
+| Firebase app id | 1:744394281001:android:2dbd9d9f5a883ef04b8c38 | 1:744394281001:android:73a8a567658818404b8c38 | NOT registered yet |
+| google-services.json | src/freshtest/google-services.json | src/freshtest/google-services.json | android-support/src/freshtest/google-services.json (crafted placeholder; FCM token generation will fail until com.gymos.support.freshtest is registered in the Firebase project and the real config replaces it) |
+| App label | GymEG أعضاء (تجريبي) | GymEG إدارة (تجريبي) | GymEG دعم (تجريبي) |
+| Signing cert SHA-256 (debug, freshtest scope only) | D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8 | same | same |
+| APK sha256 (this commit's build) | 42379530e365e2a2991cbbea0c38bf4a5dbb7c15e7f817f2e281a71e0f543c64 | 48552efe9c6988fabea2e7bd6598e4599a3dbcfe3302c23da9f61af72cc533b6 | 40b945e6b6ecb72e7f0bd9729ee1492f1ec045ed869f9b425ad5b2781c3f0361 |
 
 The debug certificate above is a fresh-test identity only. It is NOT a
 production package identity and must never be registered as one; production
