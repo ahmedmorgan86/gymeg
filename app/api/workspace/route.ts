@@ -10,7 +10,11 @@ import {after} from 'next/server';
 import {sendCommunityPush} from '../../lib/web-push';
 export const dynamic='force-dynamic';
 export const maxDuration=300;
-export async function GET(request:Request){try{const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));return reply(packet(await readSpace(ctx.owner),ctx));}catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);return reply({error:e instanceof Error&&e.message==='forbidden'?'forbidden':'unavailable'},e instanceof Error&&e.message==='forbidden'?403:503);}}
+export async function GET(request:Request){try{const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));const current=await readSpace(ctx.owner);
+ // A client that already holds this revision needs no packet: answering with
+ // the revision alone skips both the serialization and the download.
+ const sinceParam=new URL(request.url).searchParams.get('since');if(sinceParam!==null){const since=parseInt(sinceParam,10);if(Number.isSafeInteger(since)&&since===current.revision)return reply({unchanged:true,revision:current.revision,owner:ctx.tenantId,serverNow:Date.now()});}
+ return reply(packet(current,ctx));}catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);return reply({error:e instanceof Error&&e.message==='forbidden'?'forbidden':'unavailable'},e instanceof Error&&e.message==='forbidden'?403:503);}}
 export async function POST(request:Request){try{
  if(!sameOrigin(request))return reply({error:'origin'},403);if(request.headers.get('content-type')?.split(';')[0]!=='application/json')return reply({error:'invalid'},415);
  const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));if(ctx.support)return reply({error:'supportReadOnly'},403);if(ctx.license&&!licenseState(ctx.license).writable)return reply({error:'licenseReadOnly'},403);const raw=await request.text();if(new TextEncoder().encode(raw).byteLength>1_600_000)return reply({error:'limit'},413);

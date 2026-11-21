@@ -10,6 +10,49 @@ import {newMemberPin,normalizeMemberPhone} from './member-phone.ts';
 
 let firestoreInstance: Firestore | null = null;
 
+// Revision-keyed in-memory cache of assembled workspace states. Firestore
+// reads dominate quota and latency: without this, every page load, presence
+// poll and mutation re-reads every entity document of the club. The state
+// document's revision is bumped transactionally with every entity write, so a
+// cache entry keyed by (owner, revision) is always correct; a revision match
+// costs exactly one document read instead of a full collection scan.
+type CachedSpace = { revision: number; state: GymState };
+const spaceCache = new Map<string, CachedSpace>();
+const SPACE_CACHE_LIMIT = 12;
+
+function cacheSpace(owner: string, revision: number, state: GymState) {
+  spaceCache.delete(owner);
+  spaceCache.set(owner, { revision, state: structuredClone(state) });
+  while (spaceCache.size > SPACE_CACHE_LIMIT) {
+    const oldest = spaceCache.keys().next().value;
+    if (oldest === undefined) break;
+    spaceCache.delete(oldest);
+  }
+}
+
+function cachedSpace(owner: string, revision: number): GymState | null {
+  const hit = spaceCache.get(owner);
+  if (!hit || hit.revision !== revision) return null;
+  // LRU touch; callers receive a copy so route handlers can never mutate the
+  // shared entry.
+  spaceCache.delete(owner);
+  spaceCache.set(owner, hit);
+  return structuredClone(hit.state);
+}
+
+/** Reads only the state document: the cheapest way to learn an owner's revision. */
+export async function firestoreReadRevision(owner: string): Promise<number> {
+  const db = getFirestoreDb();
+  const snap = await db.collection('gym_states').doc(owner).get();
+  return snap.exists ? ((snap.data() as { revision?: number }).revision ?? 0) : 0;
+}
+
+// Firestore rejects undefined values inside documents; entity payloads carry
+// optional fields, so strip them before writing (JSON round-trip).
+function sanitize<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export function isFirebaseConfigured(): boolean {
   return Boolean(
     process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
@@ -81,6 +124,9 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
   const parsedMeta = JSON.parse(data.payload);
 
   if (parsedMeta._entityStorage === 1) {
+    const cached = cachedSpace(owner, data.revision);
+    if (cached) return { state: cached, revision: data.revision };
+
     // Read entities
     const entitiesSnap = await db.collection('gym_entities')
       .where('owner_id', '==', owner)
@@ -100,8 +146,9 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       })
     );
 
-    const state = assembleState(parsedMeta, entities, photos);
-    return { state: normalize(state), revision: data.revision };
+    const state = normalize(assembleState(parsedMeta, entities, photos));
+    cacheSpace(owner, data.revision, state);
+    return { state, revision: data.revision };
   }
 
   return { state: normalize(parsedMeta as GymState), revision: data.revision };
@@ -133,7 +180,7 @@ export async function firestorePersistSpace(
     await batch.commit();
   }
 
-  return await db.runTransaction(async (tx) => {
+  const persisted = await db.runTransaction(async (tx) => {
     const snap = await tx.get(stateDocRef);
     const tenantId = owner.startsWith('tenant:') ? owner.slice(7) : null;
     const licenseDoc = tenantId ? await tx.get(db.collection('tenant_licenses').doc(tenantId)) : null;
@@ -199,7 +246,7 @@ export async function firestorePersistSpace(
         entity_id: up.entity_id,
         position: up.position,
         branch: up.branch ?? null,
-        payload: up.payload,
+        payload: sanitize(up.payload),
       });
     }
 
@@ -245,8 +292,46 @@ export async function firestorePersistSpace(
       processed_at: null,
     });
 
+    // Delta document for incremental client sync. Clients pull only what
+    // changed since their revision instead of re-downloading the whole club.
+    // Best-effort: skipped when the change is not delta-expressible (metadata
+    // beyond settings changed, photos changed, or the change is too large);
+    // the changes endpoint then asks the client for a full snapshot.
+    const metadataExpressible = (() => {
+      const strip = (meta: Record<string, unknown>) => {
+        const clone = { ...meta };
+        delete clone.settings;
+        delete clone._entityStorage;
+        delete clone._activityArchive;
+        return JSON.stringify(clone);
+      };
+      return strip(before.metadata as Record<string, unknown>) === strip(after.metadata as Record<string, unknown>);
+    })();
+    const photosUnchanged = JSON.stringify(before.photos) === JSON.stringify(after.photos);
+    const settingsChanged = JSON.stringify((before.metadata as { settings?: unknown }).settings) !== JSON.stringify((after.metadata as { settings?: unknown }).settings);
+    const changeCount = upserts.length + removed.length;
+    const deltaBytes = changeCount > 0 || settingsChanged
+      ? upserts.reduce((total, up) => total + JSON.stringify(up.payload).length, 0)
+      : 0;
+    if (metadataExpressible && photosUnchanged && changeCount <= 500 && deltaBytes <= 700_000) {
+      const deltaRef = db.collection('gym_workspace_deltas').doc(`${owner}_${newRevision}`);
+      tx.set(deltaRef, {
+        owner_id: owner,
+        revision: newRevision,
+        created_at: new Date().toISOString(),
+        upserts: upserts.map(up => ({ collection: up.collection, entity_id: up.entity_id, branch: up.branch ?? null, payload: sanitize(up.payload) })),
+        removed: removed.map(rem => ({ collection: rem.collection, entity_id: rem.entity_id, branch: rem.branch ?? null })),
+        settings: settingsChanged ? sanitize((after.metadata as { settings?: unknown }).settings ?? null) : null,
+      });
+    }
+
     return true;
   });
+
+  // Prime the cache with the just-written state so the next read on this
+  // instance (typically the client's own follow-up) costs one document read.
+  if (persisted) cacheSpace(owner, current.revision + 1, next);
+  return persisted;
 }
 
 /**
