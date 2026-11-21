@@ -1,7 +1,6 @@
 import {Pool,type PoolClient} from 'pg';
-import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
 import {rootCertificates} from 'node:tls';
+import {SUPABASE_CA_CHAIN} from '../../certs/supabase-ca-chain.ts';
 let pool:Pool|undefined;
 const mockClient = {
   query: async () => ({ rows: [], rowCount: 0 }),
@@ -28,10 +27,12 @@ export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_EN
   // is issued by a private CA (Supabase Root), so verification then always fails and
   // every request returns 503. Strip those parameters so our TLS settings always win.
   for(const param of ['sslmode','ssl','sslrootcert','sslcert','sslkey','sslnegotiation'])url.searchParams.delete(param);
-  // System roots plus the bundled Supabase CA chain: the managed pooler's
-  // certificate is issued by Supabase's private root, which public stores
-  // do not trust.
-  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:[...rootCertificates,readFileSync(join(process.cwd(),'certs','supabase-ca-chain.crt'),'utf8')]};
+  // System roots everywhere; the Supabase private root is added only for
+  // Supabase-managed hosts (the pooler's certificate chains to it). The PEM
+  // is an imported module so the serverless bundle always includes it - a
+  // cwd-relative file read is not guaranteed to be packaged.
+  const isSupabase=/\.supabase\.(co|com)$/.test(url.hostname);
+  const ssl=isLocal?undefined:{rejectUnauthorized:true,ca:isSupabase?[...rootCertificates,SUPABASE_CA_CHAIN]:[...rootCertificates]};
   return {url,ssl};
 }
 export function getPool(){

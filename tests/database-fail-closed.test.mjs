@@ -22,6 +22,15 @@ test('Remote database connections verify TLS certificates and keep SSL parameter
  assert.match(String(effective.ca[effective.ca.length-1]),/BEGIN CERTIFICATE/);
 });
 
+test('The Supabase CA is scoped to Supabase hosts only',()=>{
+ const {rootCertificates}=process.getBuiltinModule?process.getBuiltinModule('node:tls'):require('node:tls');
+ const supabase=databaseSecurityConfig('postgresql://u:p@aws-0-eu-central-1.pooler.supabase.com:5432/postgres','production');
+ assert.ok(supabase.ssl.ca.length>1,'supabase host gets the bundled root');
+ const other=databaseSecurityConfig('postgresql://u:p@db.example.com:5432/postgres','production');
+ assert.equal(other.ssl.ca.length,supabase.ssl.ca.length-1,'other hosts get system roots only');
+ assert.ok(!other.ssl.ca.some((c)=>String(c).includes('BEGIN CERTIFICATE')&&String(c)===String(supabase.ssl.ca[supabase.ssl.ca.length-1])));
+});
+
 test('Production refuses localhost and unconfigured databases instead of serving mock data',()=>{
  assert.throws(()=>databaseSecurityConfig('postgresql://user:pass@localhost:5432/gym','production'),/managed TLS database/);
  assert.throws(()=>databaseSecurityConfig('postgresql://user:pass@127.0.0.1:5432/gym','production'),/managed TLS database/);
