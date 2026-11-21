@@ -1,6 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import {getPool,withScope} from '../../lib/database';
-import {readSpace,reply,sameOrigin,requestClientIp} from '../../lib/server-workspace';
+import {readSpace,readSpaceSlice,reply,sameOrigin,requestClientIp} from '../../lib/server-workspace';
 import {memberCodeHash,memberCookie,memberSessionToken} from '../../lib/member-code';
 import {normalizeMemberPhone,normalizeMemberPin} from '../../lib/member-phone';
 import {licenseState,type License} from '../../lib/licensing';
@@ -24,7 +24,7 @@ export async function POST(request:Request){
    }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
    if(!accounts.length)return reply({error:'invalidCredentials'},401);
    const valid:(typeof accounts[number]&{key:string;clubName:string;branchName:string})[]=[];
-   for(const account of accounts){const {state}=await readSpace(account.owner_id);if(!state.members.some(m=>m.id===account.member_id&&m.branch===account.branch&&!m.demo&&!m.archived&&normalizeMemberPhone(m.phone)===phone))continue;
+   for(const account of accounts){const {state}=await (process.env.GYMOS_MEMBER_SESSION_READS==='1'?readSpaceSlice(account.owner_id,{collections:['members'],ids:[account.member_id],branches:[account.branch]}):readSpace(account.owner_id));if(!state.members.some(m=>m.id===account.member_id&&m.branch===account.branch&&!m.demo&&!m.archived&&normalizeMemberPhone(m.phone)===phone))continue;
     const license=await withScope(account.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[account.owner_id])).rows[0] as License|undefined);if(license&&!licenseState(normalizeLicense(license)).writable)continue;
     valid.push({...account,key:account.owner_id+'|'+account.member_id,clubName:state.settings.name,branchName:state.branches.find(b=>b.id===account.branch)?.name??account.branch});
    }
