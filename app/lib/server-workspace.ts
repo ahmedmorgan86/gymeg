@@ -1,3 +1,6 @@
+import {exactPrivateCredit} from './member-private-credit';
+import {readDeadlineScope} from './read-transaction';
+import {readOwnerVersion} from './member-summary-store';
 import {commercialEnabled,commercialContext} from './commercial';
 import {trialClosed,CommercialError,type License} from './licensing';
 import {readEntitySpace} from './entity-store';
@@ -22,7 +25,15 @@ export async function readSpaceMeta(owner:string){return (await readSpaceSlice(o
 /** Only the requested collections; falls back to the full read on legacy layout, so callers must not rely on other collections being empty. */
 export async function readSpaceSlice(owner:string,query:SliceQuery|null){const sliced=await readSlice(sliceBackend(),owner,query,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
 /** What the member portal view needs for one member (see readMemberSlice); full read on legacy layout. */
-export async function readMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number}>{if(portalNow&&process.env.GYMOS_MEMBER_PORTAL_READS==='1'&&!useFirestorePersistence()){try{const portal=await readMemberPortalSlice(sliceBackend(),withScope,{owner,member:memberId,branch,now:portalNow});if(portal)return portal;}catch{/* Exact existing hydration remains the fallback. */}}const sliced=await readMemberSlice(sliceBackend(),owner,memberId,branch,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
+async function hydrateMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number}>{if(portalNow&&process.env.GYMOS_MEMBER_PORTAL_READS==='1'&&!useFirestorePersistence()){try{const portal=await readMemberPortalSlice(sliceBackend(),withScope,{owner,member:memberId,branch,now:portalNow});if(portal)return portal;}catch{/* Exact existing hydration remains the fallback. */}}const sliced=await readMemberSlice(sliceBackend(),owner,memberId,branch,normalize);if(sliced)return{state:sliced.state,revision:sliced.revision};return readSpace(owner);}
+/** Private money override never enters GymState or invoice output. Refuse stale/capped data. */
+export async function readMemberSpace(owner:string,memberId:string,branch:string,portalNow?:string):Promise<{state:GymState;revision:number;occupancy?:number;credit?:number}>{
+ if(useFirestorePersistence()){const full=await readSpace(owner);return full;}
+ const deadline=Date.now()+4000,scope=readDeadlineScope(deadline),before=await scope(owner,c=>readOwnerVersion(c,owner));if(before===null)throw Error('credit-version');
+ const hydrated=await hydrateMemberSpace(owner,memberId,branch,portalNow);
+ const credit=await scope(owner,async c=>{if(await readOwnerVersion(c,owner)!==before)throw Error('credit-changed');const row=(await c.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {revision:number}|undefined;if(!row||row.revision!==hydrated.revision)throw Error('credit-revision');const result=await exactPrivateCredit(c,owner,hydrated.state.payments,memberId,branch);if(result.status!=='ok'||await readOwnerVersion(c,owner)!==before)throw Error('credit-unavailable');return result.credit;});
+ return{...hydrated,credit};
+}
 /**
  * What GET /api/workspace needs: only the collections packet() will ship to this
  * caller (their branches, their role), never events/receipts, and photo versions
