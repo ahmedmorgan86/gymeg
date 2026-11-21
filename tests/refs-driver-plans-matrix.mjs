@@ -47,7 +47,7 @@ await run('unready owner V2 (state row, not completed)','V2',B({}));
   const c={query:async(sql,v)=>{log.push([sql,v]);return cl.query(sql,v);}};
   const ids=Array.from({length:n},(_,i)=>'p'+(1+i*7));const t0=Date.now();const out=await allocatingInvoicesFromRefs(c,owner,ids);const ms=Date.now()-t0;
   txt+=`=== ${label}: status ${out.status}${out.reason?' '+out.reason:''} invoices ${out.invoices?.length??'-'} total-ms ${ms}\n`;let seq=[];
-  for(const [sql,v] of log){const r=await cl.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v);const lines=r.rows.map(x=>x['QUERY PLAN']);for(const l of lines)if(/Seq Scan on (gym_entities|invoice_allocation_refs)\b/.test(l)&&!/never executed/.test(l))seq.push(l.trim());txt+='-- bound '+JSON.stringify(v).slice(0,120)+'\n'+lines.join('\n')+'\n';}
+  for(const [sql,v] of log){const r=await cl.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,v);const lines=r.rows.map(x=>x['QUERY PLAN']);for(const l of lines)if(/Seq Scan on (gym_entities|invoice_allocation_refs)\b/.test(l)&&!/never executed/.test(l))seq.push(l.trim());txt+='-- bound '+JSON.stringify(v??[]).slice(0,120)+'\n'+lines.join('\n')+'\n';}
   txt+='\n';summary.push({label,status:out.status,rows:out.invoices?.length??null,ms,statements:log.length,bigSeqScans:seq});}}
 fs.writeFileSync('/downloads/refs-driver-plans-matrix.txt',txt);
 console.log(JSON.stringify(summary,null,1));

@@ -42,7 +42,7 @@ test('refusals: not ready, odd shape in ANY branch, non-string payment id; empty
   s.invoices=[{id:'i1',member:s.members[0].id,title:'T',total:5,due:'2026-03-20',branch:s.members[0].branch,allocations:[{payment:'p1',minor:100}]}];
   await seed('C2',s,false);
   assert.deepEqual(await allocatingInvoicesFromRefs(db,'C2',['p1']),{status:'unavailable',reason:'refs-not-ready'});
-  assert.deepEqual(await allocatingInvoicesFromRefs(db,'C2',[]),{status:'ok',invoices:[]});
+  {const e=await allocatingInvoicesFromRefs(db,'C2',[]);assert.equal(e.status,'ok');assert.deepEqual(e.invoices,[]);}
   await db.query("SELECT gymos.invoice_allocation_refs_complete('C2',(SELECT ((payload::jsonb)->'generation')::text FROM gymos.gym_states WHERE user_id='C2'))");
   assert.equal((await allocatingInvoicesFromRefs(db,'C2',['p1'])).status,'ok');
   assert.deepEqual(await allocatingInvoicesFromRefs(db,'C2',[5]),{status:'unavailable',reason:'payment-id'});
@@ -65,4 +65,32 @@ test('targeted: float order, string/null/missing minor, voided truthiness, forei
   assert.deepEqual(r.invoices.map(i=>i.allocations.length),[1,1,1,3,1,1,1,1]);
   assert.deepEqual(await allocatingInvoicesFromRefs(db,'C4',['ps']),{status:'unavailable',reason:'non-numeric-minor'});
   for(const pid of ['pf','pn','pv']){const p=s.payments.filter(x=>x.id===pid);const rr=await allocatingInvoicesFromRefs(db,'C4',[pid]);assert.ok(Object.is(memberCredit(s,m.id,m.branch)-0,legacy-0));assert.ok(Object.is(memberCredit({...s,payments:p},m.id,m.branch),memberCredit({payments:p,invoices:rr.invoices},m.id,m.branch)),pid);}
+});
+
+const trig=async(on)=>{for(const [tbl,names] of [['gym_entities',['ins','upd','del','trunc']],['gym_states',['epoch_upd','epoch_del','epoch_trunc']]])for(const n of names)await db.query(`ALTER TABLE gymos.${tbl} ${on?'ENABLE':'DISABLE'} TRIGGER invoice_allocation_refs_${n}`);};
+test('tie at the same position is refused (legacy order undefined); cap; stale version; disabled trigger; empty owner then first invoice',async()=>{
+  const s=fixture();s.visits=[];const m=s.members[0];
+  s.payments=[{id:'p1',member:m.id,branch:m.branch,minor:900,day:'2026-03-05',method:'cash',creditable:true}];
+  const inv=(id,a)=>({id,member:m.id,title:'T',total:5,due:'2026-03-20',branch:m.branch,allocations:[{payment:'p1',minor:a}]});
+  s.invoices=[inv('ia',0.1),inv('ib',0.2)];await seed('C5',s);
+  const ok=await allocatingInvoicesFromRefs(db,'C5',['p1']);assert.equal(ok.status,'ok');assert.equal(typeof ok.version,'string');
+  // same position for both
+  await db.query("UPDATE gymos.gym_entities SET position=(SELECT position FROM gymos.gym_entities WHERE owner_id='C5' AND entity_id='ia') WHERE owner_id='C5' AND entity_id='ib'");
+  assert.deepEqual(await allocatingInvoicesFromRefs(db,'C5',['p1']),{status:'unavailable',reason:'ambiguous-order'});
+  // cap
+  assert.deepEqual(await allocatingInvoicesFromRefs(db,'C5',Array.from({length:501},(_,i)=>'x'+i)),{status:'unavailable',reason:'too-many-payment-ids'});
+  assert.equal((await allocatingInvoicesFromRefs(db,'C5',Array.from({length:500},(_,i)=>'x'+i))).status,'ok');
+  // a caller holding an older version is told 'changed'
+  const v=(await allocatingInvoicesFromRefs(db,'C5',[])).version;
+  await db.query("UPDATE gymos.gym_entities SET position=position+100 WHERE owner_id='C5' AND entity_id='ib'");
+  const after=await allocatingInvoicesFromRefs(db,'C5',['p1'],{ver:v});assert.deepEqual(after,{status:'unavailable',reason:'changed'});
+  // disabled maintenance trigger => refuse (writes could skip the refs)
+  await trig(false);try{assert.deepEqual(await allocatingInvoicesFromRefs(db,'C5',['p1']),{status:'unavailable',reason:'refs-triggers-disabled'});}finally{await trig(true);}
+  assert.equal((await allocatingInvoicesFromRefs(db,'C5',['p1'])).status,'ok');
+  // empty owner (no state row, no invoices) reads as ready; the first invoice with no readiness claim makes it unavailable
+  assert.equal((await allocatingInvoicesFromRefs(db,'NEWOWNER',['p1'])).status,'unavailable'); // no version row yet: refuses (no-version) rather than guessing
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('NEW2',$1,1,'x')",[JSON.stringify({_entityStorage:1,generation:'g'})]);
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('NEW2','invoices','i1',0,'a','{\"id\":\"i1\",\"allocations\":[{\"payment\":\"p1\",\"minor\":1}]}')");
+  const first=await allocatingInvoicesFromRefs(db,'NEW2',['p1']);assert.deepEqual(first,{status:'unavailable',reason:first.reason});assert.ok(['refs-not-ready','no-version'].includes(first.reason),first.reason);
+  const st=(await db.query("SELECT ready FROM gymos.invoice_allocation_refs_state WHERE owner_id='NEW2'")).rows[0];assert.ok(!st||st.ready===false,'no automatic readiness claim after the first invoice');
 });
