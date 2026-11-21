@@ -37,6 +37,9 @@ export async function GET(request: Request) {
   authorize.searchParams.set('response_type', 'code');
   authorize.searchParams.set('scope', 'openid email profile');
   authorize.searchParams.set('state', state);
-  authorize.searchParams.set('nonce', createHash('sha256').update(nonce).digest('base64url'));
+  // GoTrue compares the ID token's nonce claim against the SHA-256 of the
+  // raw nonce rendered as LOWERCASE HEX (token_oidc.go), so the hashed value
+  // Google embeds must use that exact encoding.
+  authorize.searchParams.set('nonce', createHash('sha256').update(nonce).digest('hex'));
   return Response.redirect(authorize.href, 303);
 }
