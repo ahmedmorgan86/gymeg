@@ -14,26 +14,26 @@ export async function readAttendance(scope:Scope,q:{owner:string;branch:string;d
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.day)||(q.after!==undefined&&(!Number.isSafeInteger(q.after.pos)||!q.after.id||q.after.id.length>200||typeof q.ver!=='string')))throw new RangeError('invalid');
   return scope(q.owner,c=>boundedRead(c,q.owner,'att\u0000'+q.branch+'\u0000'+q.day+'\u0000'+(q.after?q.after.pos+'\u0000'+q.after.id+'\u0000'+q.ver:''),async()=>{
     const ver0=await readOwnerVersion(c,q.owner); // read BEFORE the irregular probe: the regular path rechecks it after its rows
-    const irregular=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
-    const CANON=`jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
-    const ODD=`jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
+    const irregular=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND branch=$2 AND visit_odd) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
+    const CANON=`collection='visits' AND NOT visit_odd`;
+    const ODD=`visit_odd`;
     const paging=q.after!==undefined;
     if(irregular.x||paging){
       // Every page of one answer must come from one owner version: pages carry the version they were read at, and a page whose version moved (before, during or after its read) answers 'stale' so the browser restarts.
       const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable'} as const;if(paging&&q.ver!==ver)return{status:'stale'} as const;
-      const todayCount=paging?undefined:Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3 AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$'",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
-      const top=paging?[]:(await c.query(`SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number;entity_id:string}[];
+      const todayCount=paging?undefined:Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND demand_visit_day IS NOT NULL AND demand_visit_day=($3::text COLLATE \"C\")",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+      const top=paging?[]:(await c.query(`SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY demand_visit_day DESC,visit_at DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number;entity_id:string}[];
       // Steer the planner to the partial index (key owner,branch,position) for this statement only: with LIMIT it otherwise scans the whole branch in position order (~51k buffers measured).
       await c.query("SELECT set_config('enable_seqscan','off',true)");
-      const odd=(await c.query(`SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (position,entity_id)>($3::bigint,$4::text) AND (${ODD}) ORDER BY position,entity_id LIMIT ${IRREGULAR_PAGE+1}`,[q.owner,q.branch,q.after?.pos??-1,q.after?.id??''])).rows as {payload:Record<string,unknown>;position:number;entity_id:string}[];
+      const odd=(await c.query(`SELECT payload,position,entity_id FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (position,entity_id)>($3::bigint,$4::text) AND ${ODD} ORDER BY position,entity_id LIMIT ${IRREGULAR_PAGE+1}`,[q.owner,q.branch,q.after?.pos??-1,q.after?.id??''])).rows as {payload:Record<string,unknown>;position:number;entity_id:string}[];
       await c.query("SELECT set_config('enable_seqscan','on',true)");
       const more=odd.length>IRREGULAR_PAGE,page=more?odd.slice(0,IRREGULAR_PAGE):odd;
       const cand=(r:{payload:Record<string,unknown>;position:number;entity_id:string}):Cand=>({p:r.payload,pos:Number(r.position),id:r.entity_id});
       if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
       return{status:'irregular',version:ver,...(todayCount!==undefined?{todayCount}:{}),canonical:top.map(cand),candidates:page.map(cand),next:more?{pos:Number(page[page.length-1].position),id:page[page.length-1].entity_id}:null} as const;
     }
-    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3 AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$'",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
-    const rows=(await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows.map(r=>(r as {payload:Record<string,unknown>}).payload);
+    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND demand_visit_day IS NOT NULL AND demand_visit_day=($3::text COLLATE \"C\")",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+    const rows=(await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY demand_visit_day DESC,visit_at DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows.map(r=>(r as {payload:Record<string,unknown>}).payload);
     if(ver0!==null&&(await readOwnerVersion(c,q.owner))!==ver0)return{status:'stale'} as const; // (no version token: the branch pages already answer unavailable; this path keeps its previous behavior) a writer between the irregular probe and these rows could have made a row non-canonical (and so omitted above)
     return{status:'ok',todayCount,rows} as const;
   },o=>o.status==='ok'||o.status==='irregular'));

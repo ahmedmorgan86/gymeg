@@ -18,8 +18,8 @@ test('normal readAttendance rows statement carries the canonical predicate so th
   const seen=[];const rec=(o,work)=>scope(o,c=>work({query:(q,v)=>{seen.push(q);return c.query(q,v);}}));
   const d=await readAttendance(rec,{owner,branch:s.visits[0]?.branch??'a',day:'2026-03-15'});
   assert.equal(d.status,'ok');
-  const rows=seen.find(q=>/ORDER BY \(payload->>'day'\) COLLATE "C" DESC/.test(q));assert.ok(rows);
-  assert.match(rows,/payload->>'day' ~ '\^\\d\{4\}-\\d\\d-\\d\\d\$'/);assert.match(rows,/payload->>'at' ~ /);
+  const rows=seen.find(q=>/ORDER BY demand_visit_day DESC,visit_at DESC/.test(q));assert.ok(rows);
+  assert.match(rows,/collection='visits' AND branch=\$2 AND collection='visits' AND NOT visit_odd/);
 });
 
 test('a writer making a row irregular between the probe and the rows read yields stale, never an omitting ok',async()=>{

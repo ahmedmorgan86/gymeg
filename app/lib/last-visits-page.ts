@@ -11,14 +11,14 @@ export async function readLastVisits(scope:Scope,q:{owner:string;branch:string;t
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.today))throw new RangeError('invalid');
   return scope(q.owner,c=>boundedRead(c,q.owner,'lastvisits\u0000'+q.branch+'\u0000'+q.today,async()=>{
     const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable',reason:'no-version'} as const;
-    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
+    // Plain-column guards (030000 visit_odd / 020000 demand_member_hash): JSON extraction is not leakproof, so payload predicates would be RLS filters over the whole branch. The predicates are repeated verbatim for the partial indexes.
+    const odd=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND branch=$2 AND visit_odd) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
     if(odd.x)return{status:'unavailable',reason:'non-canonical-visit'} as const;
-    // a numeric/other-typed `member` would coerce to text in ->> and change the legacy Map keys; the partial index below is empty in normal clubs
-    const mem=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND jsonb_typeof(payload->'member') IS DISTINCT FROM 'string') AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
+    // a non-string `member` would coerce to text in ->> and change the legacy Map keys; the partial index below is empty in normal clubs
+    const mem=(await indexProbe(c,()=>c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND demand_member_hash IS NULL) AS x`,[q.owner,q.branch]))).rows[0] as {x:boolean};
     if(mem.x)return{status:'unavailable',reason:'non-string-member'} as const;
-    // One probe per member of the branch (the only groups the caller reads; ghost or other-branch member groups of the legacy map are never looked up). The member key is matched with
-    // md5 (index key size) AND the exact equality, the day with the canonical predicate and COLLATE "C" exactly as the index declares.
-    const rows=(await c.query(`SELECT m.entity_id AS m,l.d AS d FROM gymos.gym_entities m CROSS JOIN LATERAL (SELECT (v.payload->>'day') COLLATE "C" AS d FROM gymos.gym_entities v WHERE v.owner_id=m.owner_id AND v.collection='visits' AND md5(v.payload->>'member')=md5(m.entity_id) AND v.payload->>'member'=m.entity_id AND v.branch=$2 AND v.payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND (v.payload->>'day') COLLATE "C" <= ($3::text COLLATE "C") ORDER BY (v.payload->>'day') COLLATE "C" DESC LIMIT 1) l WHERE m.owner_id=$1 AND m.collection='members' AND m.branch=$2`,[q.owner,q.branch,q.today])).rows as {m:string;d:string}[];
+    // One probe per member of the branch (the only groups the caller reads). Member key: md5 column (index key size) AND exact equality; day: strict C-collated column, predicate repeated.
+    const rows=(await c.query(`SELECT m.entity_id AS m,l.d AS d FROM gymos.gym_entities m CROSS JOIN LATERAL (SELECT v.demand_visit_day AS d FROM gymos.gym_entities v WHERE v.owner_id=m.owner_id AND v.collection='visits' AND v.branch=$2 AND v.demand_member_hash=md5(m.entity_id) AND v.payload->>'member'=m.entity_id AND v.demand_visit_day IS NOT NULL AND v.demand_visit_day <= ($3::text COLLATE "C") ORDER BY v.demand_visit_day DESC LIMIT 1) l WHERE m.owner_id=$1 AND m.collection='members' AND m.branch=$2`,[q.owner,q.branch,q.today])).rows as {m:string;d:string}[];
     if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
     return{status:'ok',version:ver,last:Object.fromEntries(rows.map(r=>[r.m!,r.d]))} as const;
   },o=>o.status==='ok'));

@@ -197,6 +197,16 @@ ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS pay_day_odd boolean GENE
 CREATE INDEX IF NOT EXISTS gym_entities_pay_day ON gymos.gym_entities(owner_id,branch,pay_day,position,entity_id) WHERE collection='payments' AND pay_day IS NOT NULL;
 CREATE INDEX IF NOT EXISTS gym_entities_pay_day_odd ON gymos.gym_entities(owner_id,branch) WHERE pay_day_odd;
 
+-- Visit page keys (plain columns for the same RLS reason). visit_at holds `at` only when it is the canonical UTC millisecond string; visit_odd marks every visits row whose day or `at` is non-canonical (exactly the legacy
+-- readers' irregular predicate: demand_visit_day (020000) is non-null exactly when the day is a canonical string). Readers use the odd probe as an exact guard and repeat the partial-index predicates verbatim.
+-- Same held-rewrite caveat as pay_day. The member-odd probe uses the 020000 demand_member_hash IS NULL (non-string member) through its own partial index.
+ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS visit_at text COLLATE "C" GENERATED ALWAYS AS (CASE WHEN collection='visits' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$' THEN payload->>'at' END) STORED;
+ALTER TABLE gymos.gym_entities ADD COLUMN IF NOT EXISTS visit_odd boolean GENERATED ALWAYS AS (collection='visits' AND NOT COALESCE(jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\d{4}-\d\d-\d\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$',false)) STORED;
+CREATE INDEX IF NOT EXISTS gym_entities_visit_odd ON gymos.gym_entities(owner_id,branch,position,entity_id) WHERE visit_odd;
+CREATE INDEX IF NOT EXISTS gym_entities_visit_member_odd ON gymos.gym_entities(owner_id,branch) WHERE collection='visits' AND demand_member_hash IS NULL;
+CREATE INDEX IF NOT EXISTS gym_entities_visit_day_count ON gymos.gym_entities(owner_id,branch,demand_visit_day) WHERE collection='visits' AND demand_visit_day IS NOT NULL;
+CREATE INDEX IF NOT EXISTS gym_entities_visit_canon_order ON gymos.gym_entities(owner_id,branch,demand_visit_day DESC,visit_at DESC,position,entity_id) WHERE collection='visits' AND NOT visit_odd;
+
 -- Restore generation invalidation (contract with the executor: gym_states.payload is text metadata JSON; an optional string `generation` is assigned a fresh UUID by persistSpace restore=true, and the metadata UPDATE runs after every
 -- invoice diff of that transaction). Whenever the parsed generation OLD vs NEW differs (IS DISTINCT FROM, including type changes and a restore with no invoice diff), or the row's owner identity changes, or the row is deleted, the owner's readiness
 -- row is turned into a tombstone (ready=false) in the SAME transaction, so readiness is absent at commit and readers answer 'refs-not-ready' until the migration-authorized rebuild + complete runs. Unparseable metadata on either side counts as changed (fail closed). The only
