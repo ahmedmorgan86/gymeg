@@ -42,7 +42,6 @@ try{
  check(on.calls.length>=1,'ON requests today-visits: '+on.calls.length);
  check(on.home===off.home,'DailyHome text identical OFF vs ON');if(on.home!==off.home){console.log('OFF',off.home.slice(0,600));console.log('ON ',on.home.slice(0,600));}
  check(on.ops===off.ops,'Operations text identical OFF vs ON');if(on.ops!==off.ops){console.log('OFF',off.ops.slice(0,800));console.log('ON ',on.ops.slice(0,800));}
- await off.page.screenshot({path:'/downloads/today-screens-off.png'});await on.page.screenshot({path:'/downloads/today-screens-on.png'});
  // strict: first read fails twice (count + latest are one request, debounce), page must show Retry and no zero
  const st=await run('strict',1);const hasRetry=await st.page.evaluate(()=>[...document.querySelectorAll('button')].some(b=>/Retry/.test(b.textContent)));
  check(hasRetry,'STRICT failure shows Retry');check(!/Today.s real member visits: 0/.test(st.home),'STRICT failure never shows a zero count');
