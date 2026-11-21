@@ -26,6 +26,7 @@ const testSuites = [
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
   { name: 'Entity counters and size bound across every writer, recount, gate (PGlite)', file: 'tests/entity-counters.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'Hot write cannot pass the 20,000,000-byte rule (reopened visit with huge timestamp)', file: 'tests/hot-size.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Hot-operation slice persist parity against the full persist path (PGlite)', file: 'tests/hot-persist.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'GET /api/workspace/member-history flag, scope, paging and legacy layout (PGlite)', file: 'tests/member-history-route.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'POST /api/workspace hot path vs full path over a real entity-layout club (PGlite)', file: 'tests/workspace-post.integration.mjs', loader: './tests/workspace-post-loader.mjs' },

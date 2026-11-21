@@ -27,8 +27,6 @@ export type SliceQuery={
 export type Meta={metadata:Record<string,unknown>;revision:number};
 /** The callers' full-state rule: JSON.stringify(full state) over 20,000,000 UTF-8 bytes answers 413 (app/api/workspace, backup and member-messages routes). */
 export const STATE_BYTE_LIMIT=20_000_000;
-/** Room kept below the limit for what one hot operation can add (its rows, a receipt, an event). Inside it the full path decides exactly. */
-export const HOT_SIZE_SLACK=1_000_000;
 export interface SliceBackend{
   /** True when `open:true` is answered by the query itself. Firestore cannot query a missing field, so it filters after fetching the branch history and reports false. */
   readonly supportsOpen:boolean;
@@ -41,16 +39,18 @@ export interface SliceBackend{
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
   /** True when some member row has more than 1000 freezes (the full path rejects every operation on such a club). Postgres answers from a tiny partial index. */
   hasOversizedFreezes(owner:string):Promise<boolean>;
-  /** A safe UPPER bound of JSON.stringify(full state) in bytes from the trigger-maintained counters, or null when the counters are absent or not marked ready for this owner. Never an exact size. */
-  stateBound(owner:string):Promise<number|null>;
+  /** One read of the trigger-maintained counters: exact row counts per collection and a safe UPPER bound of JSON.stringify(full state) in bytes (never an exact size).
+   * null when the counters are absent or not marked ready for this owner, so callers fall back to the full path. */
+  counters(owner:string):Promise<{counts:Record<string,number>;bound:number}|null>;
 }
 export const MAX_SLICE=500;
 /** Counters for an owner whose marker row says they were built from every row (a new owner, or after recount_entity_counters). null otherwise or when the migration is absent. */
-async function readCounters(c:{query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>},owner:string):Promise<{counts:Record<string,number>;rows:number;bytes:number}|null>{
+export async function readCounters(c:{query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>},owner:string):Promise<{counts:Record<string,number>;rows:number;bytes:number}|null>{
   if(!(await c.query("SELECT to_regclass('gymos.gym_entity_counters') IS NOT NULL AS ok")).rows.some(r=>(r as {ok:boolean}).ok))return null;
   const rows=(await c.query('SELECT collection,row_count,payload_bytes FROM gymos.gym_entity_counters WHERE owner_id=$1',[owner])).rows as {collection:string;row_count:string|number;payload_bytes:string|number}[];
   if(!rows.some(r=>r.collection==='_ready'))return null;
-  const counts:Record<string,number>={};let n=0,bytes=0;for(const r of rows){if(r.collection==='_ready')continue;counts[r.collection]=Number(r.row_count);n+=Number(r.row_count);bytes+=Number(r.payload_bytes);}
+  const counts:Record<string,number>={};let n=0,bytes=0;for(const r of rows){if(r.collection==='_ready')continue;if(Number(r.row_count)<0||Number(r.payload_bytes)<0)return null; // corrupt or half-applied counters: fail closed
+    counts[r.collection]=Number(r.row_count);n+=Number(r.row_count);bytes+=Number(r.payload_bytes);}
   return{counts,rows:n,bytes};
 }
 export function checkQuery(q:SliceQuery){
@@ -88,9 +88,9 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     },
     async photo(owner,memberId){return scope(owner,async c=>{const r=(await c.query('SELECT content FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,memberId])).rows[0] as {content:string}|undefined;return r?.content??null;});},
     async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
-    async stateBound(owner){return scope(owner,async c=>{const k=await readCounters(c,owner);if(!k)return null;const m=(await c.query('SELECT octet_length(payload) AS n FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {n:number}|undefined;if(!m)return null;
+    async counters(owner){return scope(owner,async c=>{const k=await readCounters(c,owner);if(!k)return null;const m=(await c.query('SELECT octet_length(payload) AS n FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {n:number}|undefined;if(!m)return null;
       // metadata text + every row's payload (jsonb text >= compact JSON) + a comma per row + per-collection key and bracket overhead + photos
-      return Number(m.n)+k.bytes+k.rows+4096;});},
+      return{counts:k.counts,bound:Number(m.n)+k.bytes+k.rows+4096};});},
     async hasOversizedFreezes(owner){return scope(owner,async c=>((await c.query("SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND jsonb_typeof(payload->'freezes')='array' AND jsonb_array_length(payload->'freezes')>1000 LIMIT 1",[owner])).rows.length>0));},
     async count(owner,collection,branches){return scope(owner,async c=>{
       if(!branches){const fast=await readCounters(c,owner);if(fast)return fast.counts[collection]??0;}
@@ -138,7 +138,7 @@ export function firestoreBackend(getDb:()=>FsDb,opts:{indexed?:boolean}={}):Slic
     async photo(owner,memberId){const s=await getDb().collection('gym_photos').doc(`${owner}_${memberId}`).get();return s.exists?String((s.data() as {content:string}).content):null;},
     async photoVersions(owner){const snap=await getDb().collection('gym_photos').where('owner_id','==',owner).get();return Object.fromEntries(snap.docs.map(d=>{const x=d.data() as {member_id:string;content:string};return[x.member_id,createHash('sha256').update(x.content).digest('hex').slice(0,16)];}));},
     async hasOversizedFreezes(){return true;}, // fail closed: Firestore never takes the hot path
-    async stateBound(){return null;},
+    async counters(){return null;},
     async count(owner,collection,branches){
       const db=getDb();let total=0;
       const groups=branches?Array.from({length:Math.ceil(branches.length/30)},(_,i)=>branches.slice(i*30,i*30+30)):[null];
@@ -255,11 +255,13 @@ export async function readHotSlice(be:SliceBackend,owner:string,plan:{branch:str
     }
     rows.push(...await be.entities(owner,{collections:['plans','shifts'],branches:[plan.branch]}));
     const seen=new Set<string>(),unique=rows.filter(e=>{const k=e.collection+'\0'+e.entity_id;if(seen.has(k))return false;seen.add(k);return true;});
-    const counts={members:await be.count(owner,'members'),visits:await be.count(owner,'visits'),invoices:await be.count(owner,'invoices'),plans:await be.count(owner,'plans'),followUps:await be.count(owner,'followUps')};
+    // One counters read gives exact counts and the size bound; without it (absent migration, unready owner, Firestore) the hot path stays off.
+    const k=await be.counters(owner);if(!k)return null;
+    const n=(c:string)=>k.counts[c]??0,counts={members:n('members'),visits:n('visits'),invoices:n('invoices'),plans:n('plans'),followUps:n('followUps')};
     // At the trim windows the full path's own positions tie (array index vs retained rows): fail closed until a shared ordering fix is reviewed.
-    if(await be.count(owner,'events')>=RECENT_EVENTS||await be.count(owner,'receipts')>=1000)return null;
-    // The caller rejects full states over STATE_BYTE_LIMIT; the hot path never runs that check, so it qualifies only when a proven upper bound leaves room.
-    const bound=await be.stateBound(owner);if(bound===null||bound+HOT_SIZE_SLACK>STATE_BYTE_LIMIT)return null;
+    if(n('events')>=RECENT_EVENTS||n('receipts')>=1000)return null;
+    // The caller rejects full states over STATE_BYTE_LIMIT; the hot path never runs that check. Here only an already-over bound is refused.
+    if(k.bound>STATE_BYTE_LIMIT)return null; // the exact growth check for the proposed write runs inside persistSpace's transaction
     return{counts,state:normalizeState(assembleState(meta.metadata,unique,{})),positions:Object.fromEntries(unique.map(e=>[e.collection+':'+e.entity_id,Number(e.position)]))};
   });
   return got&&got.value?{state:got.value.state,positions:got.value.positions,counts:got.value.counts,revision:got.revision,partial:true}:null;

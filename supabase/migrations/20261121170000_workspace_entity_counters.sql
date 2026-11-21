@@ -68,7 +68,11 @@ CREATE TRIGGER gym_photos_counter_del AFTER DELETE ON gymos.gym_photos REFERENCI
 CREATE OR REPLACE FUNCTION gymos.mark_counters_ready() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=NEW.user_id LIMIT 1) AND NOT EXISTS(SELECT 1 FROM gymos.gym_photos WHERE owner_id=NEW.user_id LIMIT 1) THEN
-  INSERT INTO gymos.gym_entity_counters(owner_id,collection) VALUES(NEW.user_id,'_ready') ON CONFLICT DO NOTHING;
+  -- An empty owner starts from zero: drop any leftover deltas (an owner deleted and recreated) in the same statement before marking ready.
+  DELETE FROM gymos.gym_entity_counters WHERE owner_id=NEW.user_id;
+  INSERT INTO gymos.gym_entity_counters(owner_id,collection) VALUES(NEW.user_id,'_ready');
+ ELSE
+  DELETE FROM gymos.gym_entity_counters WHERE owner_id=NEW.user_id AND collection='_ready'; -- rows already exist: never trust, until recount
  END IF; RETURN NEW;
 END $$;
 REVOKE ALL ON FUNCTION gymos.mark_counters_ready() FROM PUBLIC;
@@ -85,3 +89,13 @@ BEGIN
  INSERT INTO gymos.gym_entity_counters(owner_id,collection) VALUES(target,'_ready');
 END $$;
 REVOKE ALL ON FUNCTION gymos.recount_entity_counters(text) FROM PUBLIC;
+
+-- TRUNCATE has no transition tables and no owner. Any truncate of either table drops every owner's counters and markers, so counts and the size
+-- bound go back to count(*) / the full path until recount_entity_counters(owner) is run again. It can never leave a silently wrong counter.
+CREATE OR REPLACE FUNCTION gymos.reset_entity_counters() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
+BEGIN DELETE FROM gymos.gym_entity_counters; RETURN NULL; END $$;
+REVOKE ALL ON FUNCTION gymos.reset_entity_counters() FROM PUBLIC;
+DROP TRIGGER IF EXISTS gym_entities_counter_trunc ON gymos.gym_entities;
+DROP TRIGGER IF EXISTS gym_photos_counter_trunc ON gymos.gym_photos;
+CREATE TRIGGER gym_entities_counter_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_entity_counters();
+CREATE TRIGGER gym_photos_counter_trunc AFTER TRUNCATE ON gymos.gym_photos FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_entity_counters();

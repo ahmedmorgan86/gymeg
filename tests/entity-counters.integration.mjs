@@ -15,7 +15,7 @@ const {normalize}=await import('../app/lib/extensions.ts');
 const {hotPlan,applyHot}=await import('../app/lib/hot-op-plans.ts');
 const {RECENT_EVENTS}=await import('../app/lib/activity-archive.ts');
 const {club,NOW}=await import('./hot-ops-fixture.mjs');
-const {STATE_BYTE_LIMIT,HOT_SIZE_SLACK}=await import('../app/lib/workspace-slice.ts');
+const {STATE_BYTE_LIMIT}=await import('../app/lib/workspace-slice.ts');
 const scope=async(owner,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);});
 const be=postgresBackend(scope);
 const bytes=s=>new TextEncoder().encode(s).byteLength;
@@ -34,7 +34,7 @@ async function verify(owner,label){
   for(const c of Object.keys(k))if(c!=='_ready'&&c!=='photos'&&!real.some(r=>r.collection===c))assert.equal(k[c].n,0,label+': stale '+c);
   const ph=(await db.query("SELECT count(*)::int AS n,coalesce(sum(octet_length(to_jsonb(content)::text)+9),0)::int AS b FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows[0];
   assert.deepEqual({n:k.photos?.n??0,b:k.photos?.b??0},{n:ph.n,b:ph.b},label+': photos');
-  const exact=bytes(JSON.stringify((await readEntitySpace(owner)).state)),bound=await be.stateBound(owner);
+  const exact=bytes(JSON.stringify((await readEntitySpace(owner)).state)),bound=(await be.counters(owner))?.bound;
   assert.ok(bound>=exact,`${label}: bound ${bound} must be >= exact ${exact}`);
   return {exact,bound};
 }
@@ -84,9 +84,9 @@ test('an owner with rows that existed before the counters is not trusted until r
   await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('L','{}',1,'x')");
   await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='L'"); // simulate a pre-existing club: no marker
   await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('L','members','m1',0,'a','{\"id\":\"m1\"}')");
-  assert.equal(await be.stateBound('L'),null,'no marker: no bound, hot path falls back');
+  assert.equal(await be.counters('L'),null,'no marker: no counters, hot path falls back');
   assert.equal(await be.count('L','members'),1,'count(*) fallback is exact');
-  await db.query("SELECT gymos.recount_entity_counters('L')");assert.ok(await be.stateBound('L')>0);assert.equal(await be.count('L','members'),1);
+  await db.query("SELECT gymos.recount_entity_counters('L')");assert.ok((await be.counters('L')).bound>0);assert.equal(await be.count('L','members'),1);
 });
 
 test('jsonb text length is an upper bound of compact JSON.stringify length for hostile payloads',async()=>{
@@ -102,11 +102,34 @@ test('jsonb text length is an upper bound of compact JSON.stringify length for h
   console.log('max overhead bytes in 400 samples',worst);
 });
 
-test('hot path qualifies only with room under the 20,000,000-byte rule; otherwise the full path decides',async()=>{
+test('hot path refuses an already-over bound; growth is proven per write in persistSpace',async()=>{
   await seed('G',prep(4));
   const m=(await readEntitySpace('G')).state.members.find(m=>!m.demo);const op={type:'payment.add',branch:m.branch,id:m.id,minor:1,method:'cash'};
   assert.ok(await readHotSlice(be,'G',hotPlan(op),normalize),'small club: hot');
-  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('G','announcements','big',9999,'a',jsonb_build_object('id','big','text',repeat('x',$1::int)))",[STATE_BYTE_LIMIT-HOT_SIZE_SLACK-200000]);
-  const b=await be.stateBound('G');assert.ok(b+HOT_SIZE_SLACK>STATE_BYTE_LIMIT,'bound '+b+' leaves no room');
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('G','announcements','big',9999,'a',jsonb_build_object('id','big','text',repeat('x',$1::int)))",[STATE_BYTE_LIMIT+1000]);
+  const b=(await be.counters('G')).bound;assert.ok(b>STATE_BYTE_LIMIT,'bound '+b+' is already over the rule');
   assert.equal(await readHotSlice(be,'G',hotPlan(op),normalize),null,'no proven room: fall back to the full path');
+});
+
+test('TRUNCATE can never leave a silently wrong counter: it drops all markers so callers fall back',async()=>{
+  await seed('T',prep(5));assert.ok(await be.counters('T'));
+  await db.query('TRUNCATE gymos.gym_photos');assert.equal(await be.counters('T'),null,'photos truncate: unready');
+  await db.query("SELECT gymos.recount_entity_counters('T')");assert.ok(await be.counters('T'));
+  await db.query('TRUNCATE gymos.gym_entities');assert.equal(await be.counters('T'),null,'entities truncate: unready');
+  assert.equal(await be.count('T','members'),0,'count(*) fallback is exact');
+});
+
+test('lifecycle: a pre-existing owner never becomes ready by deletes; a deleted and recreated owner restarts from zero; negative counters fail closed',async()=>{
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('P','{}',1,'x')");
+  await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='P'"); // simulate an owner that predates the counters
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('P','visits','pv',0,'a','{\"id\":\"pv\",\"member\":\"pm\"}')");
+  await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='P' AND collection='_ready'");
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='P'");
+  assert.equal(await be.counters('P'),null,'negative deltas without a marker are never trusted');
+  await db.query("DELETE FROM gymos.gym_states WHERE user_id='P'");
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES('P','{}',1,'x')");
+  const k=await be.counters('P');assert.ok(k,'recreated empty owner is ready');assert.deepEqual(k.counts,{},'and starts from zero, no leftover negative deltas');
+  await db.query("INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) VALUES('P','visits',-1,-27)");
+  assert.equal(await be.counters('P'),null,'negative counter: fail closed');
+  await db.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id='P'");
 });
