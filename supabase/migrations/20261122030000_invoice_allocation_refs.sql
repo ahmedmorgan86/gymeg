@@ -10,7 +10,7 @@
 -- if a ref write fails the whole invoice write rolls back (a failed ref write is a database failure, and a stale ref set must never exist). AFTER TRUNCATE clears the refs too; owner deletion is row DELETE and is covered.
 -- Backfill locks each invoice row (FOR UPDATE) before rebuilding it so a concurrent writer cannot be overwritten by an older payload.
 -- Readiness: readers use the refs only while invoice_allocation_refs_state has key 'complete' (set by the migration when no invoice exists yet, else only by the held backfill after a zero-mismatch check).
--- Direct writes: gymos_app holds INSERT/UPDATE/DELETE on the refs (the invoking-role trigger needs them), limited to its own owner by RLS; invoice_allocation_refs_mismatches detects any drift. OPEN REVIEW QUESTION, not hidden.
+-- Direct writes: gymos_app has NO write access to refs/odd/state (SELECT only); only the maintenance-role trigger functions and the migration role write them.
 -- Rollback: DROP the triggers, tables and functions; the payload remains the source of truth.
 CREATE TABLE IF NOT EXISTS gymos.invoice_allocation_refs(
   owner_id text NOT NULL, invoice_id text NOT NULL, ord integer NOT NULL, payment_id text NOT NULL, payment_key text NOT NULL,
@@ -39,9 +39,27 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_odd_count(p_payload jsonb) R
   SELECT CASE WHEN jsonb_typeof(p_payload->'allocations') IS DISTINCT FROM 'array' THEN 1
               ELSE (SELECT count(*)::integer FROM jsonb_array_elements(p_payload->'allocations') a WHERE NOT COALESCE(jsonb_typeof(a)='object' AND jsonb_typeof(a->'payment')='string',false)) END $$;
 -- Maintenance principal: a NOLOGIN, non-superuser, non-BYPASSRLS role that owns ONLY the two trigger functions below. The runtime role (gymos_app) has SELECT only on refs/odd/state, so it can neither forge,
--- delete nor claim readiness. The functions are SECURITY DEFINER trigger functions (they cannot be called as ordinary functions), pinned to pg_catalog, fully qualified, no dynamic SQL, no owner argument: they derive everything
+-- delete nor claim readiness. The functions are SECURITY DEFINER trigger functions (they cannot be called as ordinary functions). The maintenance role needs NO access to gym_entities or gym_states: it derives everything from OLD/NEW, pinned to pg_catalog, fully qualified, no dynamic SQL, no owner argument: they derive everything
 -- from the real OLD/NEW source row of gymos.gym_entities and fail (rolling back the source write) on any error. Local review candidate only: nothing here is applied to a remote database.
-DO $r$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='gymos_refs_maint') THEN CREATE ROLE gymos_refs_maint NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOINHERIT; END IF; END $r$;
+DO $r$ DECLARE r pg_roles%ROWTYPE; bad text;
+BEGIN
+  SELECT * INTO r FROM pg_roles WHERE rolname='gymos_refs_maint';
+  IF NOT FOUND THEN
+    CREATE ROLE gymos_refs_maint NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOINHERIT NOREPLICATION;
+  ELSE
+    -- a pre-existing role is NOT trusted: it must have exactly the safe attributes, no memberships either way, no role-level settings, own nothing except our four trigger functions, and hold no privileges on other relations
+    IF r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolinherit OR r.rolconnlimit<>-1 THEN RAISE EXCEPTION 'gymos_refs_maint exists with unsafe attributes; refusing to use it'; END IF;
+    IF EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.roleid=r.oid OR m.member=r.oid) THEN RAISE EXCEPTION 'gymos_refs_maint has role memberships (member or granted); refusing to use it'; END IF;
+    IF EXISTS (SELECT 1 FROM pg_db_role_setting d WHERE d.setrole=r.oid) THEN RAISE EXCEPTION 'gymos_refs_maint has role settings; refusing to use it'; END IF;
+    SELECT string_agg(x,',') INTO bad FROM (
+      SELECT 'rel:'||c.relname x FROM pg_class c WHERE c.relowner=r.oid
+      UNION ALL SELECT 'proc:'||p.proname FROM pg_proc p WHERE p.proowner=r.oid AND NOT (p.pronamespace='gymos'::regnamespace AND p.proname IN ('invoice_allocation_refs_sync','invoice_allocation_refs_truncate','invoice_allocation_refs_epoch','invoice_allocation_refs_epoch_truncate'))
+      UNION ALL SELECT 'ns:'||n.nspname FROM pg_namespace n WHERE n.nspowner=r.oid
+      UNION ALL SELECT 'type:'||t.typname FROM pg_type t WHERE t.typowner=r.oid AND t.typrelid=0 AND t.typtype<>'b'
+      UNION ALL SELECT 'priv:'||g.table_schema||'.'||g.table_name FROM information_schema.role_table_grants g WHERE g.grantee='gymos_refs_maint' AND NOT (g.table_schema='gymos' AND g.table_name IN ('invoice_allocation_refs','invoice_allocation_odd','invoice_allocation_refs_state'))) q;
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint has unrelated ownership or privileges: %',bad; END IF;
+  END IF;
+END $r$;
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_sync() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
 BEGIN
   IF TG_RELID IS DISTINCT FROM 'gymos.gym_entities'::regclass OR TG_LEVEL<>'ROW' OR TG_WHEN<>'AFTER' OR TG_NARGS<>0 OR TG_OP NOT IN ('INSERT','UPDATE','DELETE') OR pg_trigger_depth()<>1 THEN
@@ -88,23 +106,34 @@ BEGIN
 END $$;
 -- number of invoices of the owner whose stored refs differ from a recomputation, plus refs of invoices that no longer exist; must be 0 before 'complete' is set
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_mismatches(p_owner text) RETURNS bigint LANGUAGE sql STABLE AS $$
+  -- every alternative is scoped to p_owner (and to invoices) before any OR: nothing here may depend on another tenant's rows
   SELECT (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND
     (SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.ord),'[]'::jsonb) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND x.invoice_id=i.entity_id)
     IS DISTINCT FROM
     (SELECT COALESCE(jsonb_agg(to_jsonb(y) ORDER BY y.ord),'[]'::jsonb) FROM gymos.invoice_allocation_ref_rows(p_owner,i.entity_id,i.position,i.branch,i.payload) y))
-  + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload) OR EXISTS (SELECT 1 FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id AND o.invoice_branch IS DISTINCT FROM i.branch))
-  + (SELECT count(DISTINCT x.invoice_id) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=x.invoice_id)) $$;
+  + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND (
+       COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload)
+       OR EXISTS (SELECT 1 FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id AND o.invoice_branch IS DISTINCT FROM i.branch)))
+  + (SELECT count(DISTINCT x.invoice_id) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=x.invoice_id))
+  + (SELECT count(*) FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=o.invoice_id)) $$;
 
--- Readiness is per owner (no global flag). Marking an owner complete: only after the batched rebuild finished and a zero-mismatch check, both under one advisory lock so two completions cannot interleave. Triggers must be installed
+-- Readiness is per owner. Marking an owner complete: only after the batched rebuild finished and a zero-mismatch check, both under one advisory lock so two completions cannot interleave. Triggers must be installed
 -- BEFORE the backfill: any invoice write committing during the backfill maintains its own refs in its transaction, so only pre-existing rows can be missing and the mismatch check covers exactly those. A restore/replace of gym_entities that
 -- bypasses triggers must set the owner's state to ready=false (or rely on the generation tombstone) and repeat rebuild + complete.
-CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text) RETURNS boolean LANGUAGE plpgsql AS $$
+DROP FUNCTION IF EXISTS gymos.invoice_allocation_refs_complete(text,text);
+-- p_expected_generation = the jsonb text of payload->'generation' that the caller read BEFORE its rebuild (NULL = the key was absent). Completion is refused (false, tombstone untouched) if the owner's metadata is missing, unparseable
+-- or its generation differs now, so a restore between the final rebuild batch and completion is never silently warmed.
+CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text,p_expected_generation text) RETURNS boolean LANGUAGE plpgsql AS $$
+DECLARE cur text; have boolean;
 BEGIN
   -- Lock order (shared with persistSpace restore, which locks the owner's gym_states row FIRST, then writes entities, then the metadata UPDATE): take the owner's gym_states row FOR SHARE before reading anything.
-  -- A restore then either committed before this lock (its changes and tombstone are visible to the mismatch check below, which runs as a fresh READ COMMITTED statement) or blocks on its own gym_states lock until this
-  -- transaction commits and then writes its tombstone AFTER our ready=true, so a committed tombstone can never be overwritten by a stale completion. The check is refused under a snapshot-fixed isolation level.
+  -- A restore then either committed before this lock (the generation compare below and the mismatch check, a fresh READ COMMITTED statement, see it) or blocks until this transaction commits and then writes its tombstone AFTER our
+  -- ready=true, so a committed tombstone is never overwritten by a stale completion. Refused under a snapshot-fixed isolation level.
   IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'invoice_allocation_refs_complete requires READ COMMITTED'; END IF;
-  PERFORM 1 FROM gymos.gym_states WHERE user_id=p_owner FOR SHARE;
+  SELECT true INTO have FROM gymos.gym_states g WHERE g.user_id=p_owner FOR SHARE;
+  BEGIN SELECT ((g.payload::jsonb)->'generation')::text INTO cur FROM gymos.gym_states g WHERE g.user_id=p_owner; EXCEPTION WHEN data_exception THEN RETURN false; END; -- unparseable metadata: refuse
+  IF NOT COALESCE(have,false) THEN RETURN false; END IF;
+  IF cur IS DISTINCT FROM p_expected_generation THEN RETURN false; END IF;
   PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||p_owner));
   IF gymos.invoice_allocation_refs_mismatches(p_owner)<>0 THEN RETURN false; END IF;
   INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES(p_owner,true) ON CONFLICT (owner_id) DO UPDATE SET ready=true,set_at=now();RETURN true;
@@ -122,18 +151,15 @@ DO $p$ BEGIN
  CREATE POLICY invoice_allocation_refs_maint ON gymos.invoice_allocation_refs TO gymos_refs_maint USING(true) WITH CHECK(true);
  CREATE POLICY invoice_allocation_odd_maint ON gymos.invoice_allocation_odd TO gymos_refs_maint USING(true) WITH CHECK(true);
  CREATE POLICY invoice_allocation_refs_state_maint ON gymos.invoice_allocation_refs_state TO gymos_refs_maint USING(true) WITH CHECK(true);
-  DROP POLICY IF EXISTS gym_entities_refs_maint ON gymos.gym_entities;
- CREATE POLICY gym_entities_refs_maint ON gymos.gym_entities FOR SELECT TO gymos_refs_maint USING(true);
-END $p$;
+ END $p$;
 REVOKE ALL ON gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state FROM PUBLIC,anon,authenticated,gymos_app;
 GRANT SELECT ON gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state TO gymos_app;
 GRANT USAGE ON SCHEMA gymos TO gymos_refs_maint;
 GRANT SELECT,INSERT,DELETE,TRUNCATE ON gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state TO gymos_refs_maint;
 GRANT UPDATE ON gymos.invoice_allocation_refs_state TO gymos_refs_maint;
-GRANT SELECT(owner_id,collection,entity_id) ON gymos.gym_entities TO gymos_refs_maint;
 GRANT EXECUTE ON FUNCTION gymos.invoice_allocation_ref_rows(text,text,integer,text,jsonb),gymos.invoice_allocation_odd_count(jsonb) TO gymos_refs_maint;
--- backfill/readiness authority is the migration role only (invoker functions, never callable by the runtime role); the migration role must be able to write the tables under FORCE RLS (superuser/BYPASSRLS, as on Supabase postgres).
-REVOKE ALL ON FUNCTION gymos.invoice_allocation_refs_rebuild(text,text,integer),gymos.invoice_allocation_refs_complete(text),gymos.invoice_allocation_refs_mismatches(text) FROM PUBLIC,anon,authenticated,gymos_app;
+-- backfill/readiness authority is the migration role only (invoker functions with EXECUTE revoked from the runtime role; they run as the migration role); the migration role must be able to write the tables under FORCE RLS (superuser/BYPASSRLS, as on Supabase postgres).
+REVOKE ALL ON FUNCTION gymos.invoice_allocation_refs_rebuild(text,text,integer),gymos.invoice_allocation_refs_complete(text,text),gymos.invoice_allocation_refs_mismatches(text) FROM PUBLIC,anon,authenticated,gymos_app;
 
 -- Ordinary payment day key (plain columns, so a day range is an Index Cond under RLS instead of a payload-expression Filter). pay_day holds the day only when it is the canonical string; pay_day_odd marks every other payments row
 -- (non-string or non-canonical day) so readers can still refuse them exactly. Held: adding stored generated columns rewrites gym_entities (do it in the cutover window or on the fresh rebuild).
@@ -178,4 +204,3 @@ ALTER FUNCTION gymos.invoice_allocation_refs_epoch_truncate() OWNER TO gymos_ref
 REVOKE ALL ON FUNCTION gymos.invoice_allocation_refs_epoch_truncate() FROM PUBLIC,anon,authenticated,gymos_app;
 DROP TRIGGER IF EXISTS invoice_allocation_refs_epoch_trunc ON gymos.gym_states;
 CREATE TRIGGER invoice_allocation_refs_epoch_trunc AFTER TRUNCATE ON gymos.gym_states FOR EACH STATEMENT EXECUTE FUNCTION gymos.invoice_allocation_refs_epoch_truncate();
-GRANT SELECT ON gymos.gym_states TO gymos_refs_maint;
