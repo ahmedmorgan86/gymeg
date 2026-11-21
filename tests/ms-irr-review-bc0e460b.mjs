@@ -34,11 +34,11 @@ test('irregular attendance path + ids',async()=>{
   const out=await readAttendance(scope,{owner:'I1',branch:'a',day:'2026-03-15'});assert.equal(out.status,'irregular');
   const vis=cur.visits.filter(v=>v.branch==='a');
   assert.equal(out.todayCount,vis.filter(v=>v.day==='2026-03-15').length);
-  const {pickNewest}=await import('../app/use-attendance.ts');
+  const {pickNewest,mergeNewest}=await import('../app/use-attendance.ts');const {clientAttendance}=await import('./att-client-sim.mjs');
   const want=[...vis].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map(v=>v.id);
-  assert.deepEqual(pickNewest(out.candidates,100).map(v=>v.id),want,'exact legacy order from the bounded candidate set');
-  assert.ok(out.candidates.length<=600,'bounded candidates');
-  assert.ok(out.candidates.every(v=>v.branch==='a'),'branch isolation');
+  assert.deepEqual((await clientAttendance(scope,{owner:'I1',branch:'a',day:'2026-03-15'},{readAttendance,mergeNewest,pickNewest})).rows.map(v=>v.id),want,'exact legacy order from the bounded candidate set');
+  assert.ok(out.candidates.length<=500,'bounded page');
+  assert.ok(out.candidates.every(v=>v.p.branch==='a'),'branch isolation');
   const o2=await readAttendance(scope,{owner:'nobody',branch:'a',day:'2026-03-15'});assert.equal(o2.status,'ok');assert.equal(o2.rows.length,0);
   console.log('candidates',out.candidates.length,'of',vis.length);
 });

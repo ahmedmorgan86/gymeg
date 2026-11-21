@@ -17,5 +17,6 @@ export async function GET(request:Request){try{
  const meta=await readSpaceMeta(ctx.owner);
  const cols=new Set(packetQueries(ctx,meta.state.settings).flatMap(q=>q.collections as string[]));
  if(!cols.has('visits')||!cols.has('members'))return reply({error:'forbidden'},403);
- return reply(await readAttendance(withScope as unknown as Scope,{owner:ctx.owner,branch,day}));
+  const afterRaw=url.searchParams.get('after');const after=afterRaw===null?undefined:Number(afterRaw);
+ return reply(await readAttendance(withScope as unknown as Scope,{owner:ctx.owner,branch,day,...(after!==undefined?{after}:{})}));
  }catch(e){if(e instanceof CommercialError)return reply({error:e.code},e.status);if(e instanceof RangeError)return reply({error:'invalid'},400);if(e instanceof ReadBudgetError)return reply({error:'budget'},503);console.error('[Attendance Error]:',e);return reply({error:'unavailable'},503);}}

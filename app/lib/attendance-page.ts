@@ -1,33 +1,33 @@
 // Bounded read for the Attendance page: the branch's check-ins today (ALL of the branch's visits of that day, as the page counts them) and the newest ATTENDANCE_ROWS visits
 // in the page's order `b.day.localeCompare(a.day)||b.at.localeCompare(a.at)` (stable, so ties keep position order). Code-point order equals localeCompare only for canonical
-// day/at strings, so any irregular value in the branch returns {status:'fallback'} and the page keeps the legacy path.
+// day/at strings. A branch holding any non-canonical value is answered exactly by a candidate merge: the canonical top 100, plus the non-canonical rows streamed in position-ordered pages of IRREGULAR_PAGE that the browser merges into a running top 100 with its own comparator. No row limit: transfer is proportional to the non-canonical rows only.
 import {boundedRead} from './bounded-read.ts';
 import type {Scope} from './member-console-source.ts';
 export const ATTENDANCE_ROWS=100;
-export type AttendanceData={status:'ok';todayCount:number;rows:Record<string,unknown>[]}|{status:'irregular';todayCount:number;candidates:Record<string,unknown>[]}|{status:'capped';reason:string};
-/** Most non-canonical visits one branch may hold for the exact candidate merge. A product-neutral safety bound, my judgment (the merge returns at most this many plus 100 rows); above it the page shows its failure state with Retry. */
-export const IRREGULAR_MAX=500;
-export async function readAttendance(scope:Scope,q:{owner:string;branch:string;day:string}):Promise<AttendanceData>{
-  if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.day))throw new RangeError('invalid');
-  return scope(q.owner,c=>boundedRead(c,q.owner,'att\u0000'+q.branch+'\u0000'+q.day,async()=>{
+export type Cand={p:Record<string,unknown>;pos:number};
+export type AttendanceData={status:'ok';todayCount:number;rows:Record<string,unknown>[]}|{status:'irregular';todayCount?:number;canonical:Cand[];candidates:Cand[];next:number|null};
+/** Transfer chunk for non-canonical rows. A page size, not a limit: the browser keeps asking until `next` is null. Judgment, not derived. */
+export const IRREGULAR_PAGE=500;
+export async function readAttendance(scope:Scope,q:{owner:string;branch:string;day:string;after?:number}):Promise<AttendanceData>{
+  if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.day)||(q.after!==undefined&&!Number.isSafeInteger(q.after)))throw new RangeError('invalid');
+  return scope(q.owner,c=>boundedRead(c,q.owner,'att\u0000'+q.branch+'\u0000'+q.day+'\u0000'+(q.after??''),async()=>{
     const irregular=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch])).rows[0] as {x:boolean};
-    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
     const CANON=`jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
-    // ODD is written exactly as the held partial index gym_entities_visit_irregular_dayat predicate so the planner can use it (a NOT(CANON) form seq-scans: ~51k buffers measured).
     const ODD=`jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
-    const top=(await c.query(`SELECT payload,position FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2${irregular.x?' AND '+CANON:''} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number}[];
-    if(irregular.x){
-      // Exact merge: canonical rows keep one total order that equals the page's localeCompare order (the top 100 of them suffice), and the non-canonical rows are all returned; the page
-      // sorts this candidate set with its own comparator. Candidates come back in position order so ties keep the legacy stable order.
-      // With LIMIT the planner prefers a position-order scan of the whole branch (~51k buffers measured); steer it to the partial index for this one statement only.
+    const paging=q.after!==undefined;
+    if(irregular.x||paging){
+      const todayCount=paging?undefined:Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+      const top=paging?[]:(await c.query(`SELECT payload,position FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number}[];
+      // Steer the planner to the partial index (key owner,branch,position) for this statement only: with LIMIT it otherwise scans the whole branch in position order (~51k buffers measured).
       await c.query("SELECT set_config('enable_seqscan','off',true)");
-      const odd=(await c.query(`SELECT payload,position FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (${ODD}) LIMIT ${IRREGULAR_MAX+1}`,[q.owner,q.branch])).rows as {payload:Record<string,unknown>;position:number}[];
+      const odd=(await c.query(`SELECT payload,position FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND position>$3 AND (${ODD}) ORDER BY position LIMIT ${IRREGULAR_PAGE+1}`,[q.owner,q.branch,q.after??-1])).rows as {payload:Record<string,unknown>;position:number}[];
       await c.query("SELECT set_config('enable_seqscan','on',true)");
-      if(odd.length>IRREGULAR_MAX)return{status:'capped',reason:'too-many-non-canonical-visits'} as const;
-      const all=[...top,...odd].sort((a,b)=>Number(a.position)-Number(b.position));
-      return{status:'irregular',todayCount,candidates:all.map(r=>r.payload)} as const;
+      const more=odd.length>IRREGULAR_PAGE,page=more?odd.slice(0,IRREGULAR_PAGE):odd;
+      const cand=(r:{payload:Record<string,unknown>;position:number}):Cand=>({p:r.payload,pos:Number(r.position)});
+      return{status:'irregular',...(todayCount!==undefined?{todayCount}:{}),canonical:top.map(cand),candidates:page.map(cand),next:more?Number(page[page.length-1].position):null} as const;
     }
-    const rows=top.map(r=>r.payload);
+    const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
+    const rows=(await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows.map(r=>(r as {payload:Record<string,unknown>}).payload);
     return{status:'ok',todayCount,rows} as const;
   }));
 }

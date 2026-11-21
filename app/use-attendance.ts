@@ -1,7 +1,7 @@
 "use client";
 // OFF (default): the Attendance page keeps its legacy expressions over the packet's visits. ON (NEXT_PUBLIC_GYMOS_ATTENDANCE=1): the branch's check-ins today and its newest 100 visits
 // from the server, used only when fetched for THIS state object, owner, branch and day. Canonical branches: the server orders. Branches holding a non-canonical day/at: the server
-// returns the canonical top 100 plus every non-canonical visit (position order, at most IRREGULAR_MAX of them) and THIS browser sorts that candidate set with the page's own localeCompare comparator (exactly legacy) and keeps 100. Over the cap the server answers 'capped': failure state with Retry, never a guess.
+// returns the canonical top 100 plus the non-canonical visits in position-ordered pages (`next` cursor, no row limit); THIS browser merges each page into a running top 100 with the page's own localeCompare comparator (exactly legacy). Memory stays at 100 + one page.
 // Failure: `view` is null and `failed` is true. With NEXT_PUBLIC_GYMOS_LAZY_STRICT=1 (for when the packet omits visits) the page shows a retry state instead of the legacy expression,
 // never a zero count or an empty table; otherwise the page keeps the legacy expression over the packet's visits.
 import {useCallback,useEffect,useState} from 'react';
@@ -14,23 +14,36 @@ type Got={owner:string;branch:string;day:string;forState:GymState;data:Attendanc
 export function chooseAttendance(on:boolean,got:Got|null,state:GymState,owner:string,branch:string,day:string):AttendanceView|null{
   return on&&got&&got.owner===owner&&got.branch===branch&&got.day===day&&got.forState===state?got.data:null;
 }
-/** The page's own legacy comparator over the server's keys (position order in, stable sort); null when a value is not a string (legacy would throw). */
-export function pickNewest(keys:Visit[],n:number):Visit[]|null{
-  if(keys.some(k=>typeof k.day!=='string'||typeof k.at!=='string'))return null;
-  return [...keys].sort((a,b)=>(b.day as string).localeCompare(a.day as string)||(b.at as string).localeCompare(a.at as string)).slice(0,n);
+export type Cand={p:Visit;pos:number};
+/** The page's own legacy comparator over candidates in position order (stable); null when a value is not a string (legacy would throw). Returns the newest n, kept in position order. */
+export function mergeNewest(cands:Cand[],n:number):Cand[]|null{
+  if(cands.some(k=>typeof k.p.day!=='string'||typeof k.p.at!=='string'))return null;
+  const byPos=[...cands].sort((a,b)=>a.pos-b.pos);
+  const keep=new Set([...byPos].sort((a,b)=>b.p.day.localeCompare(a.p.day)||b.p.at.localeCompare(a.p.at)).slice(0,n));
+  return byPos.filter(c=>keep.has(c));
+}
+/** Final order for display. */
+export function pickNewest(cands:Cand[],n:number):Visit[]|null{
+  const kept=mergeNewest(cands,n);return kept?[...kept].sort((a,b)=>b.p.day.localeCompare(a.p.day)||b.p.at.localeCompare(a.p.at)).map(c=>c.p):null;
 }
 export function useAttendance(active:boolean,state:GymState|undefined,owner:string|undefined,branch:string,day:string):{view:AttendanceView|null;failed:boolean;retry:()=>void}{
   const [got,setGot]=useState<Got|null>(null),[failedFor,setFailedFor]=useState<GymState|null>(null),[bump,setBump]=useState(0);
   const retry=useCallback(()=>setBump(n=>n+1),[]);
   useEffect(()=>{
     if(!ATTENDANCE_ON||!active||!owner||!state)return;const ac=new AbortController();
-    const get=async(qs:string)=>{const r=await fetch('/api/workspace/attendance?branch='+encodeURIComponent(branch)+'&day='+encodeURIComponent(day)+qs,{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});return r.ok?await r.json() as {status?:string;todayCount?:number;rows?:Visit[];candidates?:Visit[]}:null;};
+    const get=async(qs:string)=>{const r=await fetch('/api/workspace/attendance?branch='+encodeURIComponent(branch)+'&day='+encodeURIComponent(day)+qs,{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});return r.ok?await r.json() as {status?:string;todayCount?:number;rows?:Visit[];canonical?:Cand[];candidates?:Cand[];next?:number|null}:null;};
     const fail=()=>{if(!ac.signal.aborted){setGot(null);setFailedFor(state);}};
     const timer=setTimeout(()=>{(async()=>{try{
       const d=await get('');
       if(d&&d.status==='ok'&&typeof d.todayCount==='number'&&Array.isArray(d.rows)){setGot({owner,branch,day,forState:state,data:{todayCount:d.todayCount,rows:d.rows}});setFailedFor(null);return;}
-      if(d&&d.status==='irregular'&&typeof d.todayCount==='number'&&Array.isArray(d.candidates)){
-        const rows=pickNewest(d.candidates,100);if(rows){setGot({owner,branch,day,forState:state,data:{todayCount:d.todayCount,rows}});setFailedFor(null);return;}
+      if(d&&d.status==='irregular'&&typeof d.todayCount==='number'&&Array.isArray(d.canonical)&&Array.isArray(d.candidates)){
+        let run=mergeNewest([...d.canonical,...d.candidates],100),next=d.next??null;
+        while(run&&next!==null){
+          const pg=await get('&after='+next);
+          if(!pg||pg.status!=='irregular'||!Array.isArray(pg.candidates)||pg.candidates.some(c=>c.pos<=next!))return fail();
+          run=mergeNewest([...run,...pg.candidates],100);next=pg.next??null;
+        }
+        if(run){setGot({owner,branch,day,forState:state,data:{todayCount:d.todayCount,rows:pickNewest(run,100)!}});setFailedFor(null);return;}
       }
       fail();
     }catch{fail();}})();},bump?0:REFETCH_DEBOUNCE_MS);

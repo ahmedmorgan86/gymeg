@@ -26,7 +26,8 @@ async function current(owner){const r=await db.query("SELECT collection,payload 
 
 const {readTodayVisits}=await import('../app/lib/today-visits.ts');
 const {readAttendance}=await import('../app/lib/attendance-page.ts');
-const {pickNewest}=await import('../app/use-attendance.ts');
+const {pickNewest,mergeNewest}=await import('../app/use-attendance.ts');
+const {clientAttendance}=await import('./att-client-sim.mjs');
 const {boundedRead,clearBoundedReadCache}=await import('../app/lib/bounded-read.ts');
 let sd=4242;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
 const scopeOf=()=>(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
@@ -57,7 +58,7 @@ test('attendance differential vs legacy page expressions, fallback on irregular 
     if(bad.status==='irregular'){
       const vs=(await current(owner)).visits.filter(v=>v.branch==='a');
       assert.equal(bad.todayCount,vs.filter(v=>v.day===days[0]).length);
-      const got=pickNewest(bad.candidates,100).map(v=>v.id);
+      const got=(await clientAttendance(scope,{owner,branch:'a',day:days[0]},{readAttendance,mergeNewest,pickNewest})).rows.map(v=>v.id);
       assert.deepEqual(got,[...vs].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map(v=>v.id),'irregular exact legacy order');
       irr++;
     }
@@ -78,10 +79,15 @@ test('57014 is converted so the pool retry text match cannot repeat the query',a
   await assert.rejects(boundedRead(fake,'o','k',async()=>{calls++;const e=new Error('canceling statement due to statement timeout');e.code='57014';throw e;}),e=>e instanceof ReadBudgetError&&!/timeout|503|Connection/.test(e.message));
   assert.equal(calls,1);
 });
-test('irregular cap returns capped, never a guess; version read 57014 is also converted',async()=>{
-  const {IRREGULAR_MAX}=await import('../app/lib/attendance-page.ts');const {ReadBudgetError}=await import('../app/lib/bounded-read.ts');
-  const s=fixture();s.visits=[];for(let i=0;i<IRREGULAR_MAX+5;i++)s.visits.push({id:'x'+i,member:'plain',branch:'a',day:'2026-03-15',at:'2026-03-15T09:00:00Z',leftAt:'2026-03-15T09:30:00Z'});
-  await seed('CAP',s);const out=await readAttendance(scopeOf(),{owner:'CAP',branch:'a',day:'2026-03-15'});assert.equal(out.status,'capped');
+test('irregular branches above one page are exact through paging, no cap; version read 57014 is also converted',async()=>{
+  const {IRREGULAR_PAGE}=await import('../app/lib/attendance-page.ts');const {ReadBudgetError}=await import('../app/lib/bounded-read.ts');
+  const {pickNewest,mergeNewest}=await import('../app/use-attendance.ts');const {clientAttendance}=await import('./att-client-sim.mjs');
+  const s=fixture();s.visits=[];const ats=['2026-03-15T09:00:00Z','2026-03-15T09:00:00.000Z','2026-03-16t01:00:00.000z','2026-03-14T09:00:00+02:00'];
+  for(let i=0;i<IRREGULAR_PAGE*3+37;i++)s.visits.push({id:'x'+i,member:'plain',branch:'a',day:'2026-03-1'+(4+i%3),at:ats[i%4],leftAt:'2026-03-17T00:00:00.000Z'});
+  await seed('CAP',s);const cur=await current('CAP');const vs=cur.visits.filter(v=>v.branch==='a');
+  const out=await clientAttendance(scopeOf(),{owner:'CAP',branch:'a',day:'2026-03-15'},{readAttendance,mergeNewest,pickNewest});
+  assert.ok(out.pages>=2);assert.equal(out.todayCount,vs.filter(v=>v.day==='2026-03-15').length);
+  assert.deepEqual(out.rows.map(v=>v.id),[...vs].sort((a,b)=>b.day.localeCompare(a.day)||b.at.localeCompare(a.at)).slice(0,100).map(v=>v.id));
   clearBoundedReadCache();const fake={async query(sql){if(/to_regclass/.test(sql)){const e=new Error('canceling statement due to statement timeout');e.code='57014';throw e;}return{rows:[]};}};
   await assert.rejects(boundedRead(fake,'o','k',async()=>1),e=>e instanceof ReadBudgetError);
 });
