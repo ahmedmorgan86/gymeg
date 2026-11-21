@@ -41,23 +41,50 @@ CREATE OR REPLACE FUNCTION gymos.invoice_allocation_odd_count(p_payload jsonb) R
 -- Maintenance principal: a NOLOGIN, non-superuser, non-BYPASSRLS role that owns ONLY the two trigger functions below. The runtime role (gymos_app) has SELECT only on refs/odd/state, so it can neither forge,
 -- delete nor claim readiness. The functions are SECURITY DEFINER trigger functions (they cannot be called as ordinary functions). The maintenance role needs NO access to gym_entities or gym_states: it derives everything from OLD/NEW, pinned to pg_catalog, fully qualified, no dynamic SQL, no owner argument: they derive everything
 -- from the real OLD/NEW source row of gymos.gym_entities and fail (rolling back the source write) on any error. Local review candidate only: nothing here is applied to a remote database.
-DO $r$ DECLARE r pg_roles%ROWTYPE; bad text;
+DO $r$ DECLARE r pg_roles%ROWTYPE; bad text; db oid:=(SELECT oid FROM pg_database WHERE datname=current_database());
 BEGIN
   SELECT * INTO r FROM pg_roles WHERE rolname='gymos_refs_maint';
   IF NOT FOUND THEN
     CREATE ROLE gymos_refs_maint NOLOGIN NOSUPERUSER NOBYPASSRLS NOCREATEROLE NOCREATEDB NOINHERIT NOREPLICATION;
   ELSE
-    -- a pre-existing role is NOT trusted: it must have exactly the safe attributes, no memberships either way, no role-level settings, own nothing except our four trigger functions, and hold no privileges on other relations
+    -- A pre-existing role is NOT trusted. It must have exactly the safe attributes, no memberships either way, no role-level settings, and EVERY dependency recorded for it in pg_shdepend (ownership 'o', any ACL entry incl. column,
+    -- schema, function, default and database ACLs 'a', policy references 'r') must be one of the exact identities below, with exactly the intended privileges and no grant option. Anything else fails closed.
     IF r.rolsuper OR r.rolbypassrls OR r.rolcanlogin OR r.rolcreaterole OR r.rolcreatedb OR r.rolreplication OR r.rolinherit OR r.rolconnlimit<>-1 THEN RAISE EXCEPTION 'gymos_refs_maint exists with unsafe attributes; refusing to use it'; END IF;
     IF EXISTS (SELECT 1 FROM pg_auth_members m WHERE m.roleid=r.oid OR m.member=r.oid) THEN RAISE EXCEPTION 'gymos_refs_maint has role memberships (member or granted); refusing to use it'; END IF;
     IF EXISTS (SELECT 1 FROM pg_db_role_setting d WHERE d.setrole=r.oid) THEN RAISE EXCEPTION 'gymos_refs_maint has role settings; refusing to use it'; END IF;
+    IF EXISTS (SELECT 1 FROM pg_default_acl d WHERE d.defaclrole=r.oid OR EXISTS (SELECT 1 FROM aclexplode(d.defaclacl) x WHERE x.grantee=r.oid OR x.grantor=r.oid)) THEN RAISE EXCEPTION 'gymos_refs_maint appears in default ACLs; refusing to use it'; END IF;
     SELECT string_agg(x,',') INTO bad FROM (
-      SELECT 'rel:'||c.relname x FROM pg_class c WHERE c.relowner=r.oid
-      UNION ALL SELECT 'proc:'||p.proname FROM pg_proc p WHERE p.proowner=r.oid AND NOT (p.pronamespace='gymos'::regnamespace AND p.proname IN ('invoice_allocation_refs_sync','invoice_allocation_refs_truncate','invoice_allocation_refs_epoch','invoice_allocation_refs_epoch_truncate'))
-      UNION ALL SELECT 'ns:'||n.nspname FROM pg_namespace n WHERE n.nspowner=r.oid
-      UNION ALL SELECT 'type:'||t.typname FROM pg_type t WHERE t.typowner=r.oid AND t.typrelid=0 AND t.typtype<>'b'
-      UNION ALL SELECT 'priv:'||g.table_schema||'.'||g.table_name FROM information_schema.role_table_grants g WHERE g.grantee='gymos_refs_maint' AND NOT (g.table_schema='gymos' AND g.table_name IN ('invoice_allocation_refs','invoice_allocation_odd','invoice_allocation_refs_state'))) q;
-    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint has unrelated ownership or privileges: %',bad; END IF;
+      SELECT format('%s/%s/%s/%s',d.dbid,d.classid::regclass,d.objid,d.deptype) AS x FROM pg_shdepend d
+      WHERE d.refclassid='pg_authid'::regclass AND d.refobjid=r.oid AND d.deptype<>'p' AND NOT (
+        d.dbid=db AND (
+          -- owned objects: exactly our four trigger functions (by schema, name and identity arguments, so no overload is accepted)
+          (d.deptype='o' AND d.classid='pg_proc'::regclass AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid=d.objid AND p.pronamespace='gymos'::regnamespace AND
+              p.proname IN ('invoice_allocation_refs_sync','invoice_allocation_refs_truncate','invoice_allocation_refs_epoch','invoice_allocation_refs_epoch_truncate') AND pg_get_function_identity_arguments(p.oid)=''))
+          -- ACL entries (objsubid 0 = object level, never a column ACL): the three tables, schema gymos, and EXECUTE on exactly two helper functions
+          OR (d.deptype='a' AND d.objsubid=0 AND (
+              (d.classid='pg_class'::regclass AND d.objid IN ('gymos.invoice_allocation_refs'::regclass,'gymos.invoice_allocation_odd'::regclass,'gymos.invoice_allocation_refs_state'::regclass))
+              OR (d.classid='pg_namespace'::regclass AND d.objid='gymos'::regnamespace)
+              OR (d.classid='pg_proc'::regclass AND EXISTS (SELECT 1 FROM pg_proc p WHERE p.oid=d.objid AND p.pronamespace='gymos'::regnamespace AND (
+                   (p.proname='invoice_allocation_ref_rows' AND pg_get_function_identity_arguments(p.oid)='p_owner text, p_invoice text, p_position integer, p_branch text, p_payload jsonb')
+                OR (p.proname='invoice_allocation_odd_count' AND pg_get_function_identity_arguments(p.oid)='p_payload jsonb'))))))
+          -- policies: exactly the three maintenance policies
+          OR (d.deptype='r' AND d.classid='pg_policy'::regclass AND EXISTS (SELECT 1 FROM pg_policy o WHERE o.oid=d.objid AND o.polname IN ('invoice_allocation_refs_maint','invoice_allocation_odd_maint','invoice_allocation_refs_state_maint')
+              AND o.polrelid IN ('gymos.invoice_allocation_refs'::regclass,'gymos.invoice_allocation_odd'::regclass,'gymos.invoice_allocation_refs_state'::regclass)))
+        ))) q;
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint has unrelated ownership, ACL or policy dependencies: %',bad; END IF;
+    -- exact effective privileges on the allowed objects, no grant option, no column ACLs
+    IF EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attacl IS NOT NULL AND EXISTS (SELECT 1 FROM aclexplode(a.attacl) x WHERE x.grantee=r.oid)) THEN RAISE EXCEPTION 'gymos_refs_maint holds column privileges; refusing to use it'; END IF;
+    SELECT string_agg(c.relname||':'||x.privilege_type||CASE WHEN x.is_grantable THEN '+grant' ELSE '' END,',') INTO bad FROM pg_class c,aclexplode(c.relacl) x
+      WHERE x.grantee=r.oid AND NOT (NOT x.is_grantable AND c.relnamespace='gymos'::regnamespace AND (
+        (c.relname IN ('invoice_allocation_refs','invoice_allocation_odd','invoice_allocation_refs_state') AND x.privilege_type IN ('SELECT','INSERT','DELETE','TRUNCATE'))
+        OR (c.relname='invoice_allocation_refs_state' AND x.privilege_type='UPDATE')));
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint holds unintended table privileges: %',bad; END IF;
+    SELECT string_agg(n.nspname||':'||x.privilege_type,',') INTO bad FROM pg_namespace n,aclexplode(n.nspacl) x WHERE x.grantee=r.oid AND NOT (n.nspname='gymos' AND x.privilege_type='USAGE' AND NOT x.is_grantable);
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint holds unintended schema privileges: %',bad; END IF;
+    SELECT string_agg(p.proname||':'||x.privilege_type,',') INTO bad FROM pg_proc p,aclexplode(p.proacl) x WHERE x.grantee=r.oid AND x.privilege_type<>'EXECUTE' OR (x.grantee=r.oid AND x.privilege_type='EXECUTE' AND NOT (p.pronamespace='gymos'::regnamespace AND (
+        (NOT x.is_grantable AND p.proname IN ('invoice_allocation_ref_rows','invoice_allocation_odd_count'))
+        OR (p.proowner=r.oid AND p.proname IN ('invoice_allocation_refs_sync','invoice_allocation_refs_truncate','invoice_allocation_refs_epoch','invoice_allocation_refs_epoch_truncate') AND pg_get_function_identity_arguments(p.oid)=''))));
+    IF bad IS NOT NULL THEN RAISE EXCEPTION 'gymos_refs_maint holds unintended function privileges: %',bad; END IF;
   END IF;
 END $r$;
 CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_sync() RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
@@ -130,6 +157,9 @@ BEGIN
   -- A restore then either committed before this lock (the generation compare below and the mismatch check, a fresh READ COMMITTED statement, see it) or blocks until this transaction commits and then writes its tombstone AFTER our
   -- ready=true, so a committed tombstone is never overwritten by a stale completion. Refused under a snapshot-fixed isolation level.
   IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'invoice_allocation_refs_complete requires READ COMMITTED'; END IF;
+  -- Bounded: the SHARE lock blocks that owner's saves/restores while the verification scan runs, so the whole call is capped. A timeout aborts the transaction (lock released, readiness untouched, fail closed) and the operator retries
+  -- off-peak or after more rebuild. JUDGMENT numbers, not derived: 2s to acquire the row lock, 15s for the whole call.
+  PERFORM set_config('lock_timeout','2s',true);PERFORM set_config('statement_timeout','15s',true);
   SELECT true INTO have FROM gymos.gym_states g WHERE g.user_id=p_owner FOR SHARE;
   BEGIN SELECT ((g.payload::jsonb)->'generation')::text INTO cur FROM gymos.gym_states g WHERE g.user_id=p_owner; EXCEPTION WHEN data_exception THEN RETURN false; END; -- unparseable metadata: refuse
   IF NOT COALESCE(have,false) THEN RETURN false; END IF;
