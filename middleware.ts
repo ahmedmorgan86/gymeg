@@ -20,7 +20,14 @@ export async function middleware(request: NextRequest) {
   // stores it.
   if (plan.action === 'set') request.cookies.set('gymos_session', plan.value);
   const response = NextResponse.next({ request });
-  if (plan.action === 'set') response.cookies.set('gymos_session', plan.value, plan.options);
+  if (plan.action === 'set') {
+    response.cookies.set('gymos_session', plan.value, plan.options);
+    // A session-changing response must never be stored or replayed by any
+    // cache between us and the browser.
+    response.headers.set('Cache-Control', 'private, no-store, must-revalidate');
+    response.headers.set('Pragma', 'no-cache');
+    response.headers.set('Expires', '0');
+  }
   return response;
 }
 

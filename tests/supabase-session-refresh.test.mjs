@@ -70,3 +70,16 @@ test('staggered concurrent refreshes of the same cookie never produce a clear', 
   assert.equal(loser.action, 'keep');
   delete global.fetch;
 });
+
+test('session-changing middleware responses carry cache-prevention headers', async () => {
+  // Exercises the exact header block from middleware.ts against the plan
+  // shape: only a 'set' plan may carry these headers.
+  const { readFileSync } = await import('node:fs');
+  const source = readFileSync(new URL('../middleware.ts', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf("if (plan.action === 'set')", source.indexOf('NextResponse.next')));
+  assert.match(block, /Cache-Control', 'private, no-store, must-revalidate'/);
+  assert.match(block, /Pragma', 'no-cache'/);
+  assert.match(block, /Expires', '0'/);
+  // Keep/unknown paths must not add cache headers to public pages.
+  assert.equal(source.includes("if (plan.action === 'clear')"), false);
+});
