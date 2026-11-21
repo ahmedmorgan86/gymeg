@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { getFirestoreDb } from './firestore-db.ts';
 import { emptyState } from './domain';
 import { CommercialError, licenseGrant, limits, priceMinor, type License } from './licensing';
+import { OWNER_FREE_LIMITS, OWNER_FREE_PLAN } from './platform-owner-license';
 import type { ChatGPTUser } from '../chatgpt-auth';
 import type { CommercialClub, Order } from './commercial-types';
 
@@ -52,7 +53,7 @@ export async function firebaseDirectory(user: ChatGPTUser, platformView = false)
     platformView ? database().collection('activation_requests').orderBy('created_at', 'desc').limit(200).get() : null,
     platformView ? database().collection('commercial_audit').orderBy('at', 'desc').limit(100).get() : null,
   ]);
-  return { account: { name: user.displayName, email: user.email }, platform, ownerComplimentary: false, clubs, plans: planDocs?.docs.map(doc => doc.data()) || [], settings: settings.data() || { payload: { company: '', support: '', paymentInstructions: '', terms: '', privacy: '' }, revision: 0 }, orders: orderDocs?.docs.map(doc => doc.data()) || [], events: eventDocs?.docs.map(doc => doc.data()) || [], trialUsed: trial.exists };
+  return { account: { name: user.displayName, email: user.email }, platform, ownerComplimentary: platform, clubs, plans: planDocs?.docs.map(doc => doc.data()) || [], settings: settings.data() || { payload: { company: '', support: '', paymentInstructions: '', terms: '', privacy: '' }, revision: 0 }, orders: orderDocs?.docs.map(doc => doc.data()) || [], events: eventDocs?.docs.map(doc => doc.data()) || [], trialUsed: trial.exists };
 }
 
 export async function firebaseAction(user: ChatGPTUser, body: Record<string, unknown>) {
@@ -114,22 +115,31 @@ export async function firebaseAction(user: ChatGPTUser, body: Record<string, unk
     const name = text(body.name);
     if (action === 'setup' && (typeof body.requestId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(body.requestId) || typeof body.startTrial !== 'boolean')) throw new CommercialError('invalid');
     const id = action === 'setup' ? String(body.requestId) : randomUUID(), now = new Date().toISOString();
+    // Verified platform owner (active platform_admins record): every club they
+    // create carries the complimentary platform-owner license, mirroring the
+    // Postgres ownerComplimentary flow. Never trusts a client-supplied flag.
+    const complimentary = await firebasePlatform(user);
     const userClubs = await db.collection('tenant_memberships').where('user_id', '==', user.userId).get();
-    if (userClubs.docs.filter(doc => doc.data().role === 'owner' && doc.data().revoked === false).length >= 20) throw new CommercialError('clubLimit', 403);
+    if (!complimentary && userClubs.docs.filter(doc => doc.data().role === 'owner' && doc.data().revoked === false).length >= 20) throw new CommercialError('clubLimit', 403);
     const state = emptyState(); state.settings.name = name;
     const created = await db.runTransaction(async tx => {
       const existing = await tx.get(tenantRef(id));
       const plan = await tx.get(db.collection('commercial_plans').doc('custom'));
+      const ownerPlan = complimentary ? await tx.get(db.collection('commercial_plans').doc(OWNER_FREE_PLAN)) : null;
       if (existing.exists) { if (existing.data()?.created_by !== user.userId || existing.data()?.name !== name) throw new CommercialError('conflict', 409); return false; }
       if (!plan.exists) tx.create(db.collection('commercial_plans').doc('custom'), { id: 'custom', name: 'باقة حسب الاتفاق', currency: 'EGP', monthly_minor: null, annual_minor: null, perpetual_minor: null, maintenance_minor: null, limits: DEFAULT_LIMITS, published: true, revision: 0 });
+      if (complimentary && !ownerPlan!.exists) tx.create(db.collection('commercial_plans').doc(OWNER_FREE_PLAN), { id: OWNER_FREE_PLAN, name: 'استخدام صاحب المنصة - مجاني', currency: 'EGP', monthly_minor: 0, annual_minor: 0, perpetual_minor: 0, maintenance_minor: 0, limits: OWNER_FREE_LIMITS, published: false, revision: 0 });
       tx.create(tenantRef(id), { id, name, storage_key: `tenant:${id}`, created_by: user.userId, created_at: now });
       tx.create(memberRef(id, user.userId), { tenant_id: id, user_id: user.userId, role: 'owner', name: user.displayName, branches: null, revoked: false });
-      tx.create(licenseRef(id), defaultLicense(id));
+      tx.create(licenseRef(id), complimentary
+        ? { tenant_id: id, plan_id: OWNER_FREE_PLAN, mode: 'perpetual', status: 'active', starts_at: now, ends_at: null, maintenance_until: null, limits: OWNER_FREE_LIMITS, revision: 0 }
+        : defaultLicense(id));
       tx.create(db.collection('gym_states').doc(`tenant:${id}`), { user_id: `tenant:${id}`, payload: JSON.stringify(state), revision: 0, updated_at: now });
       tx.create(auditRef(), audit(user.userId, id, 'club.created'));
+      if (complimentary) tx.create(auditRef(), audit(user.userId, id, 'license.owner_complimentary', { reason: 'Verified platform owner personal club; no charge or renewal' }));
       return true;
     });
-    if (created && action === 'setup' && body.startTrial) await firebaseAction(user, { action: 'trial.start', tenant: id });
+    if (created && action === 'setup' && body.startTrial && !complimentary) await firebaseAction(user, { action: 'trial.start', tenant: id });
     return { id };
   }
   const id = text(body.tenant), club = await firebaseClub(user, id);
