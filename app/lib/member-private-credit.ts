@@ -14,7 +14,13 @@ export async function exactPrivateCredit(c:Q,owner:string,payments:GymState['pay
  if(!selected.length)return{status:'ok',credit:0} as const;
  if(process.env.GYMOS_CREDIT_REFS==='1'){
   const r=await allocatingInvoicesFromRefs(c,owner,selected.map(p=>p.id));
-  if(r.status==='ok'){const credit=memberCredit({payments,invoices:r.invoices} as unknown as GymState,member,branch);if(!Number.isFinite(credit))return{status:'unavailable',reason:'credit-nonfinite'} as const;return{status:'ok',credit} as const;}
+  if(r.status==='ok'){
+   // Same accepted admission as the fold below, applied BEFORE the unchanged repeated fold: bytes of the returned allocation slices, and fold units x creditable payments. SQL timeouts do not bound JS CPU.
+   let units=r.invoices.length,bytes=0;for(const i of r.invoices){bytes+=Buffer.byteLength(JSON.stringify(i.allocations??null))+Buffer.byteLength(JSON.stringify(i.voided??null))+64;if(!i.voided&&Array.isArray(i.allocations))units+=i.allocations.length;}
+   if(bytes>PRIVATE_CREDIT_BYTES)return{status:'unavailable',reason:'credit-byte-cap'} as const;
+   if(bytes*selected.length>PRIVATE_CREDIT_FOLD_BYTES)return{status:'unavailable',reason:'credit-fold-byte-cap'} as const;
+   if(units*selected.length>PRIVATE_CREDIT_FOLD_UNITS)return{status:'unavailable',reason:'credit-fold-cap'} as const;
+   const credit=memberCredit({payments,invoices:r.invoices} as unknown as GymState,member,branch);if(!Number.isFinite(credit))return{status:'unavailable',reason:'credit-nonfinite'} as const;return{status:'ok',credit} as const;}
  }
  // One statement/snapshot: never check bytes then fetch a changed larger projection.
  // A refused budget emits only metadata, not the oversized allocation payload.

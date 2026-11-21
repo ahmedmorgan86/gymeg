@@ -116,3 +116,16 @@ test('exactPrivateCredit: flag ON (refs) == flag OFF (whole-owner fold) per memb
   process.env.GYMOS_CREDIT_REFS='1';const a=await exactPrivateCredit(db,'XQ6',s2.payments,m.id,m.branch);delete process.env.GYMOS_CREDIT_REFS;const b=await exactPrivateCredit(db,'XQ6',s2.payments,m.id,m.branch);
   assert.deepEqual(a,b);
 });
+test('refs path applies the same admission as the fold before the repeated fold (500 creditable payments x one 4001-allocation invoice)',async()=>{
+  const {exactPrivateCredit}=await import('../app/lib/member-private-credit.ts');
+  const owner='XQ7',payments=Array.from({length:500},(_,i)=>({id:'p'+i,member:'m',branch:'a',creditable:true,minor:1000}));
+  await db.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[owner]);
+  await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,payload) VALUES($1,'invoices','i',0,$2)",[owner,JSON.stringify({allocations:Array.from({length:4001},()=>({payment:'p0',minor:0})),voided:false})]);
+  await db.query("SELECT gymos.invoice_allocation_refs_complete($1,NULL)",[owner]);
+  delete process.env.GYMOS_CREDIT_REFS;const off=await exactPrivateCredit(db,owner,payments,'m','a');
+  process.env.GYMOS_CREDIT_REFS='1';let on;try{on=await exactPrivateCredit(db,owner,payments,'m','a');}finally{delete process.env.GYMOS_CREDIT_REFS;}
+  assert.equal(off.reason,'credit-fold-byte-cap');assert.deepEqual(on,off);
+  // under the bounds both paths answer, identically
+  const few=payments.slice(0,3);delete process.env.GYMOS_CREDIT_REFS;const a=await exactPrivateCredit(db,owner,few,'m','a');process.env.GYMOS_CREDIT_REFS='1';const b=await exactPrivateCredit(db,owner,few,'m','a');delete process.env.GYMOS_CREDIT_REFS;
+  assert.equal(a.status,'ok');assert.deepEqual(b,a);
+});
