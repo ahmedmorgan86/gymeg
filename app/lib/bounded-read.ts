@@ -24,6 +24,7 @@ export function clearBoundedReadCache(){cache.clear();}
  * generic plans) it prefers a whole-table scan for `EXISTS(... LIMIT 1)`. Disabling seq scan for this one statement (transaction-local, restored right after) makes the eligible index
  * the plan; if the index is absent the planner still falls back to a scan (enable_seqscan=off only penalises it), so correctness never depends on the setting. */
 export async function indexProbe<T>(c:Sql,work:()=>Promise<T>):Promise<T>{
+  const prior=String((await c.query("SELECT current_setting('enable_seqscan') AS v")).rows[0]?.['v' as never]??'on');
   await c.query("SELECT set_config('enable_seqscan','off',true)");
-  try{return await work();}finally{try{await c.query("SELECT set_config('enable_seqscan','on',true)");}catch{/* aborted transaction: the setting dies with it */}}
+  try{return await work();}finally{try{await c.query("SELECT set_config('enable_seqscan',$1,true)",[prior==='off'?'off':'on']);}catch{/* aborted transaction: the setting dies with it */}}
 }
