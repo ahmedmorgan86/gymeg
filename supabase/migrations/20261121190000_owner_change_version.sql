@@ -44,3 +44,9 @@ CREATE TRIGGER gym_entities_zver_trunc AFTER TRUNCATE ON gymos.gym_entities FOR 
 DROP TRIGGER IF EXISTS gym_states_zver ON gymos.gym_states;DROP TRIGGER IF EXISTS gym_states_zver_trunc ON gymos.gym_states;
 CREATE TRIGGER gym_states_zver AFTER INSERT OR UPDATE OR DELETE ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.bump_owner_version_state();
 CREATE TRIGGER gym_states_zver_trunc AFTER TRUNCATE ON gymos.gym_states FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_owner_version();
+-- Member photo rows live in gym_photos: candidate rows carry the photo version (hash), so a photo change must move the token too.
+DROP TRIGGER IF EXISTS gym_photos_zver_ins ON gymos.gym_photos;DROP TRIGGER IF EXISTS gym_photos_zver_upd ON gymos.gym_photos;DROP TRIGGER IF EXISTS gym_photos_zver_del ON gymos.gym_photos;DROP TRIGGER IF EXISTS gym_photos_zver_trunc ON gymos.gym_photos;
+CREATE TRIGGER gym_photos_zver_ins AFTER INSERT ON gymos.gym_photos REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_ins();
+CREATE TRIGGER gym_photos_zver_upd AFTER UPDATE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_upd();
+CREATE TRIGGER gym_photos_zver_del AFTER DELETE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_del();
+CREATE TRIGGER gym_photos_zver_trunc AFTER TRUNCATE ON gymos.gym_photos FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_owner_version();

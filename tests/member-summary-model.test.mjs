@@ -183,3 +183,15 @@ test('list layer: rows, summary fields and the exact search string equal console
   assert.equal(cache.get('o','a','reception-nofin','5'),null,'other permission scope is a miss');assert.equal(cache.versionFor('o','a','reception-nofin'),null);
   cache.clear();assert.equal(cache.get('o','a','admin','5'),null,'cleared on sign-out/tenant switch');
 });
+test('list source: candidates fetched for an older state are never mixed with a newer state (mutation regression)',async()=>{
+  const {chooseRows}=await import('../app/use-console-index.ts');const {emptyState}=await import('../app/lib/domain.ts');const {normalize}=await import('../app/lib/extensions.ts');
+  const {computeStoredSummary}=await import('../app/lib/member-summary-model.ts');
+  const s1=normalize(emptyState());s1.branches=[{id:'a',name:'A'}];s1.members=[{id:'m1',name:'Old Name',phone:'01000000001',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'p1',plan:'pl',start:'2026-01-01',end:'2026-12-31',visits:null}]}];
+  const stamp=Date.parse('2026-03-15T12:00:00Z');
+  const cands={owner:'o',branch:'a',scope:'admin:fin',forState:s1,list:[{member:s1.members[0],stored:computeStoredSummary(s1,s1.members[0],'2026-03-01T00:00:00.000Z')}]};
+  assert.equal(chooseRows(true,cands,s1,'a','o','admin:fin',stamp).source,'candidates');
+  const s2=structuredClone(s1);s2.members[0].name='New Name';s2.settings.receptionPolicy={...(s2.settings.receptionPolicy??{}),autoExitMinutes:5};
+  const after=chooseRows(true,cands,s2,'a','o','admin:fin',stamp);assert.equal(after.source,'legacy','state changed: exact legacy until matching candidates arrive');assert.equal(after.rows[0].m.name,'New Name','the updated member is shown, never the stale candidate');
+  assert.equal(chooseRows(true,cands,s1,'a','o2','admin:fin',stamp).source,'legacy','tenant switch');assert.equal(chooseRows(true,cands,s1,'a','o','reception:nofin',stamp).source,'legacy','permission change');
+  assert.equal(chooseRows(false,cands,s1,'a','o','admin:fin',stamp).source,'legacy','flag off is always legacy');
+});

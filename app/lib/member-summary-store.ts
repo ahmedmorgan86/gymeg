@@ -10,7 +10,11 @@ export const MEMBER_CANDIDATE_MAX=10000; // the cap the operation path and resto
 export const REFRESH_MAX=500; // dirty members per request-side read (round trips and CPU; the BYTES bound is the counters bound below)
 export const CHUNK=20; // members per history query: per-member index lookups keep the natural plan an index scan (a 100-id ANY flips to whole-collection bitmap work)
 export const LOCK_WAIT_MS=1000; // availability guard for row-lock waits; the owner refresh lock is try-lock and never waits
-export type Candidate={member:Member;stored:StoredSummary};
+/** `member` carries no health/vitals/measurements and no inline photo (list/search never reads them; the packet ships them separately); `photoV` is the same 16-hex photo version
+ * the packet uses (inline photo hash, else the stored photo row hash), null when the member has no photo. */
+export type Candidate={member:Member;stored:StoredSummary;photoV?:string|null};
+const LIST_STRIP=['photo','health','vitals','measurements'] as const;
+const slim=(m:Member):Member=>{const o={...m} as Record<string,unknown>;for(const k of LIST_STRIP)delete o[k];return o as Member;};
 export type Refusal='unready'|'too-many-members'|'too-many-dirty'|'over-state-bound'|'busy'|'raced'|'stale';
 export type CandidateResult={status:'ok';candidates:Candidate[];refreshed:number}|{status:Refusal};
 export type RefreshResult={status:'ok';refreshed:number;remaining:number}|{status:Refusal};
@@ -94,7 +98,7 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
   if(!await ready(c,owner))return refuse('unready');
   const filter=branches?' AND e.branch=ANY($2::text[])':'';const args=branches?[owner,branches]:[owner];
   // ONE statement: each member payload, its stored inputs and its dirty mark come from the same snapshot, so a candidate is never an old member paired with newer inputs.
-  const rows=(await c.query(`SELECT e.entity_id,e.payload,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;stored:StoredSummary|null;gen:string|number|null}[];
+  const rows=(await c.query(`SELECT e.entity_id,e.payload-'photo'-'health'-'vitals'-'measurements' AS payload,CASE WHEN NULLIF(e.payload->>'photo','') IS NOT NULL THEN left(encode(sha256(convert_to(e.payload->>'photo','UTF8')),'hex'),16) ELSE (SELECT left(encode(sha256(convert_to(ph.content,'UTF8')),'hex'),16) FROM gymos.gym_photos ph WHERE ph.owner_id=e.owner_id AND ph.member_id=e.entity_id) END AS photo_v,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;photo_v:string|null;stored:StoredSummary|null;gen:string|number|null}[];
   if(rows.length>MEMBER_CANDIDATE_MAX)return refuse('too-many-members');
   const members=rows.filter(r=>!r.payload.archived);
   const need=members.filter(r=>r.gen!==null||!r.stored||r.stored.v!==2).map(r=>r.entity_id); // a missing row is never trusted
@@ -105,7 +109,7 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
     const why=await recompute(c,owner,need,fresh,opts.now);if(why)return refuse(why);
   }
   const needSet=new Set(need),candidates:Candidate[]=[];
-  for(const r of members){if(!needSet.has(r.entity_id))candidates.push({member:r.payload,stored:r.stored!});else{const f=fresh.get(r.entity_id);if(!f)return refuse('raced');candidates.push(f);}} // absent: deleted while refreshing
+  for(const r of members){if(!needSet.has(r.entity_id))candidates.push({member:r.payload,stored:r.stored!,photoV:r.photo_v});else{const f=fresh.get(r.entity_id);if(!f)return refuse('raced');candidates.push({member:slim(f.member),stored:f.stored,photoV:r.photo_v});}} // absent: deleted while refreshing
   return{status:'ok',candidates,refreshed:need.length};
 }
 

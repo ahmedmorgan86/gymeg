@@ -193,3 +193,24 @@ test('console candidate source: ok, unchanged, fallback, permission blanking, fo
   const r=await readConsoleCandidates(racing,{owner:'S1',branch:'a',branches:null,financial:true,now:AS});
   assert.deepEqual(r,{status:'fallback',reason:'changed-during-read'});
 });
+test('candidate member rows equal the packet member minus health/vitals/measurements: no sensitive field for anyone, photos as versioned URLs, 22KB photos never inline',async()=>{
+  const {readConsoleCandidates}=await import('../app/lib/member-console-source.ts');const {packet}=await import('../app/lib/workspace-packet.ts');
+  const s=fixture();const PHOTO='data:image/jpeg;base64,'+'A'.repeat(21900);
+  s.members[0].health={notes:'secret'};s.members[0].vitals={bp:'120/80'};s.members[0].measurements=[{day:'2026-01-01',kg:80}];
+  if(s.members[1]){s.members[1].health={notes:'secret2'};}
+  await seed('P1',s);
+  const photoRow=s.members[0].id; // the real layout: the photo lives in its own row, at the 22,000-character maximum the table allows
+  await db.query("INSERT INTO gymos.gym_photos(owner_id,member_id,content) VALUES('P1',$1,$2)",[photoRow,PHOTO+'B']);
+  await db.query("UPDATE gymos.gym_entities SET payload=payload||jsonb_build_object('photo',$1::text) WHERE owner_id='P1' AND collection='members' AND entity_id=$2",[PHOTO,s.members[1].id]); // a legacy inline photo on another member
+  s.members[1].photo=PHOTO;
+  const scope=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});
+  await db.query("SELECT gymos.backfill_member_summaries('P1')");
+  for(const role of ['owner','reception']){
+    const out=await readConsoleCandidates(scope,{owner:'P1',tenantId:'T1',branch:'a',branches:null,financial:role!=='reception',now:AS});assert.equal(out.status,'ok');
+    const raw=JSON.stringify(out);assert.ok(!/secret|120\/80|measurements|"health"|"vitals"/.test(raw),role+': sensitive fields absent from candidates');
+    assert.ok(!raw.includes('AAAAAAAAAA'),role+': no inline photo bytes');assert.ok(raw.length<out.candidates.length*3000,'payload stays small: '+raw.length);
+    const pk=packet({state:structuredClone(s),revision:5},{role,branches:null,tenantId:'T1',owner:'T1',user:{userId:'u',displayName:'u'}},photoRow?{[photoRow]:require_hash(PHOTO+'B')}:undefined);
+    for(const c of out.candidates){const want=pk.state.members.find(m=>m.id===c.member.id);const w=structuredClone(want);delete w.health;delete w.vitals;delete w.measurements;assert.deepEqual(c.member,w,role+' '+c.member.id+': same photo URL and fields as the packet');}
+  }
+});
+import {createHash} from 'node:crypto';function require_hash(x){return createHash('sha256').update(x).digest('hex').slice(0,16);}

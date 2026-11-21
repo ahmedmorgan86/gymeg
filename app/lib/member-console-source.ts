@@ -6,7 +6,7 @@ import type {Member} from './domain.ts';
 import type {StoredSummary} from './member-summary-model.ts';
 
 export type Scope=<T>(owner:string,work:(c:{query(sql:string,values?:unknown[]):Promise<{rows:unknown[]}>})=>Promise<T>)=>Promise<T>;
-export type CandidatesRequest={owner:string;branch:string;branches:string[]|null;financial:boolean;since?:string|null;now?:string};
+export type CandidatesRequest={owner:string;tenantId:string;branch:string;branches:string[]|null;financial:boolean;since?:string|null;now?:string};
 export type CandidatesResponse=
   |{status:'ok';version:string;candidates:{member:Member;stored:StoredSummary}[]}
   |{status:'unchanged';version:string}
@@ -26,7 +26,9 @@ export async function readConsoleCandidates(scope:Scope,q:CandidatesRequest):Pro
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const v2=await readOwnerVersion(c,q.owner);
     if(v2!==v1)return{status:'fallback',reason:'changed-during-read'} as const; // a writer landed between the token read and the rows: the client retries or stays legacy
-    const candidates=r.candidates.map(x=>q.financial?x:{member:x.member,stored:{...x.stored,debt:0,paid:0}});
+    // Same photo transformation as packet(): a version in the URL, never the bytes.
+    const withPhoto=(x:{member:Member;photoV?:string|null})=>x.photoV?{...x.member,photo:'/api/member-photo?owner='+encodeURIComponent(q.tenantId)+'&id='+encodeURIComponent(x.member.id)+'&v='+x.photoV}:x.member;
+    const candidates=r.candidates.map(x=>({member:withPhoto(x),stored:q.financial?x.stored:{...x.stored,debt:0,paid:0}}));
     return{status:'ok',version:v1,candidates} as const;
   });
 }
