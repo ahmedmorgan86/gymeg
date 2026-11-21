@@ -19,7 +19,7 @@ registerHooks({
 process.env.GYMEG_FIREBASE_PROJECT_ID = 'test-project';
 process.env.GYMEG_MEMBER_PIN_KEY = randomBytes(32).toString('base64');
 
-const { __counters, __reset, __store } = await import('./firestore-snapshot-mock.mjs');
+const { __counters, __reset, __store, __hooks } = await import('./firestore-snapshot-mock.mjs');
 const { firestoreReadSpace, firestorePersistSpace, __clearSpaceCacheForTests } = await import('../app/lib/firestore-db.ts');
 const { emptyState } = await import('../app/lib/domain.ts');
 
@@ -227,6 +227,58 @@ test('a 10k-document club cold-reads with a handful of document reads', async ()
   assert.equal(__counters.reads, 1 + chunks);
   assert.ok(__counters.reads <= 10, `10k-doc club cold read cost ${__counters.reads} reads`);
 }, { timeout: 120_000 });
+
+test('a tripped guard blocks later cold instances cheaply across processes', async () => {
+  const base = await firestoreReadSpace(OWNER);
+  const next = structuredClone(base.state);
+  for (let index = 0; index < 150; index++) next.members.push(member(index));
+  assert.equal(await firestorePersistSpace(OWNER, base, next), true);
+  __store.get('gym_state_snapshots').clear();
+  const previous = process.env.GYMEG_MAX_SCAN_DOCS;
+  process.env.GYMEG_MAX_SCAN_DOCS = '100';
+  try {
+    __clearSpaceCacheForTests();
+    await assert.rejects(() => firestoreReadSpace(OWNER), /scanBudget/);
+    // Second cold instance (cache cleared): marker blocks it before any scan.
+    __clearSpaceCacheForTests();
+    const before = __counters.docsReturned;
+    await assert.rejects(() => firestoreReadSpace(OWNER), /scanBudget/);
+    assert.equal(__counters.docsReturned - before, 0, 'blocked instance must not rescan');
+    // An operator who deliberately raises the budget is not blocked.
+    process.env.GYMEG_MAX_SCAN_DOCS = '500';
+    __clearSpaceCacheForTests();
+    const fine = await firestoreReadSpace(OWNER);
+    assert.equal(fine.state.members.length, 150);
+  } finally {
+    if (previous === undefined) delete process.env.GYMEG_MAX_SCAN_DOCS; else process.env.GYMEG_MAX_SCAN_DOCS = previous;
+  }
+});
+
+test('a persist racing the entity scan never serves or caches a mixed-revision state', async () => {
+  const base = await firestoreReadSpace(OWNER);
+  const next = structuredClone(base.state);
+  next.members.push(member(1), member(2));
+  assert.equal(await firestorePersistSpace(OWNER, base, next), true);
+  __store.get('gym_state_snapshots').clear(); // force the scan path
+  __clearSpaceCacheForTests();
+  // Simulate a concurrent persist landing mid-scan: bump the revision behind
+  // the scan's back when the entity query runs (first attempt only).
+  __hooks.beforeQueryGet = (name) => {
+    if (name !== 'gym_entities') return;
+    __hooks.beforeQueryGet = undefined;
+    const stateDoc = __store.get('gym_states').get(OWNER);
+    __store.get('gym_states').set(OWNER, { ...stateDoc, revision: 99 });
+  };
+  try {
+    // The retry sees revision 99 with no matching snapshot and no racing
+    // writer this time: it scans and serves revision 99 coherently.
+    const result = await firestoreReadSpace(OWNER);
+    assert.equal(result.revision, 99);
+    assert.equal(result.state.members.length, 2);
+  } finally {
+    __hooks.beforeQueryGet = undefined;
+  }
+});
 
 test('persist write amplification stays bounded', async () => {
   const base = await firestoreReadSpace(OWNER);

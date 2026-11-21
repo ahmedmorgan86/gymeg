@@ -181,6 +181,11 @@ async function readSnapshot(db: Firestore, owner: string, revision: number): Pro
       if (typeof content === 'string') photos[photoIds[index]] = content;
     });
     packed.s.members = packed.s.members.map(member => (photos[member.id] ? { ...member, photo: photos[member.id] } : member));
+    const missing = photoIds.length - Object.keys(photos).length;
+    if (missing > 0) {
+      // Counts only - never member ids or content.
+      console.warn(`snapshot_photos_missing owner=${owner} missing=${missing} of=${photoIds.length}`);
+    }
     // The photo reads above are not in the snapshot's transaction: a persist
     // that advanced the revision while they ran would leave new photos on the
     // old state. Re-verify the revision (one extra read, only on the photo
@@ -246,10 +251,21 @@ export function getFirestoreDb(): Firestore {
   return firestoreInstance;
 }
 
+// A club that trips the scan guard gets a durable marker so every later cold
+// instance fails fast (one marker read) instead of each spending ~cap+1 docs
+// to rediscover the same over-budget club. The marker carries a TTL: after it
+// expires one bounded scan is retried, which is also how recovery happens
+// after an operator trims data or raises the budget deliberately.
+const SCAN_GUARD_TTL_MS = 6 * 60 * 60 * 1000;
+
 /**
  * Reads space from Firestore 'gym_states' collection (and entities if split).
  */
 export async function firestoreReadSpace(owner: string): Promise<{ state: GymState; revision: number }> {
+  return readSpaceWithRetry(owner, false);
+}
+
+async function readSpaceWithRetry(owner: string, isRetry: boolean): Promise<{ state: GymState; revision: number }> {
   const db = getFirestoreDb();
   const stateDocRef = db.collection('gym_states').doc(owner);
   const snap = await stateDocRef.get();
@@ -283,15 +299,40 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       return { state, revision: data.revision };
     }
 
-    // Read entities. Bounded: never scan more than MAX_SCAN_DOCS documents in
-    // a single read - fail closed rather than burn the daily quota silently.
+    // Cross-instance circuit breaker: a recent guard trip fails this cold
+    // instance fast instead of spending ~cap+1 docs per instance.
+    const guardRef = db.collection('gym_scan_guard').doc(owner);
+    const guardSnap = await guardRef.get();
+    const guardData = guardSnap.exists ? guardSnap.data() as { blockedAt?: string; scanned?: number } : undefined;
+    const blockedAt = Date.parse(guardData?.blockedAt ?? '');
+    // Block only while the recorded over-budget count still exceeds the
+    // current cap: an operator who deliberately raises GYMEG_MAX_SCAN_DOCS
+    // (the bootstrap script) is not blocked by an earlier trip.
+    const stillOverBudget = typeof guardData?.scanned !== 'number' || guardData.scanned > maxScanDocs();
+    if (Number.isFinite(blockedAt) && Date.now() - blockedAt < SCAN_GUARD_TTL_MS && stillOverBudget) {
+      throw new ScanBudgetError(-1, maxScanDocs()); // blocked by a recent trip; -1 = no scan attempted
+    }
+    const tripGuard = async (scanned: number): Promise<void> => {
+      try {
+        await guardRef.set({ owner_id: owner, blockedAt: new Date().toISOString(), scanned, cap: maxScanDocs() });
+      } catch (error) {
+        console.warn('scan_guard_mark_failed', error);
+      }
+    };
+
+    // Read entities. Bounded: .limit(cap+1) makes Firestore itself cap the
+    // returned documents, so the budget is enforced before the full fetch,
+    // and over-budget clubs fail closed rather than burn the daily quota.
     const entitiesSnap = await db.collection('gym_entities')
       .where('owner_id', '==', owner)
       .orderBy('collection')
       .orderBy('position')
       .limit(maxScanDocs() + 1)
       .get();
-    if (entitiesSnap.docs.length > maxScanDocs()) throw new ScanBudgetError(entitiesSnap.docs.length, maxScanDocs());
+    if (entitiesSnap.docs.length > maxScanDocs()) {
+      await tripGuard(entitiesSnap.docs.length);
+      throw new ScanBudgetError(entitiesSnap.docs.length, maxScanDocs());
+    }
     const entities = entitiesSnap.docs.map(d => d.data() as Entity);
 
     // Read photos. The remaining budget is always >= 1 here because the
@@ -300,7 +341,10 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       .where('owner_id', '==', owner)
       .limit(maxScanDocs() - entitiesSnap.docs.length + 1)
       .get();
-    if (entitiesSnap.docs.length + photosSnap.docs.length > maxScanDocs()) throw new ScanBudgetError(entitiesSnap.docs.length + photosSnap.docs.length, maxScanDocs());
+    if (entitiesSnap.docs.length + photosSnap.docs.length > maxScanDocs()) {
+      await tripGuard(entitiesSnap.docs.length + photosSnap.docs.length);
+      throw new ScanBudgetError(entitiesSnap.docs.length + photosSnap.docs.length, maxScanDocs());
+    }
     const photos = Object.fromEntries(
       photosSnap.docs.map(d => {
         const pd = d.data();
@@ -308,7 +352,21 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       })
     );
 
+    // The scan is not transactional: a persist that raced it leaves a state
+    // assembled from mixed revisions. Never serve or cache that: re-verify
+    // the state revision after the scan and retry once from the top (the
+    // racing persist's own snapshot usually serves the retry). If it races
+    // again, fail closed; the next request retries.
+    const recheck = await stateDocRef.get();
+    const latestRevision = recheck.exists ? (recheck.data() as { revision?: number }).revision : undefined;
+    if (latestRevision !== data.revision) {
+      console.warn('scan_raced_persist', owner);
+      if (isRetry) throw new Error('firestoreReadSpace raced concurrent writes twice; failing closed');
+      return readSpaceWithRetry(owner, true);
+    }
+
     const state = normalize(assembleState(parsedMeta, entities, photos));
+    if (guardSnap.exists) await guardRef.delete(); // scan succeeded: clear any stale trip marker
     cacheSpace(owner, data.revision, state);
     // One-time bootstrap: persist a snapshot so later cold reads skip the scan.
     await backfillSnapshot(db, owner, data.revision, state);
@@ -445,6 +503,10 @@ export async function firestorePersistSpace(
     // state can be deleted here without an extra read. Oversized states skip
     // the snapshot; reads fall back to the entity scan for those revisions.
     const built = buildSnapshotChunks(next);
+    if (!built) {
+      // No sizes or content - just the fact and the owner key.
+      console.warn(`snapshot_skipped_oversized owner=${owner} revision=${newRevision}`);
+    }
     const previousChunks = typeof (curData as { _snapshotChunks?: unknown })._snapshotChunks === 'number'
       ? (curData as unknown as { _snapshotChunks: number })._snapshotChunks
       : 0;

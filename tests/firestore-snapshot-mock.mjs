@@ -7,6 +7,9 @@
 const apps = [];
 const store = new Map(); // collection name -> Map(docId -> data)
 export const __counters = { reads: 0, writes: 0, queries: 0, docsReturned: 0 };
+// Test-only hooks: __hooks.beforeQueryGet?.(collectionName) runs before a
+// query executes, letting tests simulate a concurrent writer mid-read.
+export const __hooks = {};
 export const __store = store;
 export function __reset() {
   store.clear();
@@ -71,6 +74,7 @@ function queryApi(name, filters, orders, lim) {
     orderBy: (field, dir = 'asc') => queryApi(name, filters, [...orders, [field, dir]], lim),
     limit: (n) => queryApi(name, filters, orders, n),
     get: async () => {
+      if (__hooks.beforeQueryGet) __hooks.beforeQueryGet(name);
       let rows = [...coll(name).entries()].filter(([id, data]) => matches(id, data, filters));
       for (const [field, dir] of [...orders].reverse()) {
         rows.sort((a, b) => {

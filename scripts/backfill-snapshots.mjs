@@ -38,14 +38,25 @@ if (!process.env.GYMEG_MAX_SCAN_DOCS) {
 const db = getFirestoreDb();
 
 for (const owner of args) {
-  // Count what the entity scan would read, so the operator sees the spend.
-  const entities = await db.collection('gym_entities').where('owner_id', '==', owner).get();
-  const photos = await db.collection('gym_photos').where('owner_id', '==', owner).get();
-  console.log(`${owner}: ${entities.size} entity docs + ${photos.size} photo docs = ${entities.size + photos.size} docs (budget ${process.env.GYMEG_MAX_SCAN_DOCS})`);
+  // Count with Firestore aggregation (billed ~1 read per 1000 index entries),
+  // never an unbounded .get() probe - a probe that fetched every doc would
+  // cost as much as the scan itself and double-charge the bootstrap.
+  let entityCount = 'unknown', photoCount = 'unknown';
+  try {
+    const [e, p] = await Promise.all([
+      db.collection('gym_entities').where('owner_id', '==', owner).count().get(),
+      db.collection('gym_photos').where('owner_id', '==', owner).count().get(),
+    ]);
+    entityCount = e.data().count;
+    photoCount = p.data().count;
+  } catch (error) {
+    console.warn(`${owner}: count aggregation unavailable (${error.message}); proceeding without a pre-count`);
+  }
+  console.log(`${owner}: ${entityCount} entity docs + ${photoCount} photo docs (budget ${process.env.GYMEG_MAX_SCAN_DOCS})`);
   if (dryRun) continue;
 
   const before = Date.now();
-  const { revision } = await firestoreReadSpace(owner); // scans once + backfills the snapshot
+  const { revision } = await firestoreReadSpace(owner); // ONE bounded scan + backfills the snapshot
   const snaps = await db.collection('gym_state_snapshots').doc(`${owner}_0`).get();
   const chunks = snaps.exists ? snaps.data().chunks : 0;
   console.log(`${owner}: revision ${revision} bootstrapped, snapshot chunks=${chunks}, cold reads now cost ~${1 + chunks} docs (${Date.now() - before}ms)`);
