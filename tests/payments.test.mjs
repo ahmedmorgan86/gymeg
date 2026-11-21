@@ -61,9 +61,21 @@ test('summary streams in chunks with legacy float order and fails closed on inex
   // fractional minors only in February (outside the month), integers in March
   for(const p of s.payments)if(p.day.startsWith('2026-03'))p.minor=Math.round(p.minor);
   await seed('P2',s);const cur=await current('P2'),pays=cur.payments.filter(p=>p.branch===m.branch);
-  const r=await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40});assert.equal(r.status,'ok');
+  const r=await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40,deadlineMs:1e9});assert.equal(r.status,'ok');
   assert.deepEqual(r.trend,Array.from({length:40},(_,i)=>{const day=addDays(TODAY,i-39);return pays.filter(p=>!p.voided&&p.day===day).reduce((v,p)=>v+p.minor/100,0);}));
   assert.equal(r.monthSum,pays.filter(p=>!p.voided&&p.day.startsWith('2026-03')).reduce((a,p)=>a+p.minor,0));
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{minor}','10.5') WHERE owner_id='P2' AND collection='payments' AND payload->>'day'='2026-03-13' AND entity_id=(SELECT entity_id FROM gymos.gym_entities WHERE owner_id='P2' AND collection='payments' AND payload->>'day'='2026-03-13' LIMIT 1)");
-  assert.deepEqual(await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40}),{status:'unavailable',reason:'non-integer-minor'});
+  assert.deepEqual(await readPaymentsSummary(scope,{owner:'P2',branch:m.branch,today:TODAY,period:40,deadlineMs:1e9}),{status:'unavailable',reason:'non-integer-minor'});
+});
+test('summary stops at the whole-loop deadline, aborts on a version change between chunks, and leaves the connection usable',async()=>{
+  const TODAY='2026-03-14',s=fixture();s.visits=[];s.invoices=[];s.payments=[];const m=s.members[0];
+  for(let n=0;n<SUMMARY_CHUNK*3+5;n++)s.payments.push({id:'z'+n,member:m.id,branch:m.branch,minor:100+n,day:'2026-03-1'+(n%4),voided:false});
+  await seed('P3',s);
+  let t=0,ticks=0;const clock=()=>{ticks++;return t+=3000;}; // each read of the clock = 3s
+  const d=await readPaymentsSummary(scope,{owner:'P3',branch:m.branch,today:TODAY,period:7,deadlineMs:5000,now:clock});
+  assert.deepEqual(d,{status:'unavailable',reason:'deadline'});assert.ok(ticks<=4);
+  // a version bump between chunks: wrap scope so the first chunk read is followed by a write
+  let seen=0;const bumping=(o,work)=>scope(o,async c=>work({query:async(sql,v)=>{const r=await c.query(sql,v);if(/FROM gymos\.gym_entities WHERE owner_id=\$1 AND collection='payments'/.test(sql)&&++seen===1)await c.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{minor}','1') WHERE owner_id='P3' AND entity_id='z0'");return r;}}));
+  assert.deepEqual(await readPaymentsSummary(bumping,{owner:'P3',branch:m.branch,today:TODAY,period:7,deadlineMs:1e9}),{status:'stale'});
+  const ok=await readPaymentsSummary(scope,{owner:'P3',branch:m.branch,today:TODAY,period:7,deadlineMs:1e9});assert.equal(ok.status,'ok');
 });
