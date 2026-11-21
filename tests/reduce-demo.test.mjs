@@ -100,3 +100,20 @@ test('Backup envelope digest is recomputed so the restore route accepts the redu
   assert.equal(reduced.digest, createHash('sha256').update(JSON.stringify(reduced.state)).digest('hex'));
   validateBackup(JSON.parse(JSON.stringify(reduced.state)));
 });
+
+test('Shop sales referencing removed members are preserved with the member link anonymized', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'reduce-shop-'));
+  const input = join(dir, 'in.json'), output = join(dir, 'out.json');
+  const doc = fixture();
+  assert.ok(doc.state.shopSales?.length > 0, 'fixture needs shop sales');
+  const sale = doc.state.shopSales[0];
+  sale.member = 'sample-full-member-0061';
+  writeFileSync(input, JSON.stringify(doc));
+  execFileSync('node', ['--experimental-strip-types', 'scripts/reduce-demo.mjs', input, '--keep', '40', '--write', output], {cwd: new URL('..', import.meta.url).pathname});
+  const state = JSON.parse(readFileSync(output, 'utf8')).state;
+  const keptSale = state.shopSales.find((s2) => s2.id === sale.id);
+  assert.ok(keptSale, 'sale row must be preserved');
+  assert.equal(keptSale.member, null);
+  assert.deepEqual(keptSale.lines, sale.lines, 'stock/accounting lines untouched');
+  validateBackup(JSON.parse(JSON.stringify(state)));
+});

@@ -54,6 +54,11 @@ if (state.classes) {
 }
 // Nested subsystem references the top-level cleanup misses.
 if (state.community?.messages) state.community.messages = drop('communityMessages', state.community.messages, (r) => removed.has(r.member));
+// Shop sales are accounting rows: preserve them (and their stock links) but
+// anonymize the removed member link, exactly as walk-in sales are stored.
+for (const sale of state.shopSales ?? []) {
+  if (removed.has(sale.member)) { sale.member = null; counts.dropped.shopSalesAnonymized = (counts.dropped.shopSalesAnonymized ?? 0) + 1; }
+}
 if (state.competitions?.results) state.competitions.results = drop('competitionResults', state.competitions.results, (r) => removed.has(r.member));
 if (state.engagement) {
   for (const key of ['consents', 'sms', 'tickets']) {

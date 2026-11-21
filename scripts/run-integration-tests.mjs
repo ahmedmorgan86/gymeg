@@ -21,6 +21,7 @@ const testSuites = [
   { name: 'Firebase Cloud Messaging enrollment and tenant boundaries', file: 'tests/fcm-subscriptions.integration.mjs', loader: './tests/fcm-subscriptions-loader.mjs' },
   { name: 'Manager member credential controls', file: 'tests/member-credentials.integration.mjs', loader: './tests/member-credentials-loader.mjs' },
   { name: 'Product photo privacy', file: 'tests/product-photo.integration.mjs', loader: './tests/role-api-loader.mjs' },
+  { name: 'Member photo privacy', file: 'tests/member-photo.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Simplified onboarding and task panels', file: 'tests/usability.integration.mjs', loader: './tests/usability-loader.mjs' },
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
