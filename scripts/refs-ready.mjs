@@ -68,11 +68,11 @@ export async function readyOwner(url,owner,opts={}){
   }catch(e){if(e.commitUnknown){const rec=await reconcile(url,owner,o);return{status:'outcome-unknown',owner,generation,cursor:after,reconcile:rec,note:'COMMIT was not acknowledged: the transaction may have committed. Do not claim readiness or assume unchanged. Reconcile (ready flag and generation above, read fresh) before any retry.'};}
     return{status:classify(e),owner,generation,cursor:after,code:code(e)||null,message:String(e.message).slice(0,200),note:'transaction rolled back and connection disposed; readiness unchanged; safe to retry'};}
 }
-// RESTORE RUNBOOK STEP 1 (mandatory BEFORE any supported trigger-bypass import, e.g. pg_restore --disable-triggers or a DISABLE TRIGGER bulk load): write the tombstone for the owner(s) so every reader refuses from that moment.
-// One transaction per owner, bounded like every other phase. STEP 3 (after the import and after the triggers are re-enabled as ENABLE ALWAYS) is readyOwner(): rebuild + complete bound to the generation. See docs/refs-restore-runbook.md.
+// Writes the tombstone for an owner so refs readers refuse from then on. This is NOT enough for a trigger-bypass/replica import (excluded while readers are live: the version triggers are origin-only too); see docs/refs-restore-runbook.md.
+// One transaction per owner, bounded like every other phase.
 export async function invalidateOwner(url,owner,opts={}){const o={...DEFAULTS,...opts};o.deadlineAt=Date.now()+o.deadlineMs;
   try{await tx(url,o,async q=>{await q({text:'INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES($1,false) ON CONFLICT(owner_id) DO UPDATE SET ready=false,set_at=now()',values:[owner]});});return{status:'invalidated',owner};}
-  catch(e){return{status:classify(e),owner,message:String(e.message).slice(0,200),note:'tombstone NOT confirmed; do not start the import'};}}
+  catch(e){return{status:classify(e),owner,message:String(e.message).slice(0,200),note:'tombstone NOT confirmed'};}}
 // owners that need work: have invoices without a ready row, or are tombstoned. Bounded by `limit`.
 export async function pendingOwners(url,limit=100,opts={}){
   const o={...DEFAULTS,...opts};o.deadlineAt=Date.now()+o.deadlineMs;

@@ -22,9 +22,9 @@ async function inner(c:Q,owner:string,paymentIds:unknown[],version:string):Promi
   if(!paymentIds.length)return{status:'ok',version,invoices:[]};
   for(const id of paymentIds)if(typeof id!=='string')return{status:'unavailable',reason:'payment-id'};
   const ids=[...new Set(paymentIds as string[])];if(ids.length>MAX_CREDIT_PAYMENT_IDS)return{status:'unavailable',reason:'too-many-payment-ids'};
-  // bypass invariant: the refs are only exact while every maintenance trigger is ENABLE ALWAYS (fires for replica-role writers too). Any other state (disabled, origin-only) means writes may have skipped the refs: refuse.
-  // This cannot detect a disable/write/re-enable sequence (excluded DBA tampering; see the migration's SUPPORTED-PATH INVARIANT note).
-  const trg=(await c.query(`SELECT count(*)::int AS n,count(*) FILTER (WHERE tgenabled='A')::int AS ok,true AS origin FROM pg_trigger WHERE tgrelid IN ('gymos.gym_entities'::regclass,'gymos.gym_states'::regclass) AND tgname LIKE 'invoice\\_allocation\\_refs\\_%' AND NOT tgisinternal`)).rows[0] as {n:number;ok:number;origin:boolean};
+  // bypass guard: the refs are only exact for origin-role writes while every maintenance trigger is enabled. A disabled trigger or a replica-role session refuses (a replica-role session cannot be trusted to have fired them).
+  // This cannot detect a disable/write/re-enable sequence or an earlier replica-role import: those are EXCLUDED while readers are live (see the migration's SUPPORTED CONTRACT note and docs/refs-restore-runbook.md).
+  const trg=(await c.query(`SELECT count(*)::int AS n,count(*) FILTER (WHERE tgenabled='O')::int AS ok,current_setting('session_replication_role')='origin' AS origin FROM pg_trigger WHERE tgrelid IN ('gymos.gym_entities'::regclass,'gymos.gym_states'::regclass) AND tgname LIKE 'invoice\\_allocation\\_refs\\_%' AND NOT tgisinternal`)).rows[0] as {n:number;ok:number;origin:boolean};
   if(trg.n!==EXPECTED_TRIGGERS||trg.ok!==EXPECTED_TRIGGERS||!trg.origin)return{status:'unavailable',reason:'refs-triggers-disabled'};
   const ready=(await c.query(`SELECT (EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1 AND ready) OR (NOT EXISTS(SELECT 1 FROM gymos.invoice_allocation_refs_state WHERE owner_id=$1) AND NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='invoices'))) AS x`,[owner])).rows[0] as {x:boolean};
   if(!ready.x)return{status:'unavailable',reason:'refs-not-ready'};

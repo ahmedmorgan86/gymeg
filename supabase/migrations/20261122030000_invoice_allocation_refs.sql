@@ -233,14 +233,6 @@ ALTER FUNCTION gymos.invoice_allocation_refs_epoch_truncate() OWNER TO gymos_ref
 REVOKE ALL ON FUNCTION gymos.invoice_allocation_refs_epoch_truncate() FROM PUBLIC,anon,authenticated,gymos_app;
 DROP TRIGGER IF EXISTS invoice_allocation_refs_epoch_trunc ON gymos.gym_states;
 CREATE TRIGGER invoice_allocation_refs_epoch_trunc AFTER TRUNCATE ON gymos.gym_states FOR EACH STATEMENT EXECUTE FUNCTION gymos.invoice_allocation_refs_epoch_truncate();
--- SUPPORTED-PATH INVARIANT. Every supported write path (persistSpace upserts/removals/restore, owner delete, TRUNCATE, import/restore through persistSpace, logical-replication apply and bulk loads under session_replication_role=replica) must either
--- keep the refs exact in the same transaction as the write (the row triggers) or atomically leave the owner unready (the epoch triggers write the tombstone in the same transaction). ENABLE ALWAYS makes all seven triggers fire for
--- session_replication_role=replica sessions too, which plain (origin-only) triggers would silently skip. EXCLUDED, not claimed: ALTER TABLE ... DISABLE TRIGGER (including pg_restore --disable-triggers) and other DBA/superuser tampering:
--- writes made while a trigger is disabled are not reflected, and re-enabling does not repair them. The reader refuses while any trigger is not ALWAYS-enabled, but that cannot detect a disable/write/re-enable sequence. No audit job substitutes for this.
-ALTER TABLE gymos.gym_entities ENABLE ALWAYS TRIGGER invoice_allocation_refs_ins;
-ALTER TABLE gymos.gym_entities ENABLE ALWAYS TRIGGER invoice_allocation_refs_upd;
-ALTER TABLE gymos.gym_entities ENABLE ALWAYS TRIGGER invoice_allocation_refs_del;
-ALTER TABLE gymos.gym_entities ENABLE ALWAYS TRIGGER invoice_allocation_refs_trunc;
-ALTER TABLE gymos.gym_states ENABLE ALWAYS TRIGGER invoice_allocation_refs_epoch_upd;
-ALTER TABLE gymos.gym_states ENABLE ALWAYS TRIGGER invoice_allocation_refs_epoch_del;
-ALTER TABLE gymos.gym_states ENABLE ALWAYS TRIGGER invoice_allocation_refs_epoch_trunc;
+-- SUPPORTED CONTRACT: ordinary application (origin-role) writes only: persistSpace upserts/removals/restore/import, owner delete, TRUNCATE. For those the row triggers keep the refs exact, or the epoch triggers tombstone the owner, in the same transaction.
+-- EXCLUDED while any reader is live: session_replication_role=replica / logical-replication apply, ALTER TABLE ... DISABLE TRIGGER (pg_restore --disable-triggers) and any other trigger-bypass import. The existing owner-version triggers are origin-only as well, so such writes also skip the version bump
+-- that snapshot checks, caches and summaries rely on. Such an import needs readers disabled externally, then a trusted new epoch/version, rebuild, verify and reopen (docs/refs-restore-runbook.md). Triggers here are deliberately plain (origin) triggers.
