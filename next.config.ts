@@ -5,7 +5,11 @@ const securityHeaders=[
  {key:'X-Frame-Options',value:'DENY'},
  {key:'Referrer-Policy',value:'strict-origin-when-cross-origin'},
  {key:'Permissions-Policy',value:'camera=(self), microphone=(self), geolocation=(), payment=()'},
- {key:'Strict-Transport-Security',value:'max-age=63072000; includeSubDomains; preload'}
+ {key:'Strict-Transport-Security',value:'max-age=63072000; includeSubDomains; preload'},
+ {key:'Cross-Origin-Resource-Policy',value:'same-site'},
+ // Report-only while violations are reviewed; rename to
+ // Content-Security-Policy once the reports show no legitimate breakage.
+ {key:'Content-Security-Policy-Report-Only',value:"default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; media-src 'self' blob: data:; worker-src 'self' blob:; connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests"}
 ];
 const config:NextConfig={output:'standalone',images:{dangerouslyAllowSVG:true,contentDispositionType:'inline',contentSecurityPolicy:"default-src 'none'; style-src 'unsafe-inline'; sandbox;",localPatterns:[{pathname:'/images/**',search:'?v=20261029-gymeg-r2'},{pathname:'/icons/**',search:'?v=20261029-gymeg-r2'},{pathname:'/icons/**',search:'?v=20261030-role-icons'},{pathname:'/**',search:''},{pathname:'/images/**',search:'?v=20261027'},{pathname:'/images/**',search:'?v=20261028-gymeg'},{pathname:'/images/**',search:'?v=20261029-gymeg'},{pathname:'/icons/**',search:'?v=20261027'},{pathname:'/icons/**',search:'?v=20261028-gymeg'},{pathname:'/icons/**',search:'?v=20261029-gymeg'}]},async headers(){return[{source:'/:path*',headers:securityHeaders},{source:'/downloads/:file*.apk',headers:[{key:'Content-Type',value:'application/vnd.android.package-archive'},{key:'Content-Disposition',value:'attachment'}]}];},serverExternalPackages:['firebase-admin'],poweredByHeader:false,outputFileTracingRoot:process.cwd(),outputFileTracingIncludes:{'/*':['./public/icons/icon-512.png']},webpack(config){
   // Human's node export otherwise pulls native TensorFlow into the SSR build.

@@ -15,7 +15,9 @@ const mockPool = {
 
 // A missing database must never look like a successful empty workspace.
 // Mocks are available only to explicit test runs or a deliberate local opt-in.
-const mockAllowed=()=>process.env.NODE_ENV==='test'||process.env.GYMOS_ALLOW_DB_MOCK==='1';
+// The mock pool is a test convenience only; it must never be reachable from a
+// production process, even if GYMOS_ALLOW_DB_MOCK leaks into a production env.
+const mockAllowed=()=>process.env.NODE_ENV!=='production'&&(process.env.NODE_ENV==='test'||process.env.GYMOS_ALLOW_DB_MOCK==='1');
 export function databaseSecurityConfig(rawUrl:string,nodeEnv=process.env.NODE_ENV){
   const url=new URL(rawUrl);
   const isLocal=url.hostname==='localhost'||url.hostname==='127.0.0.1';

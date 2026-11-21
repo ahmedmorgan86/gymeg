@@ -15,7 +15,11 @@ test('PIN migration replaces the shared default, remediates existing rows and re
 });
 test('Application writes and accepts only generated non-shared PINs',()=>{
   assert.doesNotMatch(memberCodeRoute,/const pin='123456'/);
-  assert.match(memberCodeRoute,/newMemberPin\(currentPin\)/);
+  assert.match(memberCodeRoute,/newMemberPin\(\)/);
+  // PINs are hash-only: the staff-facing route never encrypts a new PIN for
+  // later display and never decrypts a stored one.
+  assert.doesNotMatch(memberCodeRoute,/member_pin_encrypt/);
+  assert.doesNotMatch(memberCodeRoute,/member_code_decrypt\(pin_cipher\)/);
   assert.doesNotMatch(memberPinRoute,/pin==='123456'/);
   assert.match(memberPinRoute,/isSharedLegacyPin\(pin\)/);
   assert.match(memberPinRoute,/licenseState\(normalizeLicense\(license\)\)\.writable/);
