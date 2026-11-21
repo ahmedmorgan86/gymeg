@@ -210,3 +210,20 @@ test('Firestore slices stay off (full read) until the indexes are confirmed',asy
   assert.equal(typeof await be.revision('club1'),'number','revision polling needs no composite index');
   await assert.rejects(()=>be.entities('club1',{collections:['members'],branches:['a']}),/indexes/);
 });
+
+test('Barcode contract: entity-layout clubs keep members out of metadata, so the route must read the full state',async()=>{
+  const {readFileSync}=await import('node:fs');
+  const db=await bootstrapDb();
+  try{
+    const full=club();full.members[1].card='1111222233334444';full.members[2].archived=true;
+    await seedPg(db,'club1',full);const {backend}=counted(db);
+    const meta=await readSlice(backend,'club1',null);
+    assert.equal(meta.state.members.length,0,'metadata-only reads see no members on an entity-layout club');
+    const all=await readSlice(backend,'club1',{collections:['members']});
+    assert.ok(all.state.members.find(m=>m.id==='m1'&&m.card==='1111222233334444'&&m.branch==='b'),'full read sees the card holder and branch');
+    assert.ok(all.state.members.find(m=>m.id==='m2').archived,'full read sees archived members');
+  }finally{await db.close();}
+  // The unit loaders alias server-workspace reads to one in-memory state, which masked this once. Pin the real import.
+  const src=readFileSync(new URL('../app/api/member-barcode/route.ts',import.meta.url),'utf8');
+  assert.ok(/\breadSpace\b/.test(src)&&!/readSpaceMeta|readSpaceSlice|readMemberSpace/.test(src),'barcode route uses the full-state read (member, branch, archived, duplicate-card checks need real members)');
+});
