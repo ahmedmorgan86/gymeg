@@ -21,3 +21,7 @@ export function checkinPick(before:ReadonlyMap<string,string>|null,open:OpenEntr
  return{member:chosen[0]?.member??null,carry:cands.filter(v=>!members.has(v.member))};
 }
 export function checkinProfileFromOpen(before:ReadonlyMap<string,string>|null,open:OpenEntry[],members:ReadonlySet<string>,now:number):string|null{return checkinPick(before,open,members,now).member;}
+/** Server clock now, grounded on the packet's serverNow plus the local time elapsed since that packet was received (a delayed or retried read must not use the packet's frozen clock). */
+export function openNow(serverNow:number|undefined,receivedAt:number,localNow:number):number{return(serverNow??receivedAt)+(localNow-receivedAt);}
+/** The map remembered for the next comparison: entries activated AFTER now+60s are left out so they still count as new once the window reaches them (never consumed unseen). */
+export function consumedMap(open:OpenEntry[],now:number):Map<string,string>{return new Map(open.filter(v=>Date.parse(key(v))<=now+60000).map(v=>[v.id,key(v)]));}
