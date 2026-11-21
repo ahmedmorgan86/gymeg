@@ -27,6 +27,7 @@ const testSuites = [
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
+  { name: 'Restore epoch and owner version atomicity (PGlite)', file: 'tests/restore-epoch.integration.mjs' },
   { name: 'Entity counters and size bound across every writer, recount, gate (PGlite)', file: 'tests/entity-counters.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'Hot write cannot pass the 20,000,000-byte rule (reopened visit with huge timestamp)', file: 'tests/hot-size.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Member summary inputs: every writer marks dirty, refresh is exact vs memberSummary, fail-closed bounds', file: 'tests/member-summary-store.integration.mjs', loader: './tests/commercial-loader.mjs' },
