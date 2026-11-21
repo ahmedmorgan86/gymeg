@@ -1,3 +1,5 @@
+import {sliceBackend} from '../../../lib/workspace-reads';
+import {isEntityLayout} from '../../../lib/member-history';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {ReadBudgetError} from '../../../lib/bounded-read';
 import {CommercialError} from '../../../lib/licensing';
@@ -11,6 +13,7 @@ export const dynamic='force-dynamic';
 export async function GET(request:Request){try{
  if(process.env.GYMOS_TODAY_VISITS!=='1')return reply({error:'notFound'},404);
  const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));
+ const be=sliceBackend();if(!be.supportsOpen||!await isEntityLayout(be,ctx.owner))return reply({error:'unsupported'},501); // bounded reads need the Postgres entity layout: fail closed before any DB read
  const url=new URL(request.url),branch=url.searchParams.get('branch')??'',day=url.searchParams.get('day')??'';
  if(!branch||!/^\d{4}-\d\d-\d\d$/.test(day))return reply({error:'invalid'},400);
  if(ctx.branches&&!ctx.branches.includes(branch))return reply({error:'forbidden'},403);

@@ -1,3 +1,5 @@
+import {sliceBackend} from '../../../lib/workspace-reads';
+import {isEntityLayout} from '../../../lib/member-history';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {CommercialError} from '../../../lib/licensing';
 import {context,readSpaceMeta,reply} from '../../../lib/server-workspace';
@@ -10,6 +12,7 @@ export const dynamic='force-dynamic';
 export async function GET(request:Request){try{
  if(process.env.GYMOS_MEMBER_SUMMARIES!=='1')return reply({error:'notFound'},404);
  const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));
+ const be=sliceBackend();if(!be.supportsOpen||!await isEntityLayout(be,ctx.owner))return reply({error:'unsupported'},501); // bounded reads need the Postgres entity layout: fail closed before any DB read
  const url=new URL(request.url),member=url.searchParams.get('member')??'',asOf=url.searchParams.get('asOf')??undefined;
  if(!member||member.length>200||(asOf!==undefined&&asOf.length>40))return reply({error:'invalid'},400);
  const meta=await readSpaceMeta(ctx.owner);

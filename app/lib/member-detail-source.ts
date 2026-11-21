@@ -1,6 +1,6 @@
 // Server side of the (OFF by default) member detail source: the selected member's own rows only, never the club's.
 import {readCounters} from './workspace-slice.ts';
-import {computeStoredSummary,type StoredSummary} from './member-summary-model.ts';
+import {computeStoredSummary,publicStored,type StoredSummary} from './member-summary-model.ts';
 import type {GymState,Member} from './domain.ts';
 type Invoice=NonNullable<GymState['invoices']>[number];type Payment=GymState['payments'][number];
 import type {Scope} from './member-console-source.ts';
@@ -30,7 +30,7 @@ export async function readMemberDetail(scope:Scope,q:Q):Promise<DetailResponse>{
     if(visits.length>cap('visits')||payments.length>cap('payments')||invoices.length>cap('invoices'))return{status:'fallback',reason:'raced'} as const;
     const mini={settings:q.settings,members:[m],visits,payments,invoices,plans:[]} as unknown as GymState;
     const stored=computeStoredSummary(mini,m,q.asOf,{allBranches:true});
-    return{status:'ok',stored,invoices:(invoices as Invoice[]).filter(i=>!i.voided),payments:payments as Payment[]} as const;
+    return{status:'ok',stored:publicStored(stored),invoices:(invoices as Invoice[]).filter(i=>!i.voided),payments:payments as Payment[]} as const;
   });
 }
 

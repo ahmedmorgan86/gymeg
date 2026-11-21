@@ -122,3 +122,6 @@ export function backfillSummaries(s:GymState,asOf?:string):Map<string,StoredSumm
   for(const m of s.members)out.set(m.id,computeStoredSummary({...s,visits:v.get(m.id)??[],payments:p.get(m.id)??[],invoices:i.get(m.id)??[]} as GymState,m,asOf));
   return out;
 }
+
+/** The stored projection WITHOUT the internal dues sums. dues are per invoice-branch totals across every branch of a member and exist only for the server-side dues aggregate; they must never reach a listing or detail DTO (reception and branch-limited staff would see finance and foreign-branch figures). */
+export function publicStored(stored:StoredSummary):StoredSummary{const {dues:_dues,...rest}=stored as StoredSummary&{dues?:unknown};void _dues;return {...rest,dues:{}} as StoredSummary;}
