@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto';
 import type { cookies } from 'next/headers';
 import { logAuthDiagnostic, sessionCookieOptions } from './auth-backend.ts';
 import { decodeSession, encodeSession, SESSION_COOKIE_MAX_BYTES } from './supabase-session-codec.ts';
@@ -72,6 +73,18 @@ function confirmedUser(user: Record<string, unknown> | undefined | null): Record
 }
 
 const UNAVAILABLE = { message: 'Auth unavailable', status: 503 } as const;
+
+// PKCE for email links: the default Supabase templates send the user through
+// the auth server's /verify, which redirects back with a one-time code. The
+// code is only exchangeable with the verifier issued here, so a leaked link
+// is useless without this browser's cookie. Verifier cookies live one hour.
+const pkceVerifierCookieOptions = { ...sessionCookieOptions, maxAge: 3600 };
+
+function pkceChallenge(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
+}
 const EMAIL_NOT_CONFIRMED = { code: 'email_not_confirmed', message: 'Email not verified', status: 403 } as const;
 
 type SessionPayload = { access_token?: unknown; refresh_token?: unknown; user?: Record<string, unknown> };
@@ -194,8 +207,13 @@ export function supabaseServerAuth(store: CookieStore) {
         const config = supabaseConfig();
         if (!config) return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } };
         // redirect_to tells the confirmation email where to send the user; it
-        // must be on the project's redirect allow list.
-        const result = await gotrue(config, '/signup' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), { body: { email, password, data: { name } } });
+        // must be on the project's redirect allow list. The PKCE challenge
+        // makes the emailed link exchangeable only from this browser.
+        const { verifier, challenge } = pkceChallenge();
+        const result = await gotrue(config, '/signup' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), {
+          body: { email, password, data: { name }, code_challenge: challenge, code_challenge_method: 's256' },
+        });
+        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         if (!result.ok) {
           logAuthDiagnostic('sign-up', result.status, result.code);
           if (result.status >= 500 || result.status === 0) return { data: { session: null }, error: { message: 'Registration unavailable', status: 503 } };
@@ -244,7 +262,11 @@ export function supabaseServerAuth(store: CookieStore) {
       async resetPasswordForEmail(email: string, redirectTo?: string) {
         const config = supabaseConfig();
         if (!config) return { error: UNAVAILABLE };
-        const result = await gotrue(config, '/recover' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), { body: { email } });
+        const { verifier, challenge } = pkceChallenge();
+        const result = await gotrue(config, '/recover' + (redirectTo ? '?redirect_to=' + encodeURIComponent(redirectTo) : ''), {
+          body: { email, code_challenge: challenge, code_challenge_method: 's256' },
+        });
+        store.set('gymos_pkce_verifier', verifier, pkceVerifierCookieOptions);
         if (!result.ok) {
           // Existence is never revealed: only throttling and provider outages
           // surface; every other failure looks like success.
@@ -304,7 +326,7 @@ export function supabaseServerAuth(store: CookieStore) {
         return { data: { session }, error: null };
       },
 
-      async exchangeCodeForSession(code: string) {
+      async exchangeCodeForSession(code: string, opts: { allowUnconfirmed?: boolean } = {}) {
         const config = supabaseConfig();
         if (!config || !code || typeof code !== 'string') return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
         const verifier = store.get('gymos_pkce_verifier')?.value;
@@ -315,7 +337,7 @@ export function supabaseServerAuth(store: CookieStore) {
           logAuthDiagnostic('exchange-code', result.status, result.code);
           return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
         }
-        const session = openSession(store, result.json);
+        const session = openSession(store, result.json, { allowUnconfirmed: opts.allowUnconfirmed === true });
         if (!session || 'error' in session) return { data: { session: null }, error: session && 'error' in session ? session.error : UNAVAILABLE };
         return { data: { session }, error: null };
       },

@@ -136,7 +136,15 @@ test('signUp sets a session only when the provider returns one', async () => {
   // Confirmation off: session in the response.
   mockFetch({ 'POST /signup': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: CONFIRMED } } });
   let store = fakeStore();
-  let result = await supabaseServerAuth(store).auth.signUp({ email: 'new@example.com', password: 'x'.repeat(12), name: 'New' });
+  let result = await supabaseServerAuth(store).auth.signUp({ email: 'new@example.com', password: 'x'.repeat(12), name: 'New', redirectTo: 'https://app.example/auth/callback' });
+  // PKCE: the challenge rides with the signup, the verifier in a cookie.
+  assert.match(calls[0].key, /redirect_to=https/);
+  assert.equal(calls[0].body.code_challenge_method, 's256');
+  assert.ok(typeof calls[0].body.code_challenge === 'string' && calls[0].body.code_challenge.length > 20);
+  const verifier = store.jar.get('gymos_pkce_verifier');
+  assert.ok(verifier.length > 20);
+  const { createHash } = await import('node:crypto');
+  assert.equal(calls[0].body.code_challenge, createHash('sha256').update(verifier).digest('base64url'));
   assert.equal(result.error, null);
   assert.equal(result.data.session.access_token, 'a');
   // Confirmation on: user but no session, still no error.
@@ -184,6 +192,38 @@ test('signOut and updateUser surface server revocation failures', async () => {
   });
   const result = await supabaseServerAuth(fakeStore({ gymos_session: encodeSession('acc', 'ref') })).auth.updateUser({ password: 'y'.repeat(12) });
   assert.equal(result.error.status, 503);
+});
+
+test('resetPasswordForEmail issues a PKCE challenge and stores the verifier', async () => {
+  mockFetch({ 'POST /recover': { status: 200, json: {} } });
+  const store = fakeStore();
+  const { error } = await supabaseServerAuth(store).auth.resetPasswordForEmail('a@b.c', 'https://app.example/auth/callback/recovery');
+  assert.equal(error, null);
+  assert.match(calls[0].key, /redirect_to=https/);
+  assert.equal(calls[0].body.email, 'a@b.c');
+  assert.equal(calls[0].body.code_challenge_method, 's256');
+  assert.ok(store.jar.has('gymos_pkce_verifier'));
+});
+
+test('exchangeCodeForSession trades a code plus verifier cookie for a session', async () => {
+  // Missing verifier cookie: rejected before any provider call.
+  let fetchCalled = false;
+  global.fetch = async () => { fetchCalled = true; throw new Error('nope'); };
+  let result = await supabaseServerAuth(fakeStore()).auth.exchangeCodeForSession('code1');
+  assert.equal(result.error.status, 400);
+  assert.equal(fetchCalled, false);
+  // Happy path, and a recovery session may precede confirmation.
+  mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
+  const store = fakeStore({ gymos_pkce_verifier: 'verifier123' });
+  result = await supabaseServerAuth(store).auth.exchangeCodeForSession('code1', { allowUnconfirmed: true });
+  assert.equal(result.error, null);
+  assert.equal(result.data.session.access_token, 'a');
+  assert.deepEqual(calls[0].body, { auth_code: 'code1', code_verifier: 'verifier123' });
+  assert.equal(store.jar.has('gymos_pkce_verifier'), false);
+  // Without the recovery allowance the same unconfirmed user is refused.
+  mockFetch({ 'POST /token?grant_type=pkce': { status: 200, json: { access_token: 'a', refresh_token: 'r', user: UNCONFIRMED } } });
+  result = await supabaseServerAuth(fakeStore({ gymos_pkce_verifier: 'verifier123' })).auth.exchangeCodeForSession('code1');
+  assert.equal(result.error.code, 'email_not_confirmed');
 });
 
 test('resetPasswordForEmail never reveals account existence', async () => {

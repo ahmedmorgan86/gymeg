@@ -65,7 +65,7 @@ export async function POST(request:Request){
     if(!limit.allowed)return limited(limit.retryAfter);
     // Firebase emails the one-time code; the branded /auth/action handler
     // verifies it and updates the password (custom action URL).
-    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim(),new URL('/auth/callback',request.url).href);
+    const {error}=await auth.auth.resetPasswordForEmail(body.email.trim(),new URL('/auth/callback/recovery',request.url).href);
     if(error?.status===429){const r=reply({error:'rate'},429);r.headers.set('Retry-After','60');return r;}
     if(error&&error.status&&error.status>=500)return reply({error:'unavailable'},503);
     return reply({ok:true});

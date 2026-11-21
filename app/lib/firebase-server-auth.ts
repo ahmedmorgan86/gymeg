@@ -272,7 +272,7 @@ export function firebaseServerAuth(store: CookieStore) {
       // The only accepted "code" is a genuine Firebase ID token (minted by an
       // email-link or provider flow); anything else is rejected. The token is
       // verified with revocation checks and exchanged for a session cookie.
-      async exchangeCodeForSession(code: string) {
+      async exchangeCodeForSession(code: string, _opts?: { allowUnconfirmed?: boolean }) {
         if (!code || typeof code !== 'string' || !isFirebaseConfigured()) {
           return { data: { session: null }, error: { message: 'Invalid confirmation code', status: 400 } };
         }

@@ -23,7 +23,7 @@ test('Password recovery uses Firebase hosted action without an untrusted redirec
  // The redirect target is derived from the request origin only, never from
  // the request body; the Firebase provider ignores it and builds its own
  // hosted action URL.
- assert.match(route,/resetPasswordForEmail\(body\.email\.trim\(\),new URL\('\/auth\/callback',request\.url\)\.href\)/);
+ assert.match(route,/resetPasswordForEmail\(body\.email\.trim\(\),new URL\('\/auth\/callback\/recovery',request\.url\)\.href\)/);
  assert.doesNotMatch(route,/resetPasswordForEmail\([^)]*body\.(redirect|continueUrl|url)/);
  assert.match(auth,/requestType: 'PASSWORD_RESET', email/);
  assert.doesNotMatch(auth,/continueUrl:.*redirectTo/);

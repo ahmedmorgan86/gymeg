@@ -67,7 +67,7 @@ test('A14: repeated password-reset requests hit 429 with Retry-After and stop em
   assert.equal(globalThis.__resetCalls[0].email, 'owner@example.test');
   // The route hands the provider its own callback URL as redirect target;
   // the Firebase provider ignores it (it builds its own action URL).
-  assert.equal(globalThis.__resetCalls[0].options, 'https://gym.example/auth/callback');
+  assert.equal(globalThis.__resetCalls[0].options, 'https://gym.example/auth/callback/recovery');
 });
 
 test('A14: reset buckets are keyed by email and IP', async () => {
