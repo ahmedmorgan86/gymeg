@@ -10,6 +10,7 @@ import {readOwnerVersion} from './member-summary-store.ts';
 import {addDays} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
 export const PAYMENTS_PAGE=500; // transfer chunk (judgment)
+export const SUMMARY_CHUNK=1000; // rows per read inside one summary (judgment; memory bound, not a data limit)
 export const PERIOD_MAX=3660; // input sanity for the chart period (the UI offers a few fixed values), not a data limit
 export type Cursor={pos:number;id:string};
 export type SummaryData={status:'ok';version:string;trend:number[];monthSum:number}|{status:'stale'}|{status:'unavailable';reason?:string};
@@ -25,11 +26,22 @@ export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:str
     const odd=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ ${DAY_RE})) AS x`,[q.owner,q.branch])).rows[0] as {x:boolean};
     if(odd.x)return{status:'unavailable',reason:'non-canonical-day'} as const;
     const lo=days.reduce((a,b)=>a<b?a:b,month+'-00'),hi=days.reduce((a,b)=>a>b?a:b,month+'-99');
-    const rows=(await c.query(`SELECT payload,${OFFSHAPE} AS odd FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND payload->>'day' ~ ${DAY_RE} AND (payload->>'day') COLLATE "C" >= ($3::text COLLATE "C") AND (payload->>'day') COLLATE "C" <= ($4::text COLLATE "C") ORDER BY position,entity_id`,[q.owner,q.branch,lo,hi])).rows as {payload:{day:string;minor:number;voided?:unknown};odd:boolean}[];
-    if(rows.some(r=>r.odd))return{status:'unavailable',reason:'invalid-payment'} as const;
-    const live=rows.map(r=>r.payload).filter(p=>!p.voided);
-    const trend=days.map(day=>live.filter(p=>p.day===day).reduce((v,p)=>v+p.minor/100,0));
-    const monthSum=live.filter(p=>p.day.startsWith(month)).reduce((s,p)=>s+p.minor,0);
+    // Streamed in keyset chunks of SUMMARY_CHUNK rows ordered (day, position, entity_id) = the index order, so memory is O(chunk + period) however many payments the window holds.
+    // Per day the rows arrive in packet order (position, entity_id), so each day's float sum `acc+minor/100` is the legacy reduce exactly. The month total is accumulated in day order:
+    // identical to the legacy packet-order sum only when every addend is an integer and every partial sum is exact (|sum| <= 2^53), so any non-integer minor answers 'unavailable' (packet path).
+    const acc=new Map<string,number>(days.map(d=>[d,0])),inWindow=new Set(days);let monthSum=0,cur:{day:string;pos:number;id:string}|null=null;
+    for(;;){
+      const args:unknown[]=[q.owner,q.branch,lo,hi];let after='';if(cur){args.push(cur.day,cur.pos,cur.id);after=` AND ((payload->>'day') COLLATE "C",position,entity_id) > ($5::text COLLATE "C",$6::bigint,$7::text)`;}
+      const rows=(await c.query(`SELECT payload,position,entity_id,${OFFSHAPE} AS odd FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND payload->>'day' ~ ${DAY_RE} AND (payload->>'day') COLLATE "C" >= ($3::text COLLATE "C") AND (payload->>'day') COLLATE "C" <= ($4::text COLLATE "C")${after} ORDER BY (payload->>'day') COLLATE "C",position,entity_id LIMIT ${SUMMARY_CHUNK}`,args)).rows as {payload:{day:string;minor:number;voided?:unknown};position:number;entity_id:string;odd:boolean}[];
+      for(const r of rows){
+        if(r.odd)return{status:'unavailable',reason:'invalid-payment'} as const;
+        const p=r.payload;if(p.voided)continue;
+        if(inWindow.has(p.day))acc.set(p.day,acc.get(p.day)!+p.minor/100);
+        if(p.day.startsWith(month)){if(!Number.isInteger(p.minor))return{status:'unavailable',reason:'non-integer-minor'} as const;monthSum+=p.minor;if(!Number.isSafeInteger(monthSum))return{status:'unavailable',reason:'month-total-inexact'} as const;}
+      }
+      if(rows.length<SUMMARY_CHUNK)break;const l=rows[rows.length-1];cur={day:l.payload.day,pos:Number(l.position),id:l.entity_id};
+    }
+    const trend=days.map(d=>acc.get(d)!);
     if((await readOwnerVersion(c,q.owner))!==ver)return{status:'stale'} as const;
     return{status:'ok',version:ver,trend,monthSum} as const;
   },o=>o.status==='ok'));
