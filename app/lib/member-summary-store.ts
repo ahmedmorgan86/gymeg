@@ -55,6 +55,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
   // transaction usable. lock_timeout is restored afterwards so it never leaks to the caller's later statements.
   const prev=String((await c.query("SELECT current_setting('lock_timeout') AS v")).rows[0]?.['v' as never]??'0');
   await c.query('SAVEPOINT msum_refresh');
+  let held=false; // grouped admission is held from here until recompute returns or throws: rows, maps and every upsert are inside
   try{
     await c.query("SELECT set_config('lock_timeout',$1,true)",[String(LOCK_WAIT_MS)]);
     if(!(await c.query('SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS ok',[`msum:${owner}`])).rows.some(r=>(r as {ok:boolean}).ok)){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}
@@ -72,7 +73,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     if(!todo.length){await c.query('RELEASE SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return null;}
     const total=Number((await c.query("SELECT count(*) AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members'",[owner])).rows[0]?.['n' as never]??0);
     const grouped=mode==='auto'?useGrouped(todo.length,k,total):mode==='grouped';
-    if(grouped){if(groupedInFlight>=GROUPED_CONCURRENCY){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}groupedInFlight++;}
+    if(grouped){if(groupedInFlight>=GROUPED_CONCURRENCY){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}groupedInFlight++;held=true;}
     const rowsOf=async(coll:string):Promise<Rows|'raced'>=>{
       if(grouped)return readGrouped(c,owner,coll,new Set(todo),lim(coll)-1);
       const all:Rows=[];
@@ -83,7 +84,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
       return all;
     };
     let visits:Rows|'raced',payments:Rows|'raced',invoices:Rows|'raced';
-    try{visits=await rowsOf('visits');payments=await rowsOf('payments');invoices=await rowsOf('invoices');}finally{if(grouped)groupedInFlight--;} // rows are held only until the summaries are computed below
+    visits=await rowsOf('visits');payments=await rowsOf('payments');invoices=await rowsOf('invoices');
     if(visits==='raced'||payments==='raced'||invoices==='raced'){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
     const by=(rows:Rows)=>{const m=new Map<string,unknown[]>();for(const r of rows){const l=m.get(r.member_id)??[];l.push(r.payload);m.set(r.member_id,l);}return m;};
     const V=by(visits),P=by(payments),I=by(invoices);
@@ -100,7 +101,8 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
     return null;
   }catch(e){
     if(busy(e)){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'busy';}
-    throw e;}
+    throw e;
+  }finally{if(held)groupedInFlight--;}
 }
 
 async function ready(c:Sql,owner:string){

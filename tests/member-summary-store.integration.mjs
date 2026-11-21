@@ -143,3 +143,22 @@ test('stale owner is read-only without refresh:true (no writes), and refresh wai
   const rc=await via('R2',async(c,s,v,phase)=>{if(phase==='after'&&/FROM gymos.gym_entity_counters/.test(s)){await c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('R2','visits','vgrow',50,'a','{\"id\":\"vgrow\",\"member\":\"m1\",\"branch\":\"a\",\"day\":\"2026-03-02\",\"at\":\"2026-03-02T10:00:00.000Z\"}')");}return null;});
   assert.equal(rc.status,'raced');
 });
+test('grouped admission is held through retention, computation and every upsert, and released on return and on error',async()=>{
+  await seed('A1',fixture());
+  const run=(hook)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",['A1']);return refreshDirtySummaries({query:async(s,v)=>{await hook(s,c);return c.query(s,v);}},'A1',500,'grouped');});
+  await db.query("SELECT gymos.backfill_member_summaries('A1')");
+  const seen=[];let nested;
+  const r=await run(async(s,c)=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){seen.push(groupedInFlightNow());
+    if(nested===undefined){nested='pending';nested=await refreshDirtySummaries(c,'A1',500,'grouped').catch(e=>'threw:'+(e.code??e.message));}}});
+  assert.equal(r.status,'ok');assert.ok(seen.length>=10);assert.deepEqual([...new Set(seen)],[1],'counter is 1 during every upsert');
+  assert.equal(groupedInFlightNow(),0,'0 after return');
+  assert.ok(nested&&nested!=='pending'&&(nested.status==='busy'||String(nested).startsWith('threw:')),'a second grouped pass during the first is refused or blocked: '+JSON.stringify(nested));
+  // error path
+  await db.query("SELECT gymos.backfill_member_summaries('A1')");
+  await assert.rejects(run(async s=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s))throw new Error('boom');}),/boom/);
+  assert.equal(groupedInFlightNow(),0,'0 after an error');
+  // busy path (40001 during an upsert) also releases
+  await db.query("SELECT gymos.backfill_member_summaries('A1')");
+  const bz=await run(async s=>{if(/INSERT INTO gymos.gym_member_summaries/.test(s)){const e=new Error('ser');e.code='40001';throw e;}});
+  assert.equal(bz.status,'busy');assert.equal(groupedInFlightNow(),0,'0 after busy');
+});
