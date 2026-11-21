@@ -23,7 +23,7 @@ const server=http.createServer(async(rq,rs)=>{
  if(rq.url.startsWith('/api/workspace/report-payments')){calls.push(rq.url);if(failNext>0){failNext--;rs.writeHead(failCode,{'content-type':'application/json'});return rs.end(failCode===503?'{"error":"budget"}':'{"error":"server"}');}const r=await route.GET(new Request('https://example.test'+rq.url,{headers:{'X-GymOS-Tenant':rq.headers['x-gymos-tenant']??''}}));rs.writeHead(r.status,{'content-type':'application/json'});return rs.end(await r.text());}
  {const f=path.join(process.cwd(),'public',decodeURIComponent(rq.url.split('?')[0]));if(rq.url.length>1&&f.startsWith(path.join(process.cwd(),'public'))&&fs.existsSync(f)&&fs.statSync(f).isFile()){const ext=path.extname(f).slice(1);rs.writeHead(200,{'content-type':{svg:'image/svg+xml',png:'image/png',jpg:'image/jpeg',webp:'image/webp',ico:'image/x-icon'}[ext]??'application/octet-stream'});return rs.end(fs.readFileSync(f));}}
  if(rq.url.startsWith('/app-')){rs.writeHead(200,{'content-type':'text/javascript'});return rs.end(js[rq.url.slice(5,rq.url.indexOf('.'))]);}
- const mode=rq.url.split('/')[1].split('?')[0];rs.writeHead(200,{'content-type':'text/html'});rs.end(`<!doctype html><meta charset=utf-8><style>${css[mode]}</style><script>window.process={env:{}}</script><div id=r></div><script>window.__P=${props.replace(/</g,'\\u003c')}</script><script src="/app-${mode}.js"></script>`);});
+ const mode=rq.url.split('/')[1].split('?')[0];rs.writeHead(200,{'content-type':'text/html'});rs.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>${css[mode]}</style><script>window.process={env:{}}</script><div id=r></div><script>window.__P=${props.replace(/</g,'\\u003c')}</script><script src="/app-${mode}.js"></script>`);});
 await new Promise(r=>server.listen(0,r));const port=server.address().port;
 const browser=await puppeteer.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu'],headless:'new'});
 let ok=true;const check=(c,msg)=>{console.log(c?'PASS':'FAIL',msg);if(!c)ok=false;};
@@ -32,7 +32,7 @@ const VP=process.env.MOBILE?{width:390,height:844,isMobile:true,deviceScaleFacto
 const run=async(mode,fail=0,code=500,shot)=>{const page=await browser.newPage();await page.setViewport(VP);page.on('pageerror',x=>console.log('pageerror:',String(x.stack??x).slice(0,600)));
  await page.evaluateOnNewDocument(()=>{const R=Date,F=new R('2026-03-15T12:00:00Z').getTime();globalThis.Date=class extends R{constructor(...a){a.length?super(...a):super(F);}static now(){return F;}};});
  calls.length=0;failNext=fail;failCode=code;await page.goto(`http://localhost:${port}/${mode}`);await page.waitForSelector('#rep',{timeout:10000});await new Promise(r=>setTimeout(r,1800));
- const out={calls:[...calls],text:await text(page),page,retry:await page.evaluate(()=>[...document.querySelectorAll('button')].some(b=>/^Retry$/.test(b.textContent.trim())))};if(shot)await page.screenshot({path:shot});return out;};
+ if(process.env.MOBILE){const w=await page.evaluate(()=>[innerWidth,document.documentElement.scrollWidth]);console.log("CSS viewport",w.join(" / "));}const out={calls:[...calls],text:await text(page),page,retry:await page.evaluate(()=>[...document.querySelectorAll('button')].some(b=>/^Retry$/.test(b.textContent.trim())))};if(shot)await page.screenshot({path:shot});return out;};
 const stat=t=>(t.match(/Valid total[^A-Za-z]*([£\d.,]+)/)||[])[1];
 try{
  const off=await run('off'),on=await run('on',0,500,'/downloads/reports-on'+(process.env.MOBILE?'-m':'')+'.png');
