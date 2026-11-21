@@ -13,7 +13,7 @@ export const IRREGULAR_PAGE=500;
 export async function readAttendance(scope:Scope,q:{owner:string;branch:string;day:string;after?:Cursor;ver?:string}):Promise<AttendanceData>{
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.day)||(q.after!==undefined&&(!Number.isSafeInteger(q.after.pos)||!q.after.id||q.after.id.length>200||typeof q.ver!=='string')))throw new RangeError('invalid');
   return scope(q.owner,c=>boundedRead(c,q.owner,'att\u0000'+q.branch+'\u0000'+q.day+'\u0000'+(q.after?q.after.pos+'\u0000'+q.after.id+'\u0000'+q.ver:''),async()=>{
-    const ver0=await readOwnerVersion(c,q.owner);if(ver0===null)return{status:'unavailable'} as const; // read BEFORE the irregular probe: the regular path rechecks it after its rows
+    const ver0=await readOwnerVersion(c,q.owner); // read BEFORE the irregular probe: the regular path rechecks it after its rows
     const irregular=(await c.query(`SELECT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND (jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$')) AS x`,[q.owner,q.branch])).rows[0] as {x:boolean};
     const CANON=`jsonb_typeof(payload->'day')='string' AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$' AND jsonb_typeof(payload->'at')='string' AND payload->>'at' ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
     const ODD=`jsonb_typeof(payload->'day') IS DISTINCT FROM 'string' OR payload->>'day' !~ '^\\d{4}-\\d\\d-\\d\\d$' OR jsonb_typeof(payload->'at') IS DISTINCT FROM 'string' OR payload->>'at' !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'`;
@@ -34,7 +34,7 @@ export async function readAttendance(scope:Scope,q:{owner:string;branch:string;d
     }
     const todayCount=Number(((await c.query("SELECT count(*)::int AS n FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND payload->>'day'=$3 AND payload->>'day' ~ '^\\d{4}-\\d\\d-\\d\\d$'",[q.owner,q.branch,q.day])).rows[0] as {n:number}).n);
     const rows=(await c.query(`SELECT payload FROM gymos.gym_entities WHERE owner_id=$1 AND collection='visits' AND branch=$2 AND ${CANON} ORDER BY (payload->>'day') COLLATE "C" DESC,(payload->>'at') COLLATE "C" DESC,position ASC,entity_id ASC LIMIT ${ATTENDANCE_ROWS}`,[q.owner,q.branch])).rows.map(r=>(r as {payload:Record<string,unknown>}).payload);
-    if((await readOwnerVersion(c,q.owner))!==ver0)return{status:'stale'} as const; // a writer between the irregular probe and these rows could have made a row non-canonical (and so omitted above)
+    if(ver0!==null&&(await readOwnerVersion(c,q.owner))!==ver0)return{status:'stale'} as const; // (no version token: the branch pages already answer unavailable; this path keeps its previous behavior) a writer between the irregular probe and these rows could have made a row non-canonical (and so omitted above)
     return{status:'ok',todayCount,rows} as const;
   },o=>o.status==='ok'||o.status==='irregular'));
 }
