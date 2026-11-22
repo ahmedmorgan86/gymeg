@@ -278,3 +278,38 @@ test('random write sequence (insert with sessions/periodId/branch, auto-exit upd
   }
   console.log('random-write coverage',JSON.stringify({compared,quota,nullDerivations:nulls}));assert.ok(compared>500&&quota>20);
 });
+test('today/tail writes (after the stored horizon), session edits, old+new member on move, explicit null derivations, and index-vs-full-state numeric semantics across branches',async()=>{
+  const {membershipIssue}=await import('../app/lib/extensions.ts');const {dayAt}=await import('../app/lib/domain.ts');
+  const s0=fixture();s0.visits=[];s0.payments=[];s0.invoices=[];
+  s0.members=['t1','t2','t3'].map((id,i)=>({id,name:'T '+i,phone:'0100000200'+i,branch:i<2?'a':'b',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'sp',plan:'pl-a',start:'2026-02-01',end:'2026-12-31',visits:i===1?3:2,quotaMode:i===2?'sessions':undefined}]}));
+  await seed('TW',s0);await db.query("SELECT gymos.backfill_member_summaries('TW')"); // horizon = 2026-03-13 (AS)
+  const ins=async(id,mem,br,d,extra={})=>{const v={id,member:mem,branch:br,day:d,at:d+'T09:00:00.000Z',leftAt:d+'T09:30:00.000Z',...extra};await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('TW','visits',$1,$2,$3,$4)",[id,20000+Math.floor(Math.random()*1e6),br,JSON.stringify(v)]);};
+  const upd=(id,path,val)=>db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,$2::text[],$3::jsonb) WHERE owner_id='TW' AND entity_id=$1",[id,path,JSON.stringify(val)]);
+  const clocks=['2026-03-15T12:00:00.000Z','2026-03-16T12:00:00.000Z','2026-03-20T22:30:00.000Z','2026-04-01T00:30:00.000Z'];
+  const st={compared:0,quota:0,nullBeforeHorizon:0,usedDiffFullState:0,remainingDiffFullState:0,issueDiffFullState:0,statusDiffFullState:0};
+  async function check(label){
+    const res=await read('TW');assert.equal(res.status,'ok',label);const s=await current('TW');
+    for(const {member,stored} of res.candidates){
+      for(const now of clocks){const got=deriveSummary(strip(stored),member,s.settings,now);assert.ok(got,label+' derive not null at/after horizon');
+        const want=ORACLE(s,member,now);for(const k of ['issue','remaining','status','used','visitsRemaining'])assert.deepEqual(strip(got[k]),strip(want[k]),`${label} ${member.id} ${now} ${k} (branch-local oracle)`);
+        const full=memberSummary(s,member,now); // legacy console on the FULL state, all branches
+        if(got.used!==full.used)st.usedDiffFullState++;if(got.remaining!==full.remaining)st.remainingDiffFullState++;if(got.issue!==full.issue)st.issueDiffFullState++;if(got.status!==full.status)st.statusDiffFullState++;
+        assert.equal(got.issue,membershipIssue(s,member,dayAt(now,s.settings.timezone)),`${label} ${member.id} ${now} issue vs membershipIssue(full)`);
+        st.compared++;if(got.issue==='quota')st.quota++;}
+      // explicit null derivation: a clock before the stored horizon
+      if(deriveSummary(strip(stored),member,s.settings,'2026-03-10T12:00:00.000Z')===null)st.nullBeforeHorizon++;
+    }
+  }
+  // tail + today inserts, same branch and cross-branch, sessions mode member t3
+  await ins('x1','t1','a','2026-03-15');await ins('x2','t1','b','2026-03-15');await ins('x3','t1','a','2026-03-16');await check('tail inserts');
+  await ins('x4','t3','b','2026-03-15',{sessions:[{at:'2026-03-15T11:00:00.000Z',leftAt:'2026-03-15T11:20:00.000Z'}]});await check('session insert');
+  await upd('x4',['{sessions}'],[{at:'2026-03-15T11:00:00.000Z',leftAt:'2026-03-15T11:20:00.000Z'},{at:'2026-03-15T13:00:00.000Z',leftAt:'2026-03-15T13:10:00.000Z'},{at:'2026-03-15T14:00:00.000Z',leftAt:'2026-03-15T14:10:00.000Z'}]);await check('session edit (more sessions)');
+  await ins('x5','t2','a','2026-03-15',{leftAt:undefined});await check('today open visit');
+  await upd('x5',['leftAt'],'2026-03-15T10:00:00.000Z');await check('today visit exit (add leftAt)');
+  await upd('x1',['member'],'t2');await check('move tail visit t1->t2 (old+new refreshed)');
+  await upd('x3',['periodId'],'nope');await check('tail visit pointing to another period');
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='TW' AND entity_id IN ('x2','x4')");await check('tail delete');
+  await ins('x6','t1','a','2026-03-13');await ins('x7','t1','a','2026-03-14');await check('visits on horizon day and day after');
+  console.log('tail-write coverage',JSON.stringify(st));
+  assert.ok(st.compared>=100&&st.quota>0&&st.nullBeforeHorizon>0);
+});
