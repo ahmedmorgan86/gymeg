@@ -9,7 +9,8 @@ import {emptyState,applyOperation} from '../app/lib/domain.ts';
 import {persistSpace,readEntitySpace} from '../app/lib/entity-store.ts';
 import {validateBackup} from '../app/lib/backup.ts';
 import {backupDigest,BACKUP_CHUNK_BYTES} from '../app/lib/backup-transfer.ts';
-import {createSession,stageSection,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,photoCount,archiveCount,validateManifest,readValidatedCore,commitRestoreV3,discardSession} from '../app/lib/backup-v3.ts';
+import {createSession,stageSection,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,photoCount,archiveCount,validateManifest,readValidatedCore,commitRestoreV3,discardSession,sessionInfo} from '../app/lib/backup-v3.ts';
+import {readEntityCore} from '../app/lib/entity-store.ts';
 import {TransferError} from '../app/lib/backup-transfer.ts';
 
 const pool=getPool(),owner='gymos-backup-v3-'+randomUUID(),actor='tester';
@@ -35,8 +36,8 @@ try{
  const totalEvents=await archiveCount(owner);assert.equal(await photoCount(owner),25);assert.ok(totalEvents>=90000,'seed events + member.save events archived: '+totalEvents);
 
  // DOWNLOAD: core staged once, pages staged incrementally.
- const dl=await createSession(owner,actor,'download');
  const {buffer:coreBuf,revision}=await buildCoreBuffer(owner);
+ const dl=await createSession(owner,actor,'download',revision);
  const coreSection=await stageSection(owner,actor,dl,'core',0,coreBuf);
  const core=JSON.parse(coreBuf.toString('utf8'));
  assert.ok(core.members.every(m=>m.photo===undefined),'core excludes photo bodies');
@@ -113,6 +114,52 @@ try{
  assert.equal((await withScope(owner,c=>c.query('SELECT count(*)::int n FROM gymos.gym_photos WHERE owner_id=$1',[owner]))).rows[0].n,25,'rejected commit left photos untouched');
  await discardSession(owner,actor,ul2);
  console.log('PASS: manifest digest/count/section binding rejects tampered or incomplete restores');
+
+ // Adversarial case: a never-started session UUID cannot stage anything (durable registry admission).
+ let neverStarted=false;
+ try{await stageSection(owner,actor,randomUUID(),'core',0,Buffer.from('{}'));}catch(e){neverStarted=e instanceof TransferError&&e.code==='notFound';}
+ assert.ok(neverStarted,'never-started session UUID rejected at staging admission');
+ // Adversarial case: chunk overwrite after declaration breaks the digest at assembly (AAAA->BBBB).
+ const ul3=await createSession(owner,actor,'upload');
+ const tamperBuf=Buffer.from(JSON.stringify({probe:'x'.repeat(1000)}),'utf8');
+ const s3=await openUploadSection(owner,actor,ul3,'core',0,tamperBuf.length,backupDigest(tamperBuf));
+ await putSectionChunk(owner,actor,s3.id,0,tamperBuf.toString('base64'));
+ let overwritten=false;
+ try{await putSectionChunk(owner,actor,s3.id,0,Buffer.from(JSON.stringify({probe:'y'.repeat(1000)}),'utf8').toString('base64'));}catch(e){overwritten=e instanceof TransferError&&e.code==='chunkMismatch';} // overwrite index 0: AAAA->BBBB refused
+ assert.ok(overwritten,'overwritten chunk refused at write (chunkMismatch)');
+ await discardSession(owner,actor,ul3);
+ console.log('PASS: never-started sessions and chunk overwrites are rejected');
+ // Adversarial case: cross-page duplicate event ids rejected DB-side (ON CONFLICT at apply would mask them).
+ const ul4=await createSession(owner,actor,'upload');
+ const c4=await uploadSection(ul4,'core',0,coreBuf);
+ for(let i=0;i<photoBufs.length;i++)await uploadSection(ul4,'photos',i,photoBufs[i]);
+ const dupRef0=await uploadSection(ul4,'events',0,eventBufs[0]);
+ const dupRef1=await uploadSection(ul4,'events',1,eventBufs[0]); // same events staged as a second page
+ const dupCount=JSON.parse(eventBufs[0].toString('utf8')).length*2;
+ const mDup=manifestWith(final.revision,{bytes:c4.bytes,digest:c4.digest},photoRefs,[dupRef0,dupRef1],25,dupCount);
+ let dupRejected=false;
+ try{await commitRestoreV3(owner,actor,ul4,mDup,await readEntitySpace(owner),restoredState);}catch(e){dupRejected=e instanceof TransferError&&e.code==='invalidBackup';}
+ assert.ok(dupRejected,'cross-page duplicate events rejected');
+ await discardSession(owner,actor,ul4);
+ console.log('PASS: cross-page duplicate events rejected');
+ // Adversarial case: revision pin - a write after downloadStart makes later pages conflict, never mix.
+ const info=await sessionInfo(owner,actor,dl,'download');assert.equal(info.revision,revision,'session pinned the download revision');
+ let pinConflict=false;
+ try{await nextPhotoPage(owner,null,revision);}catch(e){pinConflict=e instanceof TransferError&&e.code==='conflict';}
+ assert.ok(pinConflict,'revision moved after pin: page read conflicts instead of mixing states');
+ console.log('PASS: download revision pin enforced inside the page transaction');
+ // Adversarial case: legacy blob workspace exports its real state (never silently empty).
+ const legacyOwner=owner+'-legacy';
+ const legacyState=save(emptyState(),'Legacy Member',jpeg(50000,'lg'));
+ await withScope(legacyOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,7,$3)',[legacyOwner,JSON.stringify(legacyState),new Date().toISOString()]));
+ const legacyCore=await readEntityCore(legacyOwner);
+ assert.equal(legacyCore.state.members.length,1,'legacy blob read returns its members, not empty collections');
+ assert.ok(legacyCore.state.members[0].photo,'legacy blob keeps photos inline');
+ const legacyBuilt=await buildCoreBuffer(legacyOwner);
+ assert.ok(legacyBuilt.snapshotPhotos&&Object.keys(legacyBuilt.snapshotPhotos).length===1,'legacy photos paged as snapshot');
+ assert.ok(JSON.parse(legacyBuilt.buffer.toString('utf8')).members[0].photo===undefined,'legacy core strips photos for paging');
+ await withScope(legacyOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[legacyOwner]));
+ console.log('PASS: legacy blob workspaces export their real state with photos paged');
  console.log('PASS: backup v3 round trip complete');
 }finally{
  const client=await pool.connect();
@@ -122,5 +169,6 @@ try{
   await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  await admin.query('DELETE FROM gymos.gym_activity_archive WHERE owner_id=$1',[owner]);
  await admin.query('DELETE FROM gymos.gym_backup_sections WHERE owner_id=$1',[owner]);
+ await admin.query('DELETE FROM gymos.gym_backup_sessions WHERE owner_id=$1',[owner]);
  await admin.end();await pool.end();
 }

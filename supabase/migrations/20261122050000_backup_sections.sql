@@ -17,6 +17,52 @@ CREATE TABLE gymos.gym_backup_sections (
  expires_at timestamptz NOT NULL DEFAULT now()+interval '30 minutes',
  UNIQUE(session_id,kind,ordinal)
 );
+-- Durable session registry: one active session per owner+actor+direction (UNIQUE), pinned
+-- revision for downloads, 30-minute TTL. Sections without a live session row are unreachable.
+CREATE TABLE gymos.gym_backup_sessions (
+ id uuid PRIMARY KEY,
+ owner_id text NOT NULL,
+ actor_id text NOT NULL,
+ direction text NOT NULL CHECK(direction IN ('upload','download')),
+ revision integer,
+ expires_at timestamptz NOT NULL DEFAULT now()+interval '30 minutes',
+ UNIQUE(owner_id,actor_id,direction)
+);
+CREATE INDEX gym_backup_sessions_expiry ON gymos.gym_backup_sessions(expires_at);
+ALTER TABLE gymos.gym_backup_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE gymos.gym_backup_sessions FORCE ROW LEVEL SECURITY;
+CREATE POLICY backup_session_scope ON gymos.gym_backup_sessions TO gymos_app
+ USING(owner_id=current_setting('app.gym_owner',true) AND actor_id=current_setting('app.gym_actor',true))
+ WITH CHECK(owner_id=current_setting('app.gym_owner',true) AND actor_id=current_setting('app.gym_actor',true));
+REVOKE ALL ON gymos.gym_backup_sessions FROM PUBLIC,anon,authenticated;
+GRANT SELECT,INSERT,UPDATE,DELETE ON gymos.gym_backup_sessions TO gymos_app;
+-- Retention minimization parity with gym_backup_transfers: the runtime role cannot delete
+-- other tenants' rows under FORCE RLS, so a narrow definer function removes only rows whose
+-- 30-minute TTL has already elapsed.
+CREATE OR REPLACE FUNCTION gymos.cleanup_expired_backup_sections() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,gymos AS $$
+DECLARE removed integer;
+BEGIN
+ WITH expired AS (DELETE FROM gymos.gym_backup_sections WHERE expires_at<now() RETURNING 1)
+ SELECT count(*) INTO removed FROM expired;
+ WITH gone AS (DELETE FROM gymos.gym_backup_sessions WHERE expires_at<now() RETURNING 1)
+ SELECT removed+count(*) INTO removed FROM gone;
+ RETURN removed;
+END $$;
+REVOKE ALL ON FUNCTION gymos.cleanup_expired_backup_sections() FROM PUBLIC,anon,authenticated;
+GRANT EXECUTE ON FUNCTION gymos.cleanup_expired_backup_sections() TO gymos_app;
+-- Install disabled. Enable only after the matching application release is deployed.
+DO $$
+DECLARE job_id bigint;
+BEGIN
+ IF to_regclass('cron.job') IS NOT NULL THEN
+  IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='gymos-backup-section-cleanup') THEN
+   PERFORM cron.schedule('gymos-backup-section-cleanup','*/15 * * * *','SELECT gymos.cleanup_expired_backup_sections()');
+  END IF;
+  SELECT jobid INTO job_id FROM cron.job WHERE jobname='gymos-backup-section-cleanup';
+  IF job_id IS NOT NULL THEN PERFORM cron.alter_job(job_id,active=>false); END IF;
+ END IF;
+END $$;
 CREATE INDEX gym_backup_sections_scope ON gymos.gym_backup_sections(owner_id,actor_id,direction,expires_at);
 ALTER TABLE gymos.gym_backup_sections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gymos.gym_backup_sections FORCE ROW LEVEL SECURITY;
