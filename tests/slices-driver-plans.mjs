@@ -34,6 +34,6 @@ await run('dues first page, active branch a','R',s=>mods.dues.readDues(s,{...B,b
 await run('dues restricted to branch b','R',s=>mods.dues.readDues(s,{owner:'R',branch:'b',branches:['b']}));
 await run('payments summary (period 30)','R',s=>mods.pay.readPaymentsSummary(s,{...B,today:day,period:30}));
 await run('payments export first page','R',s=>mods.pay.readPaymentsExport(s,B));
-fs.writeFileSync('/downloads/slices-driver-plans-v3.txt',txt);
+fs.writeFileSync('/downloads/slices-driver-plans-v4-eb851.txt',txt);
 console.log(JSON.stringify(summary,null,1));
 await cl.query('RESET ROLE');await cl.end();await S(clean);await sup.end();
