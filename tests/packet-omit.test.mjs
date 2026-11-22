@@ -48,3 +48,33 @@ test('client capability: an omitted packet is refused by a non-capable client; t
   for(const p of [null,undefined,{},{omitted:[]}])assert.equal(packetUsable(p,false),true);
   assert.deepEqual(lazyHeaders(false),{});assert.deepEqual(lazyHeaders(true),{'X-GymOS-Lazy':'1'});
 });
+test('capability is impossible while readers are incomplete or any reader flag is off',async()=>{
+  const {omitCapable,OMIT_CAPABLE,OMIT_READERS_COMPLETE}=await import('../app/packet-capable.ts');
+  const all={a:true,b:true},some={a:true,b:false};
+  assert.equal(omitCapable(all,true,true,true),true);
+  for(const args of [[all,false,true,true],[all,true,false,true],[all,true,true,false],[some,true,true,true]])assert.equal(omitCapable(...args),false);
+  assert.equal(OMIT_READERS_COMPLETE,false,'readers missing: capability stays hard-off');assert.equal(OMIT_CAPABLE,false);
+});
+test('static contract: every full-packet fetch of /api/workspace sends the capability header and every packet parse is validated',async()=>{
+  const fs=await import('node:fs');
+  for(const f of ['app/workspace.tsx','app/use-offline.ts']){
+    const src=fs.readFileSync(new URL('../'+f,import.meta.url),'utf8');
+    const nFetch=[...src.matchAll(/fetch\((?:'|"|`)\/api\/workspace(?:'|"|`|\?)/g)].length,nHdr=[...src.matchAll(/lazyHeaders\(OMIT_CAPABLE\)/g)].length;
+    assert.ok(nFetch>=2,f+': found packet fetches ('+nFetch+')');assert.ok(nHdr>=nFetch,f+`: ${nHdr} capability headers for ${nFetch} packet fetches`);
+    const parses=[...src.matchAll(/await (?:r|response)\.json\(\) as [^;]*Packet[^;]*;/g)].length;
+    const checks=[...src.matchAll(/packetUsable\(/g)].length;
+    assert.ok(checks>=parses,f+`: packetUsable checks ${checks} cover packet parses ${parses}`);
+    assert.ok(/packetUsable\(cached/.test(src)||/!packetUsable\(value/.test(src),f+': cached packet guarded');
+  }
+});
+test('WorkspaceSyncManager: a visits-only delta on an omitted packet yields a NEW state identity (demand sources refetch), visits stay empty',async()=>{
+  const {WorkspaceSyncManager}=await import('../app/lib/workspace-sync.ts');
+  const prev=packet(cur(),ctx(),undefined,['visits']);let updated=null,snap=false;
+  const realFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(JSON.stringify({events:[{id:'e1',revision:prev.revision+1,eventType:'entity.upsert',collection:'visits',entityId:'vz',payload:{id:'vz',member:'m0',branch:'a',day:'2026-03-15',at:'2026-03-15T09:00:00.000Z'}}],toRevision:prev.revision+1,hasMore:false}),{status:200});
+  try{
+    const sm=new WorkspaceSyncManager({tenantId:'t-A',owner:'t-A',initialRevision:prev.revision,getCurrentPacket:()=>prev,onPacketUpdate:p=>{updated=p;},onSnapshotRequired:()=>{snap=true;}});
+    await sm.pullDeltas();sm.destroy();
+  }finally{globalThis.fetch=realFetch;}
+  assert.ok(updated,'update emitted');assert.equal(snap,false);assert.notEqual(updated.state,prev.state,'new state identity');assert.equal(updated.revision,prev.revision+1);assert.deepEqual(updated.state.visits,[]);assert.deepEqual(updated.omitted,['visits']);
+});
