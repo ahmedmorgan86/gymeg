@@ -13,7 +13,7 @@ for(let i=1;i<=100;i++){await S(mk('S'+i,30,100,100,50));await S(`insert into gy
 await S("select gymos.invoice_allocation_refs_complete('R','\"g\"')");
 await S('analyze gymos.gym_entities');
 const cl=new pg.Client({host:'/tmp/pgdata',user:'postgres',database:'rehearsal_w'});await cl.connect();await cl.query('SET ROLE gymos_app');await cl.query('SET statement_timeout=10000');
-const mods={};for(const [k,f] of Object.entries({att:'attendance-page',today:'today-visits',last:'last-visits-page',open:'open-visits-page',dues:'dues-page',pay:'payments-page'}))mods[k]=await import('/tmp/gymint/app/lib/'+f+'.ts');
+const mods={};for(const [k,f] of Object.entries({att:'attendance-page',today:'today-visits',last:'last-visits-page',open:'open-visits-page',dues:'dues-page',pay:'payments-page',trend:'visit-trend-page'}))mods[k]=await import('/tmp/gymint/app/lib/'+f+'.ts');
 let txt='fixture: owner R 3000 members, 60000 visits (2% open), 60000 payments, 30000 invoices over branches a,b,c; 100 small owners. Runtime role gymos_app, FORCE RLS.\n\n';const summary=[];
 const run=async(label,owner,fn)=>{
   await cl.query("SELECT set_config('app.gym_owner',$1,false)",[owner]);const log=[];
@@ -30,10 +30,11 @@ await run('attendance, small owner','S50',s=>mods.att.readAttendance(s,{owner:'S
 await run('today-visits','R',s=>mods.today.readTodayVisits(s,{...B,day}));
 await run('last-visits','R',s=>mods.last.readLastVisits(s,{...B,today:day}));
 await run('open-visits','R',s=>mods.open.readOpenVisits(s,B));
+await run('visit-trend (period 14)','R',s=>mods.trend.readVisitTrend(s,{...B,today:day,period:14}));
 await run('dues first page, active branch a','R',s=>mods.dues.readDues(s,{...B,branches:null}));
 await run('dues restricted to branch b','R',s=>mods.dues.readDues(s,{owner:'R',branch:'b',branches:['b']}));
 await run('payments summary (period 30)','R',s=>mods.pay.readPaymentsSummary(s,{...B,today:day,period:30}));
 await run('payments export first page','R',s=>mods.pay.readPaymentsExport(s,B));
-fs.writeFileSync('/downloads/slices-driver-plans-v3.txt',txt);
+fs.writeFileSync('/downloads/slices-driver-plans-v6-trend.txt',txt);
 console.log(JSON.stringify(summary,null,1));
 await cl.query('RESET ROLE');await cl.end();await S(clean);await sup.end();

@@ -59,6 +59,8 @@ export function applyWorkspaceDeltas(prev: Packet | null, events: DeltaEvent[]):
     if (!col || !Array.isArray(nextState[col])) {
       continue;
     }
+    // The packet left this collection out on purpose: a delta must never turn an omitted list into a plausible partial one.
+    if (prev.omitted?.includes(col as string)) continue;
 
     const list = [...(nextState[col] as Array<{id?: string}>)];
 

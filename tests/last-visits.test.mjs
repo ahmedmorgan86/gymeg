@@ -32,10 +32,11 @@ test('last visits per member == the legacy loop; odd data fails closed',async()=
   const days=['2026-03-01','2026-03-09','2026-03-14','2026-03-15','2026-04-02','2025-12-31'];let n=0;
   for(let k=0;k<1200;k++){const m=pick(s.members),d=pick(days);s.visits.push({id:'v'+n++,member:rnd()<.05?'ghost':m.id,branch:pick(['a','b','c']),day:d,at:iso(d,k%24),leftAt:iso(d,(k%24)),method:'x'});}
   await seed('L1',s);const cur=await current('L1');
-  for(const branch of ['a','b','c'])for(const today of ['2026-03-14','2025-12-30','2027-01-01']){
+  for(const branch of ['a','b','c'])for(const today of ['2026-03-14','2025-12-30','2027-01-01','9999-12-31']){
     const legacy=new Map();for(const v of cur.visits)if(v.branch===branch&&v.day<=today&&v.day>(legacy.get(v.member)??''))legacy.set(v.member,v.day);
     const r=await readLastVisits(scope,{owner:'L1',branch,today});assert.equal(r.status,'ok');
     for(const m of cur.members.filter(m=>m.branch===branch))assert.equal(r.last[m.id],legacy.get(m.id),branch+today+m.id);assert.ok(Object.keys(r.last).every(id=>cur.members.some(m=>m.id===id&&m.branch===branch)));
+    if(today==='9999-12-31')for(const m of cur.members.filter(m=>m.branch===branch))assert.equal(r.last[m.id],cur.visits.filter(v=>v.branch===branch&&v.member===m.id).map(v=>v.day).sort().at(-1),'members-table expression (no day clamp) '+branch+m.id);
   }
   await db.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','\"2026-3-9\"') WHERE owner_id='L1' AND entity_id='v1'");
   const bad=cur.visits.find(v=>v.id==='v1').branch;
