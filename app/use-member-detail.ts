@@ -37,5 +37,7 @@ export function useMemberDetail(state:GymState,m:Member,owner:string,now:string)
     return()=>ac.abort();
   },[owner,m.id,state,bump]); // eslint-disable-line react-hooks/exhaustive-deps -- `now` ticks every second; the fetch follows state changes only
   const retry=useCallback(()=>setBump(n=>n+1),[]);
-  return{...chooseDetail(SUMMARIES_ON,d,state,m,owner,now,LAZY_STRICT),failed:SUMMARIES_ON&&failedFor!==null&&failedFor===state,retry};
+  const failed=SUMMARIES_ON&&failedFor!==null&&failedFor===state;
+  // a failed refetch drops the hold: stale quota/open visit/count must not persist silently, the caller shows unknown + Retry
+  return{...chooseDetail(SUMMARIES_ON,d,state,m,owner,now,LAZY_STRICT&&!failed),failed,retry};
 }
