@@ -25,7 +25,7 @@ try{
   await seed(O,3000,60000,6000);console.log('seeded owner',O,'3000 members, 66000 visits (6000 on one member), dirty',await dirty(O,null));
   // drain convergence as the runtime role, branch a
   let i=0,last,worst=0;const lines=[];
-  for(;i<30;i++){const st=[];const t0=performance.now();last=await req(O,'a',st);const ms=Math.round(performance.now()-t0);worst=Math.max(worst,ms);lines.push(`request ${i+1}: ${last.status}${last.reason?':'+last.reason:''} recomputed=${last.recomputed} remaining=${last.remaining??''} ms=${ms} statements=${st.length} slowest=${Math.round(Math.max(...st.map(s=>s.ms)))}ms`);if(last.status==='ok')break;}
+  for(;i<30;i++){const st=[];const t0=performance.now();last=await req(O,'a',st);const ms=Math.round(performance.now()-t0);worst=Math.max(worst,ms);lines.push(`request ${i+1}: ${last.status}${last.reason?':'+last.reason:''} recomputed=${last.recomputed} more=${last.more??''} ms=${ms} statements=${st.length} slowest=${Math.round(Math.max(...st.map(s=>s.ms)))}ms`);if(last.status==='ok')break;}
   console.log(lines.join('\n'));check('branch a drains to ok as gymos_app',last.status==='ok');console.log('worst single request ms',worst,'; branch b dirty untouched:',await dirty(O,'b'));
   check('branch b marks untouched',await dirty(O,'b')>0);
   // steady state request: statements and timing, then plans
@@ -35,13 +35,25 @@ try{
   const plan=async(label,sql,args)=>{const rows=await asRole(O,async c=>(await c.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,args)).rows.map(r=>r['QUERY PLAN']));console.log('\n=== PLAN',label);console.log(rows.join('\n'));};
   await plan('scoped dirty select',"SELECT d.member_id FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$3 WHERE d.owner_id=$1 ORDER BY d.gen LIMIT $2",[O,10,'b']);
   await plan('candidate select (photo:false)',"SELECT e.entity_id,e.payload-'photo'-'health'-'vitals'-'measurements' AS payload,NULL::text AS photo_v,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members' AND e.branch=ANY($2::text[]) ORDER BY e.position,e.entity_id LIMIT 10001",[O,['a']]);
-  // real concurrent drainers on branch b (separate connections)
-  const t1=performance.now();const rounds=[];
-  for(let k=0;k<30;k++){const pair=await Promise.all([req(O,'b'),req(O,'b'),req(O,'b')]);rounds.push(pair.map(p=>p.status+(p.reason?':'+p.reason:'')+(p.recomputed!==undefined?'/'+p.recomputed:'')).join(' '));if(await dirty(O,'b')===0&&pair.some(p=>p.status==='ok'))break;}
-  console.log('\nconcurrent drainers (3 connections) rounds:\n'+rounds.join('\n'),'\ntotal ms',Math.round(performance.now()-t1));
-  check('concurrent drainers converge',await dirty(O,'b')===0);
-  const busy=rounds.some(r=>/busy/.test(r));console.log('busy observed:',busy);
-  const bq=await req(O,'b');check('b answer ok after concurrent drain',bq.status==='ok');
+  // owner version must not move when summaries are maintained (version triggers are on entities/states/photos only)
+  const ver=async()=>(await pool.query('SELECT version FROM gymos.gym_owner_version WHERE owner_id=$1',[O])).rows[0]?.version;
+  const v0=await ver();const w0=await req(O,'b');const v1=await ver();check('draining branch b summaries does not bump the owner version',v0===v1&&w0.recomputed>0,`version ${v0} -> ${v1}, recomputed ${w0.recomputed}`);
+  // TWO-BRANCH real concurrency: branches b and c drain at the same time on separate connections (owner-wide advisory lock serializes them)
+  const t1=performance.now();const rounds=[];const wins={b:0,c:0},busy={b:0,c:0};let totalRecomputed=0;const startB=await dirty(O,'b'),startC=await dirty(O,'c');
+  const doneB=()=>dirty(O,'b').then(n=>n===0),doneC=()=>dirty(O,'c').then(n=>n===0);
+  for(let k=0;k<40;k++){const [rb,rc]=await Promise.all([req(O,'b'),req(O,'c')]);
+    for(const [br,r] of [['b',rb],['c',rc]]){if(r.reason==='busy')busy[br]++;else if(r.recomputed>0){wins[br]++;totalRecomputed+=r.recomputed;}}
+    rounds.push(`b:${rb.status}${rb.reason?':'+rb.reason:''}/${rb.recomputed??0} c:${rc.status}${rc.reason?':'+rc.reason:''}/${rc.recomputed??0}`);
+    if(await doneB()&&await doneC()&&rb.status==='ok'&&rc.status==='ok')break;}
+  console.log('\ntwo-branch concurrent (b and c at once) rounds:\n'+rounds.join('\n'),'\ntotal ms',Math.round(performance.now()-t1),'wins',JSON.stringify(wins),'busy',JSON.stringify(busy),'recomputed in the rounds',totalRecomputed,'initial dirty b/c',startB,startC);
+  check('both branches converge',await dirty(O,'b')===0&&await dirty(O,'c')===0);
+  check('no double work: total recomputed equals the initial backlog of b and c',totalRecomputed===startB+startC,`${totalRecomputed} vs ${startB+startC}`);
+  check('neither branch starved (each made progress)',wins.b>0&&wins.c>0,JSON.stringify(wins));
+  // same-branch concurrent drainers on a fresh backlog of branch a
+  await pool.query(`INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen') FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND branch='a' ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen`,[O]);
+  const sameA=[];let tot=0;const startA=await dirty(O,'a');
+  for(let k=0;k<30;k++){const rs=await Promise.all([req(O,'a'),req(O,'a'),req(O,'a')]);for(const r of rs)if(r.reason!=='busy')tot+=r.recomputed??0;sameA.push(rs.map(r=>r.status+(r.reason?':'+r.reason:'')).join(' '));if(await dirty(O,'a')===0&&rs.some(r=>r.status==='ok'))break;}
+  console.log('\nsame-branch (3 connections) rounds:\n'+sameA.join('\n'));check('same-branch drainers converge with total recomputed == backlog',await dirty(O,'a')===0&&tot===startA,`${tot} vs ${startA}`);
 }catch(e){console.error('ERROR',e);failed++;}
 finally{for(const o of owners){for(const t of ['gym_entities','gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id=$1`,[o]).catch(()=>{});await pool.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[o]).catch(()=>{});}await pool.end();}
 process.exit(failed?1:0);

@@ -138,6 +138,22 @@ export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,a
   return{status:'ok',refreshed:ids.length,remaining:left};
 }
 
+export type DrainResult={status:'ok';refreshed:number;more:boolean;batches:number}|{status:Refusal};
+/** Request-side bounded drain for ONE branch: ONE selection of up to budget+1 dirty members of that branch (so `more` is exact without counting the backlog and without re-scanning per batch),
+ * then recomputed in units of `batch` until the budget is spent or `deadlineAt` (epoch ms) has passed. The deadline is checked before every unit, so the overrun is at most one unit.
+ * Marks of members that no longer exist are not selected (the membership join excludes them): they are not this caller's work and are cleaned by the owner-wide refresher only. */
+export async function drainBranchDirty(c:Sql,owner:string,branch:string,o:{budget:number;batch:number;deadlineAt:number;asOf?:string}):Promise<DrainResult>{
+  if(!await ready(c,owner))return refuse('unready');
+  const budget=Math.max(0,Math.min(o.budget,REFRESH_MAX)),batch=Math.max(1,o.batch);
+  const ids=(await c.query("SELECT d.member_id FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$3 WHERE d.owner_id=$1 ORDER BY d.gen LIMIT $2",[owner,budget+1,branch])).rows.map(r=>(r as {member_id:string}).member_id);
+  const work=ids.slice(0,budget);let done=0,batches=0;
+  while(done<work.length&&Date.now()<o.deadlineAt){
+    const unit=work.slice(done,done+batch);const why=await recompute(c,owner,unit,new Map<string,Candidate>(),o.asOf);if(why)return refuse(why);
+    done+=unit.length;batches++;
+  }
+  return{status:'ok',refreshed:done,more:ids.length>done,batches};
+}
+
 /** Convenience for the (future, not yet wired) route: one consistent REPEATABLE READ snapshot for the whole candidate read and refresh. */
 export async function readMemberCandidatesSnapshot(owner:string,branches:string[]|null,opts:{refresh?:boolean;now?:string}={}):Promise<CandidateResult>{
   const {withSnapshotScope}=await import('./member-summary-scope.ts');

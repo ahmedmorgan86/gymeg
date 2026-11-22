@@ -1,0 +1,27 @@
+// Plan-scale comparison, real PG16.2 as gymos_app (FORCE RLS). Branch d = 100 members of an owner with N members; buffers = top plan node shared hit+read, best of 3 EXPLAIN ANALYZE.
+import pg from 'pg';
+const pool=new pg.Pool({connectionString:'postgres://postgres@localhost/rehearsal_w?host=/tmp/pgdata',max:2});
+const SEL_OLD="SELECT d.member_id FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$2 WHERE d.owner_id=$1 ORDER BY d.gen LIMIT $3";
+const SEL_NEW="SELECT d.member_id,d.gen FROM gymos.gym_entities e CROSS JOIN LATERAL (SELECT y.member_id,y.gen FROM gymos.gym_member_summary_dirty y WHERE y.owner_id=e.owner_id AND y.member_id=e.entity_id OFFSET 0) d WHERE e.owner_id=$1 AND e.collection='members' AND e.branch=$2 ORDER BY d.gen LIMIT $3";
+const CAND_OLD="SELECT e.entity_id,e.payload,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members' AND e.branch=ANY($2::text[]) ORDER BY e.position,e.entity_id LIMIT 10001";
+const CAND_NEW="SELECT e.entity_id,e.payload,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN LATERAL (SELECT x.stored FROM gymos.gym_member_summaries x WHERE x.owner_id=e.owner_id AND x.member_id=e.entity_id OFFSET 0) s ON true LEFT JOIN LATERAL (SELECT y.gen FROM gymos.gym_member_summary_dirty y WHERE y.owner_id=e.owner_id AND y.member_id=e.entity_id OFFSET 0) d ON true WHERE e.owner_id=$1 AND e.collection='members' AND e.branch=ANY($2::text[]) ORDER BY e.position,e.entity_id LIMIT 10001";
+const asRole=async(o,work)=>{const c=await pool.connect();try{await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);const r=await work(c);await c.query('ROLLBACK');return r;}finally{c.release();}};
+const cost=async(o,sql,args)=>asRole(o,async c=>{let best=null;for(let i=0;i<3;i++){const r=(await c.query('EXPLAIN (ANALYZE,BUFFERS,COSTS OFF,TIMING OFF) '+sql,args)).rows.map(x=>x['QUERY PLAN']);const buf=Number((r.find(l=>/Buffers: shared/.test(l))||'').match(/hit=(\d+)/)?.[1]??0)+Number((r.find(l=>/Buffers: shared/.test(l))||'').match(/read=(\d+)/)?.[1]??0);const ex=Number(r.find(l=>/Execution Time/.test(l)).match(/([\d.]+)/)[1]);if(!best||ex<best.ex)best={buf,ex};}return best;});
+async function seed(o,N){await pool.query("INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,'{\"_entityStorage\":1}',1,'x')",[o]);
+  await pool.query(`INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT $1,'members','m'||g,g,CASE WHEN g%100=0 THEN 'd' ELSE (ARRAY['a','b','c'])[1+g%3] END,jsonb_build_object('id','m'||g,'branch',CASE WHEN g%100=0 THEN 'd' ELSE (ARRAY['a','b','c'])[1+g%3] END,'joined','2025-01-01','expires','2026-12-31') FROM generate_series(0,$2) g`,[o,N-1]);
+  await pool.query('SELECT gymos.backfill_member_summaries($1)',[o]);await pool.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[o]);}
+const out=[];
+try{
+ for(const N of [3000,10000]){const o='ps-'+N+'-'+Date.now();await seed(o,N);await pool.query('ANALYZE gymos.gym_entities;ANALYZE gymos.gym_member_summaries;ANALYZE gymos.gym_member_summary_dirty');
+  const mark=async(where)=>{await pool.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[o]);await pool.query(`INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT $1,entity_id,nextval('gymos.member_summary_gen') FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' ${where}`,[o]);await pool.query('ANALYZE gymos.gym_member_summary_dirty');};
+  const scen={'no backlog':async()=>mark("AND false"),'branch a dirty (all of a)':async()=>mark("AND branch='d'"),'other branches dirty (b,c), a clean':async()=>mark("AND branch<>'d'"),'whole owner dirty':async()=>mark('')};
+  for(const [name,f] of Object.entries(scen)){await f();
+   // orphan marks (deleted members) on top
+   const row={N,scenario:name};
+   for(const [k,sql,args] of [['select (planner, shipped)',SEL_OLD,[o,'d',11]],['select (forced per-member probes)',SEL_NEW,[o,'d',11]],['candidates (planner, shipped)',CAND_OLD,[o,['d']]],['candidates (forced probes)',CAND_NEW,[o,['d']]]]){const r=await cost(o,sql,args);row[k]=r.buf+' buf '+r.ex+'ms';}
+   out.push(row);console.log(JSON.stringify(row));}
+  // orphan marks: 5000 marks of non-existent members
+  await pool.query(`INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT $1,'gone'||g,nextval('gymos.member_summary_gen') FROM generate_series(1,5000) g`,[o]);await pool.query('ANALYZE gymos.gym_member_summary_dirty');
+  const row={N,scenario:'whole owner dirty + 5000 orphan marks'};for(const [k,sql,args] of [['select (planner, shipped)',SEL_OLD,[o,'d',11]],['select (forced per-member probes)',SEL_NEW,[o,'d',11]],['candidates (planner, shipped)',CAND_OLD,[o,['d']]],['candidates (forced probes)',CAND_NEW,[o,['d']]]]){const r=await cost(o,sql,args);row[k]=r.buf+' buf '+r.ex+'ms';}console.log(JSON.stringify(row));
+  for(const t of ['gym_entities','gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id=$1`,[o]);await pool.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[o]);}
+}finally{await pool.end();}

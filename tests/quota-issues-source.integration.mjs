@@ -129,13 +129,17 @@ test('worst-case history: one member with 6000 visits among 150 dirty members; w
   console.log('quota-issues worst-case: dirty',d0,'requests',calls+1,'worst request ms',worst);assert.equal(last.status,'ok');
   // oracle still exact for the heavy member
   const day=dayAt(NOWS2[0],st.settings.timezone);const want=st.members.filter(m=>!m.archived&&membershipIssue(st,m,day)==='quota').map(m=>m.id).sort();assert.deepEqual([...last.quota].sort(),want);
-  // deadline: every statement costs 400 ms, so the wave must stop at the deadline (not at the 100-recompute budget), keep its progress and report draining
+  // deadline with near-bound assertions: every statement costs 20 ms, units of 1 member, wave deadline 1200 ms. The deadline is checked before each unit, so the last unit must START before
+  // t0+waveMs and the whole wave ends at most one unit (the largest observed gap between consecutive summary writes) plus the candidate-read tail after it.
   await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QH','h'||g,9000+g FROM generate_series(0,99) g ON CONFLICT DO NOTHING");
-  const slow=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QH',true)");return work({query:async(q,v)=>{await new Promise(r=>setTimeout(r,400));return c.query(q,v);}});});
-  const b=await dirty(),t1=Date.now();const r=await readQuotaIssues(slow,{owner:'QH',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});const el=Date.now()-t1;
-  console.log('quota-issues deadline: ms',el,'status',r.status,r.reason,'dirty',b,'->',await dirty());
-  assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.ok(el<QUOTA_WAVE_MS+QUOTA_BATCH*20*400,'bounded by deadline plus one batch');
-  const afterN=await dirty();assert.ok(afterN<b&&b-afterN<QUOTA_MAX_DIRTY,'some progress kept, stopped before the budget: '+(b-afterN));
+  const writes=[];const slow=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QH',true)");return work({query:async(q,v)=>{await new Promise(r=>setTimeout(r,20));const r=await c.query(q,v);if(/INSERT INTO gymos.gym_member_summaries/.test(String(q)))writes.push(Date.now());return r;}});});
+  const b=await dirty(),t1=Date.now(),WAVE=1200;const r=await readQuotaIssues(slow,{owner:'QH',branch:'a',branches:null,settings:st.settings,now:NOWS2[0],batch:1,waveMs:WAVE});const el=Date.now()-t1;
+  const gaps=writes.slice(1).map((x,i)=>x-writes[i]),unit=Math.max(...gaps);
+  console.log('quota-issues deadline: elapsed',el,'ms, wave',WAVE,'units done',writes.length,'largest unit',unit,'ms; status',r.status,r.reason,'dirty',b,'->',await dirty());
+  assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.ok(writes.length>=2&&writes.length<100,'stopped by the deadline, after real progress: '+writes.length);
+  assert.ok(writes.at(-1)-t1<=WAVE+unit+300,'last unit started before the deadline: '+(writes.at(-1)-t1));
+  assert.ok(el<=WAVE+2*unit+1000,'total bounded by deadline + one unit + tail: '+el);
+  const afterN=await dirty();assert.equal(b-afterN,writes.length,'progress kept exactly for the completed units');
 });
 test('scoped + shared budget + concurrency: a branch-a request never writes or waits on branch-b marks; recomputed <= budget in total; concurrent drainers converge without double work',async()=>{
   const {QUOTA_MAX_DIRTY}=await import('../app/lib/quota-issues-source.ts');
@@ -145,7 +149,7 @@ test('scoped + shared budget + concurrency: a branch-a request never writes or w
   const dirty=async b=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id WHERE d.owner_id='QS' AND ($1::text IS NULL OR e.branch=$1)",[b])).rows[0].n);
   const rq=(b,extra={})=>readQuotaIssues(scopeFor('QS'),{owner:'QS',branch:b,branches:null,settings:st.settings,now:NOWS2[0],...extra});
   const bB=await dirty('b'),bA=await dirty('a');assert.ok(bB>=130&&bA>=130);
-  let r=await rq('a');assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.equal(r.remaining,bA-QUOTA_MAX_DIRTY,'remaining counts only the branch');assert.equal(r.recomputed,QUOTA_MAX_DIRTY);
+  let r=await rq('a');assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.equal(r.more,true,'more is exact: the branch has more than the budget');assert.equal(r.recomputed,QUOTA_MAX_DIRTY);
   assert.equal(await dirty('b'),bB,'branch b marks untouched by a branch-a request');assert.equal(await dirty('a'),bA-QUOTA_MAX_DIRTY);
   r=await rq('a');assert.equal(r.status,'ok',JSON.stringify(r));assert.ok(r.recomputed<=QUOTA_MAX_DIRTY,'one shared budget across wave and candidate read: '+r.recomputed);assert.equal(await dirty('b'),bB,'still untouched');
   // concurrent drainers on branch b: both finish, total recomputed work equals the backlog (no member recomputed twice by the winner/loser pair), final answers equal
