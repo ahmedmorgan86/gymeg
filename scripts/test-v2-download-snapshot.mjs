@@ -41,17 +41,20 @@ ok('over-limit rejected 413 limit',v2.accepted===false&&v2.code==='limit'&&v2.st
 ok('over-limit rejection fast (<2000ms)',v2.ms<2000);
 console.log('  over-limit rejection ms:',v2.ms);
 
-// 3: counter fallback
-await admin.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id=$1",[over]); // no counters at all -> no _ready baseline -> exact SUM
+// 3: counter fallback (missing ROWS; on remote-parity schemas the counters TABLE itself is absent - same exact-SUM path, proven by cases 1-2 already running table-free)
+const hasCounters=(await admin.query("SELECT to_regclass('gymos.gym_entity_counters') IS NOT NULL AS ok")).rows[0].ok;
+if(hasCounters)await admin.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id=$1",[over]); // no counters at all -> no _ready baseline -> exact SUM
 const v3=await verdict(over);
-ok('no _ready baseline -> exact-SUM fallback still rejects',v3.accepted===false&&v3.code==='limit');
+ok(hasCounters?'no _ready baseline -> exact-SUM fallback still rejects':'no counters TABLE -> exact-SUM fallback still rejects',v3.accepted===false&&v3.code==='limit');
 
-// 4: delta-only counter without _ready is not trusted
+// 4: delta-only counter without _ready is not trusted (requires the counters table)
+if(hasCounters){
 const delta=await seed('delta',{photos:2,photoBytes:100});
 await admin.query("DELETE FROM gymos.gym_entity_counters WHERE owner_id=$1",[delta]);
 await admin.query("INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) VALUES($1,'photos',2,999999999)",[delta]);
 const v4=await verdict(delta);
 ok('delta-only counter without _ready falls back to exact SUM (accepted)',v4.accepted===true);
+}else console.log('SKIP delta-only counter case (no counters table on this schema)');
 
 // 5: recovery never hydrates live state
 const rOwner=await seed('rec',{photos:900,photoBytes:96_000}); // live photos alone over budget
@@ -64,11 +67,13 @@ ok('recovery snapshot: preserved photo reattached to its member, live members ab
 const v5l=await verdict(rOwner);
 ok('live snapshot of same owner rejected',v5l.accepted===false&&v5l.code==='limit');
 
-// 6: negative counter fails closed (with _ready present so it would otherwise be trusted)
+// 6: negative counter fails closed (with _ready present so it would otherwise be trusted; requires the counters table)
+if(hasCounters){
 const weird=await seed('weird',{photos:1,photoBytes:100});
 await admin.query("UPDATE gymos.gym_entity_counters SET payload_bytes=-5 WHERE owner_id=$1 AND collection='photos'",[weird]);
 const v6=await verdict(weird);
 ok('negative counter not trusted -> exact-SUM fallback accepts',v6.accepted===true);
+}else console.log('SKIP negative counter case (no counters table on this schema)');
 
 // 7: archive SUM cost sample at 200k events
 const big=await seed('big',{events:200000});
