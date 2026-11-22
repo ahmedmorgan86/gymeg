@@ -19,6 +19,7 @@ const R=[
  ['attendance','GYMOS_ATTENDANCE',b=>({branch:b,day:'2026-03-05'}),['visits','members'],false],
  ['today-visits','GYMOS_TODAY_VISITS',b=>({branch:b,day:'2026-03-05'}),['visits','members'],false],
  ['last-visits','GYMOS_LAST_VISITS',b=>({branch:b,today:'2026-03-05'}),['visits','members'],false],
+ ['visit-trend','GYMOS_VISIT_TREND',b=>({branch:b,today:'2026-03-05',period:'7'}),['visits','members'],false],
  ['open-visits','GYMOS_OPEN_VISITS',b=>({branch:b}),['visits','members'],false],
  ['payments','GYMOS_PAYMENTS',b=>({branch:b,mode:'summary',today:'2026-03-05',period:'30'}),['payments','members'],false],
  ['payments','GYMOS_PAYMENTS',b=>({branch:b,mode:'export'}),['payments','members'],false],
