@@ -4,9 +4,12 @@ CREATE TABLE IF NOT EXISTS gymos.gym_entities (
  PRIMARY KEY(owner_id,collection,entity_id)
 );
 CREATE INDEX IF NOT EXISTS gym_entities_owner_branch ON gymos.gym_entities(owner_id,branch,collection);
+-- Photo content bound mirrors MEMBER_PHOTO_MAX in app/lib/member-photo-input.ts (96,000
+-- data-URL chars for the 320px q85 member-photo contract); change both together.
+-- Existing databases converge through scripts/migrate-member-photo-cap.mjs.
 CREATE TABLE IF NOT EXISTS gymos.gym_photos (
  owner_id text NOT NULL, member_id text NOT NULL, content text NOT NULL,
- PRIMARY KEY(owner_id,member_id), CHECK(length(content)<=22000)
+ PRIMARY KEY(owner_id,member_id), CHECK(length(content)<=96000)
 );
 ALTER TABLE gymos.gym_entities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE gymos.gym_entities FORCE ROW LEVEL SECURITY;
