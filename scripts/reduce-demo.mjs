@@ -4,7 +4,7 @@ import {createHash} from 'node:crypto';
 import {validateBackup} from '../app/lib/backup.ts';
 
 // Offline demo-dataset reducer: shrinks the fictional 'sample-full-' demo
-// population inside a GymEG JSON backup to --keep members (default 20),
+// population inside a GymEG JSON backup to --keep members (default 11),
 // dropping every row that references removed demo members, then re-validates
 // the result with the app's own backup validator. Local files only; it never
 // touches a backend. Dry-run by default; pass --write OUT.json to save.
@@ -17,7 +17,7 @@ const flag = (name, fallback) => {
   const i = args.indexOf(name);
   return i < 0 ? fallback : args[i + 1];
 };
-const keep = Number(flag('--keep', '20')), stripPhotos = args.includes('--strip-photos'), out = flag('--write', null);
+const keep = Number(flag('--keep', '11')), stripPhotos = args.includes('--strip-photos'), out = flag('--write', null);
 if (!input || !Number.isInteger(keep) || keep < 0) throw Error('Usage: node --experimental-strip-types scripts/reduce-demo.mjs backup.json [--keep N] [--strip-photos] [--write out.json]');
 
 if (statSync(input).size > 256 * 1024 * 1024) throw Error('refusing: input file larger than 256 MiB');

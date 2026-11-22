@@ -10,7 +10,7 @@ import {completeDemo,DEMO_PREFIX} from '../app/lib/complete-demo.ts';
 // Firestore when it is the persistence backend, Postgres/Supabase otherwise.
 // Follows isFirestorePersistence() so a deployment that keeps Firebase envs
 // for FCM push only still seeds into Postgres.
-const owner=process.env.GYMOS_DEMO_STORAGE_KEY,count=Number(process.env.GYMOS_DEMO_COUNT??20),output=resolve(process.env.GYMOS_DEMO_OUTPUT_DIR??'.demo-artifacts');
+const owner=process.env.GYMOS_DEMO_STORAGE_KEY,count=Number(process.env.GYMOS_DEMO_COUNT??11),output=resolve(process.env.GYMOS_DEMO_OUTPUT_DIR??'.demo-artifacts');
 if(!owner||!process.argv.includes('--confirm-test-club')||!Number.isInteger(count)||count<1||count>2000)throw Error('Set GYMOS_DEMO_STORAGE_KEY and pass --confirm-test-club for an isolated test club only.');
 mkdirSync(output,{recursive:true});const backup=join(output,'GymOS_Demo_Before_Seed.json'),now=new Date().toISOString();
 
