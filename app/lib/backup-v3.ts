@@ -30,7 +30,7 @@
 import {randomUUID} from 'node:crypto';
 import type {PoolClient} from 'pg';
 import {getPool} from './database.ts';
-import {assembleTransfer,backupDigest,BACKUP_CHUNK_BYTES,decodeChunk,TransferError} from './backup-transfer.ts';
+import {assembleTransfer,backupDigest,BACKUP_CHUNK_BYTES,BACKUP_MAX_BYTES,decodeChunk,TransferError} from './backup-transfer.ts';
 import {readEntityCore,persistSpaceTx,type StagedRestore} from './entity-store.ts';
 import {processWorkspaceOutbox} from './realtime-broadcast.ts';
 import {STATE_BYTE_LIMIT} from './workspace-slice.ts';
@@ -39,7 +39,9 @@ import {RECENT_EVENTS} from './activity-archive.ts';
 import {MEMBER_PHOTO_MAX} from './member-photo-input.ts';
 import {useFirestorePersistence,getFirestoreDb} from './firestore-db.ts';
 import {db} from './database.ts';
-import type {Event,GymState} from './domain.ts';
+import {emptyState,type Event,type GymState} from './domain.ts';
+import {normalize} from './extensions.ts';
+import {assembleState} from './entity-state.ts';
 
 export const SECTION_MAX_BYTES=64*1024*1024;
 export const PHOTO_PAGE_BYTES=2_000_000;
@@ -78,6 +80,25 @@ async function requireSession(c:PoolClient,owner:string,actor:string,sessionId:s
 async function admissionLock(c:PoolClient,owner:string){await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[owner+'|backup-sections']);}
 
 /** One active session per owner+actor+direction (UNIQUE): starting a session abandons and wipes the previous one plus anything expired. Download sessions pin the core's revision. */
+export async function readV2DownloadSnapshot(owner:string,actor:string,recoveryId?:string){postgresOnlyV3(); /* PG-only: the Firestore path keeps its existing reads (bounded post-assembly in the route) */ const client=await getPool().connect();try{await client.query('BEGIN ISOLATION LEVEL REPEATABLE READ');await client.query("SELECT set_config('app.gym_owner',$1,true),set_config('app.gym_actor',$2,true)",[owner,actor]);
+ // Admission IN the same snapshot as hydration: encoded-size accounting over the sources the
+ // body is actually built from (jsonb::text adds spacing, so it is >= the compact JSON.stringify
+ // output - conservative by construction, same invariant as the counters migration). Photo bytes
+ // mirror the counter formula exactly: octet_length(to_jsonb(content)::text)+9 ('"photo":' key).
+ const sum=async(sql:string,args:unknown[])=>{const v=Number((await client.query(sql,args)).rows[0]?.n??0);if(!Number.isSafeInteger(v)||v<0)throw new TransferError('limit',413);return v;};
+ let bytes=0;
+ if(recoveryId){bytes+=await sum('SELECT COALESCE(octet_length(payload::text),0)::bigint AS n FROM gymos.gym_recovery WHERE owner_id=$1 AND id=$2',[owner,recoveryId]);bytes+=await sum('SELECT COALESCE(SUM(octet_length(to_jsonb(content)::text)+9),0)::bigint AS n FROM gymos.gym_recovery_photos WHERE owner_id=$1 AND recovery_id=$2',[owner,recoveryId]);}
+ else{bytes+=await sum('SELECT COALESCE(octet_length(payload::text),0)::bigint AS n FROM gymos.gym_states WHERE user_id=$1',[owner]);bytes+=await sum('SELECT COALESCE(SUM(octet_length(payload::text)+1),0)::bigint AS n FROM gymos.gym_entities WHERE owner_id=$1',[owner]);const counterRows=(await client.query("SELECT collection,payload_bytes FROM gymos.gym_entity_counters WHERE owner_id=$1 AND collection IN('photos','_ready')",[owner])).rows as {collection:string;payload_bytes:string|number}[];const ready=counterRows.some(r=>r.collection==='_ready');const counter=counterRows.find(r=>r.collection==='photos');const counterBytes=counter?Number(counter.payload_bytes):ready?0:NaN;if(ready&&Number.isSafeInteger(counterBytes)&&counterBytes>=0)bytes+=counterBytes;else bytes+=await sum('SELECT COALESCE(SUM(octet_length(to_jsonb(content)::text)+9),0)::bigint AS n FROM gymos.gym_photos WHERE owner_id=$1',[owner]);}
+ bytes+=await sum('SELECT COALESCE(SUM(octet_length(payload::text)+1),0)::bigint AS n FROM gymos.gym_activity_archive WHERE owner_id=$1',[owner]);
+ if(bytes+4096>BACKUP_MAX_BYTES)throw new TransferError('limit',413);
+ const stateRow=(await client.query('SELECT payload,revision FROM gymos.gym_states WHERE user_id=$1 FOR SHARE',[owner])).rows[0] as {payload:string;revision:number}|undefined;
+ let state:GymState;
+ if(recoveryId){const rec=(await client.query('SELECT payload FROM gymos.gym_recovery WHERE owner_id=$1 AND id=$2',[owner,recoveryId])).rows[0] as {payload:string}|undefined;if(!rec)throw new TransferError('notFound',404);const preserved=(await client.query('SELECT member_id,content FROM gymos.gym_recovery_photos WHERE owner_id=$1 AND recovery_id=$2',[owner,recoveryId])).rows as {member_id:string;content:string}[];state=reattachRecoveryPhotos(JSON.parse(rec.payload) as GymState,preserved);}
+ else if(stateRow&&(JSON.parse(stateRow.payload) as {_entityStorage?:number})._entityStorage===1){const entities=(await client.query('SELECT collection,entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=$1 ORDER BY collection,position',[owner])).rows;const images=(await client.query('SELECT member_id,content FROM gymos.gym_photos WHERE owner_id=$1',[owner])).rows as {member_id:string;content:string}[];state=normalize(assembleState(JSON.parse(stateRow.payload),entities,Object.fromEntries(images.map(p=>[p.member_id,p.content]))));}
+ else state=stateRow?normalize(JSON.parse(stateRow.payload) as GymState):emptyState();
+ const archive=(await client.query('SELECT payload FROM gymos.gym_activity_archive WHERE owner_id=$1 ORDER BY at,event_id',[owner])).rows as {payload:Event}[];
+ state.events=[...new Map([...archive.map(r=>r.payload),...state.events].map(e=>[e.id,e])).values()];
+ await client.query('COMMIT');return {state,revision:stateRow?.revision??0};}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}}
 export async function createSession(owner:string,actor:string,direction:'upload'|'download',pinRevision?:number,snapshot=false){
  return scoped(owner,actor,async c=>{
   await admissionLock(c,owner);
