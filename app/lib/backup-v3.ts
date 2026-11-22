@@ -209,6 +209,15 @@ export function packEventPages(events:Event[]):Event[][]{
  * Note: a legacy recovery payload is one pre-existing monolithic row; parsing it is bounded by
  * that row's stored size (same as v2 today), not by the section caps.
  */
+/** Re-attach SQL-preserved recovery portraits to a photo-free recovery state. The lookup map is
+ null-prototype: reserved member ids (__proto__, constructor, ...) must only match their OWN row,
+ never Object.prototype members. */
+export function reattachRecoveryPhotos(state:GymState,preserved:{member_id:string;content:string}[]):GymState{
+ if(!preserved.length)return state;
+ const photos=Object.create(null) as Record<string,string>;
+ for(const p of preserved)photos[p.member_id]=p.content;
+ return{...state,members:state.members.map(m=>m.photo===undefined&&photos[m.id]!==undefined?{...m,photo:photos[m.id]}:m)};
+}
 export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
  let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false,preservedPhotos:{member_id:string;content:string}[]=[];
  if(recovery){

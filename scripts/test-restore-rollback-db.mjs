@@ -5,7 +5,7 @@ import {getPool,withScope} from '../app/lib/database.ts';
 import {emptyState,applyOperation} from '../app/lib/domain.ts';
 import {persistSpace,readEntitySpace,readEntityCore} from '../app/lib/entity-store.ts';
 import {backupDigest,BACKUP_CHUNK_BYTES} from '../app/lib/backup-transfer.ts';
-import {createSession,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,validateManifest,readValidatedCore,commitRestoreV3,discardSession} from '../app/lib/backup-v3.ts';
+import {createSession,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,validateManifest,readValidatedCore,commitRestoreV3,discardSession,reattachRecoveryPhotos} from '../app/lib/backup-v3.ts';
 import {validateBackup} from '../app/lib/backup.ts';
 
 const owner='gymos-restore-rb-'+randomUUID(),actor='tester';
@@ -89,6 +89,18 @@ try{
  const snap=Object.assign({},rebuilt.snapshotPhotos);
  assert.deepEqual(snap,Object.fromEntries(preRestore.map(r=>[r.member_id,r.content])),'recovery download snapshot photos = preserved set');
  assert.ok(!rebuilt.buffer.toString('utf8').includes('data:image/jpeg'),'recovery core buffer itself still photo-free');
+
+ // 5) reattachRecoveryPhotos: reserved member ids match only their OWN preserved row.
+ const reserved=reattachRecoveryPhotos(
+  {...restoredState,members:[{...restoredState.members[0],id:'constructor',photo:undefined},{...restoredState.members[1],id:'m-real',photo:undefined}]},
+  [{member_id:'m-real',content:'data:image/jpeg;base64,/9j/real'}]);
+ assert.equal(reserved.members[0].photo,undefined,"absent reserved-name member 'constructor' gets NO inherited photo");
+ assert.equal(reserved.members[1].photo,'data:image/jpeg;base64,/9j/real','real portrait attached');
+ const ownReserved=reattachRecoveryPhotos(
+  {...restoredState,members:[{...restoredState.members[0],id:'__proto__',photo:undefined}]},
+  [{member_id:'__proto__',content:'data:image/jpeg;base64,/9j/proto'}]);
+ assert.equal(ownReserved.members[0].photo,'data:image/jpeg;base64,/9j/proto','own reserved-name entry attaches');
+ assert.equal(reattachRecoveryPhotos(restoredState,[]),restoredState,'empty preserved set returns state unchanged');
 
  await discardSession(owner,actor,ul);
  for(const t of ['gym_recovery_photos','gym_entities','gym_photos','gym_recovery','member_code_access'])await admin.query('DELETE FROM gymos.'+t+' WHERE owner_id=$1',[owner]);
