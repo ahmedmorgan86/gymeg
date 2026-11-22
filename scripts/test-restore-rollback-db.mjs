@@ -3,7 +3,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import pg from 'pg';
 import {getPool,withScope} from '../app/lib/database.ts';
 import {emptyState,applyOperation} from '../app/lib/domain.ts';
-import {persistSpace,readEntitySpace,readEntityCore} from '../app/lib/entity-store.ts';
+import {persistSpace,readEntitySpace,readEntityCore,readEntityCoreOrSpace} from '../app/lib/entity-store.ts';
 import {backupDigest,BACKUP_CHUNK_BYTES} from '../app/lib/backup-transfer.ts';
 import {createSession,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,validateManifest,readValidatedCore,commitRestoreV3,discardSession,reattachRecoveryPhotos} from '../app/lib/backup-v3.ts';
 import {validateBackup} from '../app/lib/backup.ts';
@@ -32,11 +32,9 @@ try{
 
  // DOWNLOAD (backup set = the 3 original photos).
  const {buffer:coreBuf,revision}=await buildCoreBuffer(owner);
- const dl=await createSession(owner,actor,'download',revision);
- await createSession(owner,actor,'download',revision).then(()=>{});
- const photoBufs=[];let pc,ord=0;
+ const photoBufs=[];let pc;
  for(;;){const r=await nextPhotoPage(owner,pc);if(r.done&&!Object.keys(r.page).length)break;photoBufs.push(Buffer.from(JSON.stringify(r.page),'utf8'));pc=r.nextCursor;if(r.done)break;}
- const eventBufs=[];let ec,eventN=0;ord=0;
+ const eventBufs=[];let ec,eventN=0;
  for(;;){const r=await nextEventPage(owner,ec);if(r.done&&!r.page.length)break;eventBufs.push(Buffer.from(JSON.stringify(r.page),'utf8'));eventN+=r.page.length;ec=r.nextCursor;if(r.done)break;}
  assert.ok(photoBufs.length>=1&&eventBufs.length>=1,'download produced pages');
 
@@ -75,7 +73,7 @@ try{
  assert.deepEqual(kept,preRestore,'preserved set equals the exact pre-restore photo set');
  // 3a) Composite FK: even with a known recovery id, another owner's scope cannot reference it.
  let fkBlocked=false;
- try{await withScope('intruder-'+randomUUID(),c=>c.query("INSERT INTO gymos.gym_recovery_photos(recovery_id,owner_id,member_id,content) VALUES($1,$2,'x','data:image/jpeg;base64,/9j/AAAA')",[rec.id,'intruder-'+owner]));}catch(e){fkBlocked=true;}
+ try{await withScope('intruder-'+randomUUID(),c=>c.query("INSERT INTO gymos.gym_recovery_photos(recovery_id,owner_id,member_id,content) VALUES($1,$2,'x','data:image/jpeg;base64,/9j/AAAA')",[rec.id,'intruder-'+owner]));}catch{fkBlocked=true;}
  assert.ok(fkBlocked,'cross-owner recovery reference rejected (RLS scope + composite FK)');
  // 3b) Tenant scoping: another owner sees nothing (RLS).
  await withScope('someone-else-'+randomUUID(),async c=>{
@@ -101,6 +99,19 @@ try{
   [{member_id:'__proto__',content:'data:image/jpeg;base64,/9j/proto'}]);
  assert.equal(ownReserved.members[0].photo,'data:image/jpeg;base64,/9j/proto','own reserved-name entry attaches');
  assert.equal(reattachRecoveryPhotos(restoredState,[]),restoredState,'empty preserved set returns state unchanged');
+
+ // 6) readEntityCoreOrSpace: over-admission stored core falls back to the full read;
+ //    any OTHER failure propagates (narrow catch, no masking).
+ const bigOwner='gymos-overcore-'+randomUUID();
+ const bigMeta={...emptyState(),_entityStorage:1};
+ await withScope(bigOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,0,$3)',[bigOwner,JSON.stringify(bigMeta),new Date().toISOString()]));
+ await withScope(bigOwner,c=>c.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) SELECT $1,'members','pad-'||g,g,'main',jsonb_build_object('id','pad-'||g,'pad',repeat('x',1100000)) FROM generate_series(1,20) g",[bigOwner])); // 20 x ~1.1MB > 21MB admission
+ const fb=await readEntityCoreOrSpace(bigOwner);
+ assert.ok(fb.state&&typeof fb.revision==='number','over-limit stored core: fallback full read returned state');
+ let masked=false;
+ try{await readEntityCoreOrSpace('gymos-no-row-'+randomUUID());}catch{masked=true;}
+ assert.ok(masked,'non-admission failure (missing state row) propagates, not masked');
+ for(const t of ['gym_entities','gym_states'])await admin.query('DELETE FROM gymos.'+t+' WHERE '+(t==='gym_states'?'user_id':'owner_id')+'=$1',[bigOwner]);
 
  await discardSession(owner,actor,ul);
  for(const t of ['gym_recovery_photos','gym_entities','gym_photos','gym_recovery','member_code_access'])await admin.query('DELETE FROM gymos.'+t+' WHERE owner_id=$1',[owner]);
