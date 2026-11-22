@@ -24,6 +24,14 @@ android {
             buildConfigField 'String', 'WEB_HOST', '"gymeg-supabase.vercel.app"'
             manifestPlaceholders = [webHost: 'gymeg-supabase.vercel.app']
         }
+        coexist {
+            dimension 'target'
+            versionCode 13
+            versionName '1.1.9.2'
+            applicationIdSuffix '.freshtest'
+            buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
+            manifestPlaceholders = [webHost: 'gymeg.vercel.app']
+        }
     }
     signingConfigs { release { storeFile file(System.getenv('GYMEG_KEYSTORE') ?: 'missing-keystore.jks'); storePassword System.getenv('GYMEG_KEYSTORE_PASSWORD'); keyAlias System.getenv('GYMEG_KEY_ALIAS'); keyPassword System.getenv('GYMEG_KEYSTORE_PASSWORD') } }
     buildTypes { release { signingConfig signingConfigs.release } }

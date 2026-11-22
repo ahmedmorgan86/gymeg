@@ -113,8 +113,8 @@ public final class AnnouncementReceiver extends BroadcastReceiver {
             builder = new android.app.Notification.Builder(context);
         }
 
-        builder.setContentTitle(name != null && !name.isEmpty() ? name : "نداء صوتي مجدول")
-                .setContentText("موعد النداء الصوتي في الصالة")
+        builder.setContentTitle(name != null && !name.isEmpty() ? name : context.getString(R.string.announcement_default_title))
+                .setContentText(context.getString(R.string.announcement_body))
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setAutoCancel(true)
                 .setContentIntent(pi)
