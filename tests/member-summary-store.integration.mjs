@@ -253,3 +253,28 @@ test('today visits source equals the legacy expressions for every branch/day (ar
   assert.ok(n>=9);
   await assert.rejects(()=>readTodayVisits(scope,{owner:'TV',branch:'a',day:"2026-01-01' OR 1=1"}),RangeError);
 });
+test('random write sequence (insert with sessions/periodId/branch, auto-exit update, delete, move) over members sharing one period: refreshed stored summary == legacy for numeric fields and == membershipIssue over the FULL state; null derivations counted',async()=>{
+  const {membershipIssue}=await import('../app/lib/extensions.ts');const {dayAt}=await import('../app/lib/domain.ts');
+  const s0=fixture();s0.visits=[];s0.payments=[];s0.invoices=[];s0.members=['r1','r2','r3'].map((id,i)=>({id,name:'R '+i,phone:'0100000100'+i,branch:i<2?'a':'b',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'shared',plan:'pl-a',start:'2026-02-01',end:'2026-12-31',visits:i===1?4:3,quotaMode:i===2?'sessions':undefined}]}));
+  await seed('RW',s0);await db.query("SELECT gymos.backfill_member_summaries('RW')");
+  let sd=21;const rnd=()=>{sd=(sd*1664525+1013904223)>>>0;return sd/2**32;};const pick=a=>a[Math.floor(rnd()*a.length)];
+  const days=['2026-02-03','2026-02-20','2026-03-01','2026-03-05','2026-03-10','2026-03-12','2026-03-13'];let n=0,compared=0,quota=0,nulls=0;
+  for(let step=0;step<60;step++){
+    const ex=async q=>{try{await db.query(q[0],q[1]);return true;}catch(e){if(/gym_visit_one_open/.test(e.message))return false;throw e;}};
+    const op=pick(['ins','ins','ins','exit','del','move']);
+    const ids=(await db.query("SELECT entity_id FROM gymos.gym_entities WHERE owner_id='RW' AND collection='visits' ORDER BY position")).rows.map(r=>r.entity_id);
+    if(op==='ins'||!ids.length){const d=pick(days),mem=pick(['r1','r2','r3']);const v={id:'w'+n,member:mem,branch:pick(['a','b']),day:d,at:d+'T0'+(n%9)+':00:00.000Z'};if(rnd()<.5)v.leftAt=d+'T0'+(n%9)+':30:00.000Z';if(rnd()<.5)v.periodId=pick(['shared','shared','other']);if(rnd()<.4)v.sessions=[{at:d+'T12:00:00.000Z',leftAt:d+'T12:20:00.000Z'}];
+      if(await ex(["INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('RW','visits',$1,$2,$3,$4)",[v.id,10000+n,v.branch,JSON.stringify(v)]]))n++;}
+    else if(op==='exit')await ex(["UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{leftAt}','\"2026-03-13T18:00:00.000Z\"') WHERE owner_id='RW' AND entity_id=$1",[pick(ids)]]);
+    else if(op==='del')await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='RW' AND entity_id=$1",[pick(ids)]);
+    else await ex(["UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{member}',to_jsonb($2::text)) WHERE owner_id='RW' AND entity_id=$1",[pick(ids),pick(['r1','r2','r3'])]]);
+    const res=await read('RW');assert.equal(res.status,'ok',`step ${step} ${op}`);const s=await current('RW');
+    for(const {member,stored} of res.candidates)for(const now of NOWS){
+      const got=deriveSummary(strip(stored),member,s.settings,now);if(!got){nulls++;continue;}
+      const want=ORACLE(s,member,now);for(const k of ['issue','remaining','status','used','visitsRemaining'])assert.deepEqual(strip(got[k]),strip(want[k]),`step ${step} ${op} ${member.id} ${now} ${k}`);
+      assert.equal(got.current?.id,want.current?.id,`step ${step} ${member.id} open visit`);
+      const legacyFull=membershipIssue(s,member,dayAt(now,s.settings.timezone));if(now>='2026-03-15')assert.equal(got.issue,legacyFull,`step ${step} ${member.id} vs membershipIssue(full state) ${now}`);
+      compared++;if(got.issue==='quota')quota++;}
+  }
+  console.log('random-write coverage',JSON.stringify({compared,quota,nullDerivations:nulls}));assert.ok(compared>500&&quota>20);
+});
