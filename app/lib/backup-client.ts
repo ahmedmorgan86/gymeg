@@ -11,12 +11,12 @@ type V3Writer={write:(s:string|Uint8Array)=>Promise<void>;finish:()=>Promise<Blo
 export const v3Streams=()=>typeof window!=='undefined'&&window.isSecureContext&&'showSaveFilePicker' in window;
 type SaveStream={write:(d:string|Uint8Array)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>};
 type SaveHandle={createWritable:()=>Promise<SaveStream>};
-async function pickHandle(name:string):Promise<SaveHandle>{ // picker must run inside the click's transient activation: no awaits may precede it. Picking creates NO file - the writable (and thus the file) appears only after downloadStart succeeds.
+async function pickHandle(name:string):Promise<SaveHandle>{ // picker must run inside the click's transient activation: no awaits may precede it. Picking creates no writable here; whether the native picker itself pre-creates an empty file is browser behaviour we do not control.
  return (window as unknown as {showSaveFilePicker:(o:object)=>Promise<SaveHandle>}).showSaveFilePicker({suggestedName:name,types:[{description:'GymEG backup',accept:{'application/json':['.json']}}]});
 }
 async function streamWriter(handle:SaveHandle):Promise<V3Writer>{
  const stream=await handle.createWritable();
- return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;},abort:async()=>{await stream.abort();}}; // abort discards the partial file: no empty or half-written apparent backup
+ return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;},abort:async()=>{await stream.abort();}}; // best-effort abort: asks the browser to discard the partial file
 }
 function collectWriter():V3Writer{ // fallback: accumulate with an ACTUAL byte cap; the estimate only preflights, this enforces
  const parts:Uint8Array[]=[];let total=0;const enc=new TextEncoder();
@@ -53,7 +53,7 @@ export async function downloadBackupV3(owner:string,recovery:string|undefined,on
   await wr.write(']}');
   const blob=await wr.finish();ok=true;
   return blob;
- }finally{if(!ok&&w?.abort)await w.abort().catch(()=>{});await request(owner,{action:'uploadAbort',session:start.session}).catch(()=>{});} // an unfinished download never leaves a partial file behind
+ }finally{if(!ok&&w?.abort)await w.abort().catch(()=>{});await request(owner,{action:'uploadAbort',session:start.session}).catch(()=>{});} // best-effort: an unfinished download aborts the writable and the server session
 }
 export async function restoreBackupV3(owner:string,file:File,revision:number,onProgress:(done:number,total:number)=>void){
  if(file.size>V3_RESTORE_CAP)throw Error('tooLarge'); // admission BEFORE parse: the parsed DOM and every staging buffer derive from this bound
