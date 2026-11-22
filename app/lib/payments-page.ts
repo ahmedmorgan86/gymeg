@@ -33,8 +33,9 @@ export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:str
     const now=q.now??Date.now,t0=now(),budget=q.deadlineMs??SUMMARY_DEADLINE_MS;
     const acc=new Map<string,number>(days.map(d=>[d,0])),inWindow=new Set(days);let monthSum=0,cur=null as {day:string;pos:number;id:string}|null;
     for(;;){
-      const args:unknown[]=[q.owner,q.branch,lo,hi];let after='';if(cur){args.push(cur.day,cur.pos,cur.id);after=` AND ((payload->>'day') COLLATE "C",position,entity_id) > ($5::text COLLATE "C",$6::bigint,$7::text)`;}
-      const rows=(await c.query(`SELECT payload,position,entity_id,${OFFSHAPE} AS odd FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND payload->>'day' ~ ${DAY_RE} AND (payload->>'day') COLLATE "C" >= ($3::text COLLATE "C") AND (payload->>'day') COLLATE "C" <= ($4::text COLLATE "C")${after} ORDER BY (payload->>'day') COLLATE "C",position,entity_id LIMIT ${SUMMARY_CHUNK}`,args)).rows as {payload:{day:string;minor:number;voided?:unknown};position:number;entity_id:string;odd:boolean}[];
+      const args:unknown[]=[q.owner,q.branch,lo,hi];let after='';if(cur){args.push(cur.day,cur.pos,cur.id);after=` AND (pay_day,position,entity_id) > ($5::text COLLATE "C",$6::bigint,$7::text)`;}
+      // Plain generated pay_day (030000) so the day range and the keyset row comparison are Index Conds of gym_entities_pay_day under FORCE RLS (payload expressions are non-leakproof Filters whose rejected rows grow with every chunk). Predicates repeated for the partial index.
+      const rows=(await c.query(`SELECT payload,position,entity_id,${OFFSHAPE} AS odd FROM gymos.gym_entities WHERE owner_id=$1 AND collection='payments' AND branch=$2 AND pay_day IS NOT NULL AND pay_day >= ($3::text COLLATE "C") AND pay_day <= ($4::text COLLATE "C")${after} ORDER BY pay_day,position,entity_id LIMIT ${SUMMARY_CHUNK}`,args)).rows as {payload:{day:string;minor:number;voided?:unknown};position:number;entity_id:string;odd:boolean}[];
       for(const r of rows){
         if(r.odd)return{status:'unavailable',reason:'invalid-payment'} as const;
         const p=r.payload;if(p.voided)continue;
