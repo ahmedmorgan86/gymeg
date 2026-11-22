@@ -16,6 +16,8 @@ export function chooseDetail(on:boolean,d:Detail|null,state:GymState,m:Member,ow
   const x=memberSummary(state,m,now);
   return{x,visitCount:state.visits.filter(v=>v.member===m.id).length,payments:state.payments.filter(a=>a.member===m.id),source:'legacy'};
 }
+/** Visit count for display. Strict (packet may omit visits): the legacy fallback would count an empty list, so an unknown count is null (the caller shows a dash), never 0. */
+export function visitCountView(view:Pick<DetailView,'visitCount'|'source'>,strict:boolean):number|null{return strict&&view.source==='legacy'?null:view.visitCount;}
 export function useMemberDetail(state:GymState,m:Member,owner:string,now:string):DetailView{
   const [d,setD]=useState<Detail|null>(null);
   useEffect(()=>{
