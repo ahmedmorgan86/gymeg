@@ -7,16 +7,19 @@ import {deriveSummary} from './member-summary-model.ts';
 import {dayAt} from './domain.ts';
 import type {GymState} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
+/** Read budget of one request: at most this many dirty members are recomputed (write-on-read) before the answer is an explicit fallback; photos are never hashed (the aggregate does not use photoV). */
+export const QUOTA_MAX_DIRTY=100,QUOTA_STATEMENT_MS=4000;
 export type QuotaIssues={status:'ok';version:string;day:string;quota:string[];members:number}|{status:'unchanged';version:string}|{status:'fallback';reason:string}|{status:'forbidden'};
 export type QuotaRequest={owner:string;branch:string;branches:string[]|null;settings:GymState['settings'];now:string;since?:string|null};
 export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaIssues>{
   if(!q.branch||q.branch.length>200)return{status:'fallback',reason:'invalid-branch'};
   if(q.branches&&!q.branches.includes(q.branch))return{status:'forbidden'};
   return scope(q.owner,async c=>{
+    await c.query("SELECT set_config('statement_timeout',$1,true)",[String(QUOTA_STATEMENT_MS)]); // transaction-local: a slow plan fails closed to the fallback
     const v1=await readOwnerVersion(c,q.owner);if(v1===null)return{status:'fallback',reason:'no-version'} as const;
     const day=dayAt(q.now,q.settings.timezone);
     if(q.since&&q.since===v1+'|'+day)return{status:'unchanged',version:v1} as const; // the token covers the day too: a day change must recompute
-    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:true,now:q.now});
+    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:true,now:q.now,photo:false,maxDirty:QUOTA_MAX_DIRTY});
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const quota:string[]=[];
     for(const {member,stored} of r.candidates){

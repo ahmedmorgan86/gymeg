@@ -85,3 +85,22 @@ test('after real writes (tail/today inserts, session edit, move, delete, exit) t
   assert.equal((await readQuotaIssues(scopeFor('QW'),{owner:'QW',branch:'a',branches:null,settings:sNow.settings,now:NOWS2[0],since:ok.version})).status,'unchanged');
   assert.equal((await readQuotaIssues(scopeFor('QW'),{owner:'QW',branch:'a',branches:null,settings:sNow.settings,now:NOWS2[1],since:ok.version})).status,'ok','day change recomputes');
 });
+test('cost: no photo hashing, bounded dirty work (explicit fallback over the budget), statement timeout set, query count and time at 3000 members',async()=>{
+  const {QUOTA_MAX_DIRTY}=await import('../app/lib/quota-issues-source.ts');
+  const s=club();s.visits=[];s.members=[];const big='data:image/jpeg;base64,'+'A'.repeat(20000);
+  for(let i=0;i<3000;i++)s.members.push({id:'z'+i,branch:['a','b','c'][i%3],joined:'2026-01-01',expires:'2026-12-31',photo:i%2?big:undefined,membershipPeriods:[{id:'pz'+i,plan:'pl',start:'2026-02-01',end:'2026-12-31',visits:i%4?null:3}]});
+  await seed('QC',s);for(let i=0;i<20;i++){const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QC',true)");return refreshDirtySummaries(c,'QC',500,AS);});if(!r.remaining)break;}
+  const seen=[];const counting=owner=>(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work({query:async(q,v)=>{seen.push(String(q));return c.query(q,v);}});});
+  const st=await current('QC');
+  const t0=performance.now();const r=await readQuotaIssues(counting('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});const ms=Math.round(performance.now()-t0);
+  assert.equal(r.status,'ok',JSON.stringify(r));assert.equal(r.members,1000);
+  assert.ok(!seen.some(q=>/sha256|gym_photos/.test(q)),'no photo hashing or photo-table access');
+  assert.ok(seen.some(q=>/statement_timeout/.test(q)),'statement timeout is set before the reads');
+  console.log('quota-issues cost: members',r.members,'statements',seen.length,'ms',ms);
+  assert.ok(seen.length<=8,'constant statement count, not per member: '+seen.length);
+  // dirty budget: mark more than the budget dirty -> explicit fallback, nothing partial, no unbounded write-on-read
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,1000+g FROM generate_series(0,$1) g ON CONFLICT DO NOTHING",[QUOTA_MAX_DIRTY*3]);
+  const over=await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});
+  console.log('quota-issues over-budget',JSON.stringify(over));
+  assert.equal(over.status,'fallback');
+});
