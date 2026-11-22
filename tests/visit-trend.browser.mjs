@@ -38,10 +38,11 @@ await new Promise(r=>server.listen(0,r));const port=server.address().port;
 const browser=await puppeteer.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu'],headless:'new'});
 let ok=true;const check=(c,msg)=>{console.log(c?'PASS':'FAIL',msg);if(!c)ok=false;};
 const OUT=process.env.SHOTS??'/downloads';
-const openOverview=async page=>{await page.waitForFunction(()=>[...document.querySelectorAll('button,a')].some(b=>/^\s*Start here/.test(b.innerText)),{timeout:15000}).catch(()=>{});await page.evaluate(()=>[...document.querySelectorAll('button,a')].find(b=>/^\s*Start here/.test(b.innerText))?.click());await page.waitForSelector('details.card summary',{timeout:8000}).catch(()=>{});await page.evaluate(()=>document.querySelectorAll('details').forEach(d=>d.open=true));await page.waitForSelector('.stats-grid',{timeout:5000}).catch(()=>{});};
-const run=async(mode,{fail=0,w=1280,h=900,shot,keep=false}={})=>{const page=await browser.newPage();await page.setViewport({width:w,height:h,isMobile:w<600});page.on('console',m=>process.env.DEBUG&&console.log('console:',m.text().slice(0,200)));page.on('requestfailed',r=>process.env.DEBUG&&console.log('reqfail',r.url()));page.on('pageerror',x=>console.log('pageerror:',String(x.stack??x).slice(0,600)));calls.length=0;failNext=fail;
- await page.evaluateOnNewDocument(()=>localStorage.setItem('gymos.language','en'));
- await page.goto(`http://localhost:${port}/${mode}`);await openOverview(page);await new Promise(r=>setTimeout(r,2500));
+const START={en:'Start here',ar:'ابدأ يومك'};
+const openOverview=async(page,lang='en')=>{const re=START[lang];await page.waitForFunction(r=>[...document.querySelectorAll('button,a')].some(b=>b.innerText.trim().startsWith(r)),{timeout:15000},re).catch(()=>{});await page.evaluate(r=>[...document.querySelectorAll('button,a')].find(b=>b.innerText.trim().startsWith(r))?.click(),re);await page.waitForSelector('details.card summary',{timeout:8000}).catch(()=>{});await page.evaluate(()=>document.querySelectorAll('details').forEach(d=>d.open=true));await page.waitForSelector('.stats-grid',{timeout:5000}).catch(()=>{});};
+const run=async(mode,{fail=0,w=1280,h=900,shot,keep=false,lang='en'}={})=>{const page=await browser.newPage();await page.setViewport({width:w,height:h,isMobile:w<600});page.on('console',m=>process.env.DEBUG&&console.log('console:',m.text().slice(0,200)));page.on('requestfailed',r=>process.env.DEBUG&&console.log('reqfail',r.url()));page.on('pageerror',x=>console.log('pageerror:',String(x.stack??x).slice(0,600)));calls.length=0;failNext=fail;
+ await page.evaluateOnNewDocument(l=>localStorage.setItem('gymos.language',l),lang);
+ await page.goto(`http://localhost:${port}/${mode}`);await openOverview(page,lang);await new Promise(r=>setTimeout(r,2500));
  if(process.env.DEBUG)console.log('BODY',(await page.$eval('body',e=>e.innerText)).slice(0,1500),await page.evaluate(()=>document.querySelectorAll('details').length));
  const g=sel=>page.$eval(sel,e=>e.innerText.replace(/\s+/g,' ').trim()).catch(()=>'<missing>');
  const out={calls:[...calls],stats:await g('.stats-grid'),chart:await g('.chart-card'),svg:await page.$eval('.chart svg',e=>e.innerHTML.length).catch(()=>-1),overflow:await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),page};if(shot)await (await page.$('.stats-grid')).evaluate(e=>e.scrollIntoView()).then(()=>page.screenshot({path:`${OUT}/${shot}.png`}));if(!keep)await page.close();return out;};
@@ -52,15 +53,25 @@ try{
  check(on.stats===off.stats&&on.chart===off.chart,'Overview stats + pulse text identical OFF vs ON (synthetic club, distinct daily counts, future-day visit)');if(on.chart!==off.chart){console.log('ON ',on.chart.slice(0,300));}
  check(on.svg===off.svg&&on.svg>0,'chart svg markup size identical');
  console.log('strict-fail start');const st=await run('strict',{fail:1,keep:true,shot:'overview-strict-error-desktop'});
- check(/Retry|إعادة/.test(st.chart),'STRICT failure shows Retry');console.log('STRICT-ERR',st.chart.slice(0,200));
+ check(/Retry|إعادة/.test(st.chart),'STRICT failure shows Retry');check(!/\b0 visits/.test(st.chart)&&/—/.test(st.chart)&&!/Today's check-ins 0/.test(st.stats)&&/Today's check-ins —/.test(st.stats),'STRICT failure shows dashes, never a zero count');console.log('STRICT-ERR',st.chart.slice(0,200));
  await st.page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>/Retry|إعادة/.test(b.textContent))?.click());await new Promise(r=>setTimeout(r,1500));
  const after=await st.page.$eval('.chart-card',e=>e.innerText.replace(/\s+/g,' ').trim());check(after===off.chart,'STRICT after Retry equals legacy text');
  const ok2=await run('strict',{shot:'overview-strict-ok-desktop'});check(ok2.stats===off.stats&&ok2.chart===off.chart,'STRICT success equals legacy text');
+ // non-canonical visit data in the branch: the server answers unavailable (real DB row), strict shows an explicit notice with no Retry and no numbers, non-strict falls back to the packet
+ {const bv=s.visits.find(v=>v.branch==='a'&&!v.id.startsWith('x')&&!v.id.startsWith('fut'))??s.visits.find(v=>v.branch==='a');await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','5'::jsonb) WHERE owner_id='A' AND entity_id=$1",[bv.id]);
+  const pkOdd=JSON.parse(JSON.stringify(pk));
+  const un=await run('strict',{shot:'overview-strict-unavailable-desktop'});console.log('UNAVAIL',un.chart.slice(0,220));
+  check(/unavailable/.test(un.chart)&&!/Retry/.test(un.chart)&&/—/.test(un.chart)&&!/\b0 visits/.test(un.chart),'STRICT + non-canonical visit: explicit unavailable, no Retry, no numbers');
+  const unAr=await run('strict',{w:390,h:844,lang:'ar',shot:'overview-strict-unavailable-mobile-ar'});console.log('UNAVAIL-AR',unAr.chart.slice(0,220));check(/غير متاح/.test(unAr.chart)&&!/إعادة/.test(unAr.chart)&&/—/.test(unAr.chart)&&!unAr.overflow,'390px Arabic unavailable: notice, dash, no retry, no overflow');
+  const nonStrict=await run('on',{});check(nonStrict.stats===off.stats&&nonStrict.chart===off.chart,'non-strict ON with a non-canonical visit falls back to the packet (text equals OFF)');
+  await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}',to_jsonb($2::text)) WHERE owner_id='A' AND entity_id=$1",[bv.id,bv.day]);}
  // loading: a slow first read (server holds the answer 5 s)
  delayMs=5000;const lp=await browser.newPage();await lp.setViewport({width:1280,height:900});await lp.evaluateOnNewDocument(()=>localStorage.setItem('gymos.language','en'));await lp.goto(`http://localhost:${port}/strict`);await openOverview(lp);await new Promise(r=>setTimeout(r,1000));
- const lt=await lp.$eval('.chart-card',e=>e.innerText.replace(/\s+/g,' ').trim()).catch(()=>'<missing>');console.log('LOADING',lt.slice(0,200));check(/Loading/.test(lt),'STRICT loading shows loading notice');await (await lp.$('.stats-grid')).evaluate(e=>e.scrollIntoView());await lp.screenshot({path:`${OUT}/overview-strict-loading-desktop.png`});delayMs=0;await lp.close();
+ const lt=await lp.$eval('.chart-card',e=>e.innerText.replace(/\s+/g,' ').trim()).catch(()=>'<missing>');console.log('LOADING',lt.slice(0,200));check(/Loading/.test(lt)&&!/\b0 visits/.test(lt)&&/—/.test(lt),'STRICT loading shows loading notice and dashes, no zero');await (await lp.$('.stats-grid')).evaluate(e=>e.scrollIntoView());await lp.screenshot({path:`${OUT}/overview-strict-loading-desktop.png`});delayMs=0;await lp.close();
  const mo=await run('off',{w:390,h:844,shot:'overview-off-mobile'}),mn=await run('on',{w:390,h:844,shot:'overview-on-mobile'});check(mo.stats===mn.stats&&mo.chart===mn.chart,'390px Overview text identical OFF vs ON');
- const ms=await run('strict',{fail:1,w:390,h:844,shot:'overview-strict-error-mobile'});check(/Retry/.test(ms.chart),'390px STRICT error shows Retry');
+ const ms=await run('strict',{fail:1,w:390,h:844,shot:'overview-strict-error-mobile'});check(/Retry/.test(ms.chart)&&!/\b0 visits/.test(ms.chart),'390px STRICT error shows Retry, no zero');
+ const aoff=await run('off',{w:390,h:844,lang:'ar',shot:'overview-off-mobile-ar'}),aon=await run('on',{w:390,h:844,lang:'ar',shot:'overview-on-mobile-ar'}),aerr=await run('strict',{fail:1,w:390,h:844,lang:'ar',shot:'overview-strict-error-mobile-ar'});
+ check(aoff.stats!=='<missing>'&&aoff.stats===aon.stats&&aoff.chart===aon.chart,'390px Arabic Overview text identical OFF vs ON');console.log('AR-ERR',aerr.chart.slice(0,160));check(/إعادة المحاولة/.test(aerr.chart)&&/—/.test(aerr.chart)&&!aoff.overflow&&!aon.overflow&&!aerr.overflow,'390px Arabic STRICT error: retry + dash, no overflow');
  check(!mn.overflow&&!mo.overflow&&!ms.overflow,'390px no horizontal overflow (ON)');
 }finally{await browser.close();server.close();}
 console.log(ok?'ALL PASS':'FAILURES');process.exit(ok?0:1);
