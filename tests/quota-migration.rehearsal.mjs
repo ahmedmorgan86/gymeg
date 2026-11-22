@@ -55,6 +55,25 @@ try{
    check('stamp makes every live member current without recompute (stored bytes unchanged)',before>0&&after===0&&storedBefore===storedAfter&&nullLeft===0,`before=${before} after=${after} nullLeft=${nullLeft}`);
    check('stamp ran under a concurrent writer with no writer error',e2===0);
    const again=await stampBranches(pool,{batch:500});check('re-run is a no-op (resumable)',again.summaries===0&&again.marks===0,JSON.stringify(again));}
+  // 6. stamp guards: runtime role (FORCE RLS, no BYPASSRLS) is refused loudly; disabled triggers are refused; residual report; moved member with its mark is recomputed, not trusted
+  {const {stampBranches,preflight}=await import('../scripts/summary-branch-stamp.mjs');
+   const asApp={query:async(sql,v)=>{const c=await pool.connect();try{await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');const r=await c.query(sql,v);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}},connect:()=>pool.connect()};
+   let e1=null;try{await preflight(asApp);}catch(e){e1=e;}check('preflight refuses a non-bypass role under FORCE RLS',!!e1&&/BYPASSRLS|FORCE ROW LEVEL|permission/i.test(e1.message),e1?.message.slice(0,90));
+   await pool.query('ALTER TABLE gymos.gym_entities DISABLE TRIGGER gym_entities_msum_upd');let e2=null;try{await preflight(pool);}catch(e){e2=e;}await pool.query('ALTER TABLE gymos.gym_entities ENABLE TRIGGER gym_entities_msum_upd');
+   check('preflight refuses when a summary trigger is disabled',!!e2&&/triggers/.test(e2.message),e2?.message.slice(0,80));
+   // moved member pre-stamp: summary NULL-branch, member moves (mark written), stamp, then the mark still forces a recompute
+   await pool.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id=$1",[O]);await pool.query("DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1",[O]);
+   await pool.query("UPDATE gymos.gym_entities SET branch='b',payload=jsonb_set(payload,'{branch}','\"b\"') WHERE owner_id=$1 AND collection='members' AND entity_id='m3'",[O]);
+   const mk=(await pool.query("SELECT branch FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m3'",[O])).rows[0];check('move wrote a dirty mark carrying the new branch',mk?.branch==='b');
+   const tot=await stampBranches(pool,{batch:500});const after=(await pool.query("SELECT (SELECT branch FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m3') sb,(SELECT count(*) FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m3') marks",[O])).rows[0];
+   check('moved member keeps its mark after stamping (recompute still forced)',Number(after.marks)===1,JSON.stringify(after));
+   console.log('residual after stamp',JSON.stringify(tot.residual));check('no live NULL-branch rows remain',tot.residual.liveSummariesNull===0&&tot.residual.liveMarksNull===0);
+   // loud failure when nothing is stamped but live NULLs remain: lock a row, stamp skips it
+   await pool.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id=$1 AND member_id='m7'",[O]);
+   const lk=await pool.connect();await lk.query('BEGIN');await lk.query("SELECT 1 FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m7' FOR UPDATE",[O]);
+   let e3=null;try{await stampBranches(pool,{batch:500});}catch(e){e3=e;}await lk.query('ROLLBACK');lk.release();
+   check('stamped 0 with a live NULL row left (locked) FAILS LOUDLY with the residual counts',!!e3&&/stamped 0 rows but live NULL/.test(e3.message)&&/"liveSummariesNull":1/.test(e3.message),e3?.message.slice(0,120));
+   const t3=await stampBranches(pool,{batch:500});check('re-run after the lock clears reaches residual 0',t3.residual.liveSummariesNull===0&&t3.summaries===1,JSON.stringify(t3));}
 }catch(e){console.error('ERROR',e);failed++;}
 finally{for(const t of ['gym_entities','gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id=$1`,[O]).catch(()=>{});await pool.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[O]).catch(()=>{});await pool.end();}
 process.exit(failed?1:0);
