@@ -8,7 +8,7 @@ import {decodedPhotoKind} from '../app/lib/photo-decode.ts';
 import {MEMBER_PHOTO_MAX, MEMBER_PHOTO_SIZE} from '../app/lib/member-photo-input.ts';
 
 // HELD, review-only. Offline backup-image compressor. Local files only; it never touches a backend.
-// Re-encodes the JPEG data-URL photos inside a GymEG JSON backup as WebP (same pixels geometry, never upscaled,
+// Re-encodes the JPEG data-URL photos inside a GymEG JSON backup as WebP, downscaled to fit the slot side (320px members, aspect kept, never upscaled,
 // no crop change, EXIF dropped by the re-encode), but ONLY when the result is at least --min-gain smaller (default 15%)
 // AND passes the same byte validation the app uses (photo-data-url.ts) AND fits the slot cap. Anything else stays the
 // original bytes. A lossy JPEG->WebP re-encode adds generation loss, so quality is explicit (default 85, the approved level).
@@ -46,8 +46,11 @@ for (const slot of SLOTS) for (const row of slot.pick(state)) {
     if (value.length > MAX_ENCODED_CHARS) { entry.reason = 'encoded size above admission limit'; report.push(entry); continue; }
     const bytes = Buffer.from(value.slice(value.indexOf(',') + 1), 'base64');
     const meta = await sharp(bytes, {limitInputPixels: MAX_PIXELS}).metadata();
-    if (!meta.width || !meta.height || meta.width > slot.side || meta.height > slot.side) { entry.reason = 'would downscale or unreadable size (left alone, not transcoded)'; report.push(entry); continue; }
+    if (!meta.width || !meta.height) { entry.reason = 'unreadable size (left alone, not transcoded)'; report.push(entry); continue; }
+    // Images larger than the slot side are downscaled (aspect ratio kept, EXIF orientation applied first, never upscaled).
     const buf = await sharp(bytes, {limitInputPixels: MAX_PIXELS}).rotate().resize(slot.side, slot.side, {fit: 'inside', withoutEnlargement: true}).webp({quality}).toBuffer();
+    const outMeta = await sharp(buf).metadata();
+    entry.dims = {before: [meta.width, meta.height, meta.orientation ?? 1], after: [outMeta.width, outMeta.height]};
     const next = 'data:image/webp;base64,' + buf.toString('base64');
     entry.after = next.length;
     if (await decodedPhotoKind(next, slot.cap, slot.side) !== 'webp') entry.reason = 'fails app validation, full decode or cap';
