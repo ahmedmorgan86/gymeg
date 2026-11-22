@@ -28,6 +28,15 @@ android {
             buildConfigField 'String', 'SUPABASE_HOST', '"aynycpumwcopbnkbkqhr.supabase.co"'
             manifestPlaceholders = [webHost: 'gymeg-supabase.vercel.app']
         }
+        coexist {
+            dimension 'target'
+            versionCode 10
+            versionName '1.0.9'
+            applicationIdSuffix '.freshtest'
+            buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
+            buildConfigField 'String', 'SUPABASE_HOST', '"frsstuqstutbflkaffcx.supabase.co"'
+            manifestPlaceholders = [webHost: 'gymeg.vercel.app']
+        }
     }
     signingConfigs { release { storeFile file(System.getenv('GYMEG_KEYSTORE') ?: 'missing-keystore.jks'); storePassword System.getenv('GYMEG_KEYSTORE_PASSWORD'); keyAlias System.getenv('GYMEG_KEY_ALIAS'); keyPassword System.getenv('GYMEG_KEYSTORE_PASSWORD') } }
     buildTypes { release { signingConfig signingConfigs.release } }
