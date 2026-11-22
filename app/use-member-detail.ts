@@ -23,21 +23,20 @@ export function visitCountView(view:Pick<DetailView,'visitCount'|'source'>,stric
 /** Strict (LAZY_STRICT, the packet may omit visits): a legacy summary is computed from an empty list (full quota, no open visit, zero visits), so it is unknown, never shown. */
 export const detailUnknown=(view:Pick<DetailView,'source'>,strict:boolean)=>strict&&view.source==='legacy';
 export function useMemberDetail(state:GymState,m:Member,owner:string,now:string):DetailView&{failed:boolean;retry:()=>void}{
-  const [d,setD]=useState<Detail|null>(null),[failedFor,setFailedFor]=useState<GymState|null>(null),[bump,setBump]=useState(0);
+  const [d,setD]=useState<Detail|null>(null),[failedFor,setFailedFor]=useState<{s:GymState;o:string;m:string}|null>(null),[bump,setBump]=useState(0);
   useEffect(()=>{
     if(!SUMMARIES_ON)return;
-    setFailedFor(null);
     const ac=new AbortController();
     (async()=>{try{
       const get=async(asOf?:string)=>{const r=await fetch('/api/workspace/member-detail?member='+encodeURIComponent(m.id)+(asOf?'&asOf='+encodeURIComponent(asOf):''),{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});return r.ok?await r.json() as {status:string;stored?:StoredSummary;invoices?:Detail['invoices'];payments?:Detail['payments']}:null;};
       let j=await get();
       if(j?.status==='ok'&&j.stored&&deriveSummary(j.stored,m,state.settings,now)===null)j=await get(now); // the screen clock is behind the server's: recompute at that clock
-      if(j?.status==='ok'&&j.stored){setD({owner,member:m.id,forState:state,stored:j.stored,invoices:j.invoices??[],payments:j.payments??[]});setFailedFor(null);}else setFailedFor(state); // keep the last good detail: strict mode shows it (same owner and member only) instead of flashing unknown
-    }catch{if(!ac.signal.aborted)setFailedFor(state);}})();
+      if(j?.status==='ok'&&j.stored){setD({owner,member:m.id,forState:state,stored:j.stored,invoices:j.invoices??[],payments:j.payments??[]});setFailedFor(null);}else setFailedFor({s:state,o:owner,m:m.id}); // keep the last good detail: strict mode shows it (same owner and member only) instead of flashing unknown
+    }catch{if(!ac.signal.aborted)setFailedFor({s:state,o:owner,m:m.id});}})();
     return()=>ac.abort();
   },[owner,m.id,state,bump]); // eslint-disable-line react-hooks/exhaustive-deps -- `now` ticks every second; the fetch follows state changes only
-  const retry=useCallback(()=>setBump(n=>n+1),[]);
-  const failed=SUMMARIES_ON&&failedFor!==null&&failedFor===state;
+  const retry=useCallback(()=>{setFailedFor(null);setBump(n=>n+1);},[]); // reset in the event handler, not in the effect: the failure is keyed by state, owner and member, so any change of them already ends it
+  const failed=SUMMARIES_ON&&failedFor!==null&&failedFor.s===state&&failedFor.o===owner&&failedFor.m===m.id;
   // a failed refetch drops the hold: stale quota/open visit/count must not persist silently, the caller shows unknown + Retry
   return{...chooseDetail(SUMMARIES_ON,d,state,m,owner,now,LAZY_STRICT&&!failed),failed,retry};
 }
