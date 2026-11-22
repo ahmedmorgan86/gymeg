@@ -210,11 +210,13 @@ export function packEventPages(events:Event[]):Event[][]{
  * that row's stored size (same as v2 today), not by the section caps.
  */
 export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
- let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false;
+ let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false,preservedPhotos:{member_id:string;content:string}[]=[];
  if(recovery){
-  const row=useFirestorePersistence()?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
-  if(!row||useFirestorePersistence()&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
+  const firestore=useFirestorePersistence();
+  const row=firestore?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
+  if(!row||firestore&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
   const parsed=JSON.parse((row as {payload:string}).payload) as GymState;
+  preservedPhotos=firestore?[]:((await db.prepare('SELECT member_id,content FROM gymos.gym_recovery_photos WHERE owner_id=? AND recovery_id=?').bind(owner,recovery).all(owner)).results as {member_id:string;content:string}[]); // SQL-side preserved photos of the state this recovery replaced (restore keeps recovery cores photo-free)
   const current=await readEntityCore(owner);revision=current.revision;state=parsed;
   snapshotEvents=state.events; // the snapshot's OWN history, complete: staged as event pages, never re-trimmed, never live archive rows
  }else{
@@ -224,6 +226,7 @@ export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{bu
  }
  snapshotPhotos=Object.create(null); // ids like __proto__ must survive assignment
  state={...state,members:state.members.map(m=>{if(m.photo===undefined)return m;const rest={...m};snapshotPhotos![m.id]=m.photo as string;delete rest.photo;return rest;}),events:snapshotEvents?[]:state.events.slice(-RECENT_EVENTS),receipts:[]};
+ for(const p of preservedPhotos)if(snapshotPhotos![p.member_id]===undefined)snapshotPhotos![p.member_id]=p.content;
  if(!Object.keys(snapshotPhotos!).length)snapshotPhotos=undefined;
  if(!snapshotEvents?.length)snapshotEvents=undefined;
  const buffer=Buffer.from(JSON.stringify(state),'utf8');
@@ -371,7 +374,11 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
    photos:(async function*(){for(const r of photoRows)yield JSON.parse(decode(await readSection(r))) as Record<string,string>;})(),
    archiveEvents:(async function*(){for(const r of eventRows)yield JSON.parse(decode(await readSection(r))) as Event[];})(),
   };
-  const applied=await persistSpaceTx(client,owner,current,state,true,undefined,staged);
+  // persistSpaceTx writes the recovery row under this id AND copies the outgoing photo set
+  // SQL-side into gym_recovery_photos (before its staged photo delete, same transaction): full
+  // rollback coverage without hydrating current photo blobs into the runtime.
+  const recoveryId=randomUUID();
+  const applied=await persistSpaceTx(client,owner,current,state,true,undefined,staged,recoveryId);
   if(!applied){await client.query('ROLLBACK');return false;}
   await client.query('COMMIT');
   try{void processWorkspaceOutbox(owner);}catch{}
