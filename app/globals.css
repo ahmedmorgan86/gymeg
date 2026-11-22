@@ -281,3 +281,5 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 [data-slot="alert-dialog-footer"]{display:flex!important;gap:10px!important;justify-content:flex-end!important;flex-wrap:wrap!important;margin-top:10px!important}
 [data-slot="alert-dialog-action"]{background:var(--accent,var(--purple,#7c3aed))!important;color:#ffffff!important;font-weight:700!important;padding:9px 18px!important;border-radius:8px!important;border:none!important;cursor:pointer!important}
 [data-slot="alert-dialog-cancel"]{background:var(--surface-soft,#272738)!important;color:var(--text,#f0edf9)!important;border:1px solid var(--line,#38384a)!important;font-weight:600!important;padding:9px 16px!important;border-radius:8px!important;cursor:pointer!important}
+
+.quota-notice{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;width:100%;grid-column:1/-1;margin-top:8px}.quota-notice span{flex:1 1 14rem;min-width:0;white-space:normal;overflow-wrap:anywhere}.quota-notice button{flex:0 0 auto}
