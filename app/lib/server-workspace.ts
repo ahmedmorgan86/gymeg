@@ -3,7 +3,7 @@ import {readDeadlineScope} from './read-transaction';
 import {readOwnerVersion} from './member-summary-store';
 import {commercialEnabled,commercialContext} from './commercial';
 import {trialClosed,CommercialError,type License} from './licensing';
-import {readEntitySpace} from './entity-store';
+import {readEntitySpace,readEntityCore} from './entity-store';
 import {db,withScope} from './database';
 import {readMemberPortalSlice} from './member-portal-slice';
 import {useFirestorePersistence,firestoreReadSpace,firestoreCachedSpace} from './firestore-db.ts';
@@ -52,6 +52,12 @@ export async function readSpaceForPacket(owner:string,ctx:Pick<Context,'role'|'b
 }
 export type {Collection,SliceQuery};
 export type Context=NonNullable<Awaited<ReturnType<typeof context>>>;
+/** Photo-free parity of readSpace for READ-ONLY consumers: identical bootstrap/normalize/revision
+ semantics, but the PG entity branch reads via readEntityCore so photo bodies are never hydrated.
+ Mutation flows must keep readSpace: persistSpace derives intentional photo deletions by diffing the
+ caller-supplied states, so a photo-free current would orphan rows a caller meant to delete. */
+export async function readSpaceCore(owner:string){// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
+if(useFirestorePersistence())return readSpace(owner);const row=await db.prepare('SELECT payload,revision FROM gym_states WHERE user_id=?').bind(owner).first<{payload:string;revision:number}>(owner);if(!row)return readSpace(owner);if(JSON.parse(row.payload)._entityStorage===1){const core=await readEntityCore(owner);return{state:normalize(core.state),revision:core.revision};}return{state:normalize(JSON.parse(row.payload) as GymState),revision:row.revision};}
 export async function readSpace(owner:string){if(useFirestorePersistence()){return firestoreReadSpace(owner);}let row=await db.prepare('SELECT payload,revision FROM gym_states WHERE user_id=?').bind(owner).first<{payload:string;revision:number}>(owner);if(!row){const state=emptyState();await db.prepare('INSERT OR IGNORE INTO gym_states(user_id,payload,revision,updated_at) VALUES(?,?,0,?)').bind(owner,JSON.stringify(state),new Date().toISOString()).run(owner);row=await db.prepare('SELECT payload,revision FROM gym_states WHERE user_id=?').bind(owner).first<{payload:string;revision:number}>(owner);}if(!row)throw Error('unavailable');if(JSON.parse(row.payload)._entityStorage===1){const stored=await readEntitySpace(owner);return{state:normalize(stored.state),revision:stored.revision};}return{state:normalize(JSON.parse(row.payload) as GymState),revision:row.revision};}
 export {packet} from './workspace-packet';
 export const reply=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'}});
