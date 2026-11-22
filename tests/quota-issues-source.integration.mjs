@@ -220,3 +220,22 @@ test('P1: a LIVE member with a v2 summary and a NULL-branch or wrong-branch mark
   const w=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QP',true)");return refreshDirtySummaries(c,'QP',500,AS);});assert.equal(w.remaining,0);
   assert.equal(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QP' AND member_id='legacy-ghost'")).rows[0].n),0,'owner-wide refresher drained it');
 });
+test('steady state: a clean request never runs the branch anti-join (repair arm); a missing or unstamped summary triggers exactly the repair wave and converges',async()=>{
+  const s=club();s.visits=[];await seed('QX',s);const st=await current('QX');const sqls=[];
+  const spy=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QX',true)");return work({query:(q,v)=>{sqls.push(String(q));return c.query(q,v);}});});
+  const rq=(b,sc=spy)=>readQuotaIssues(sc,{owner:'QX',branch:b,branches:null,settings:st.settings,now:NOWS2[0]});
+  for(let i=0;i<20;i++){const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QX',true)");return refreshDirtySummaries(c,'QX',500,AS);});if(!r.remaining)break;}
+  for(let i=0;i<5;i++){const r=await rq('a');if(r.status==='ok')break;}
+  sqls.length=0;const clean=await rq('a');assert.equal(clean.status,'ok');assert.equal(clean.recomputed,0);
+  const anti=q=>/LEFT JOIN gymos\.gym_member_summaries s ON s\.owner_id=e\.owner_id AND s\.member_id=e\.entity_id AND s\.branch=\$3/.test(q);
+  assert.equal(sqls.filter(anti).length,0,'no anti-join on a clean request');
+  // a summary row that vanished (never computed) -> candidate read sees it missing -> exactly one repair selection, then ok
+  const gone=(await db.query("SELECT entity_id FROM gymos.gym_entities WHERE owner_id='QX' AND collection='members' AND branch='a' AND payload->>'archived' IS NULL LIMIT 2")).rows.map(r=>r.entity_id);
+  await db.query("DELETE FROM gymos.gym_member_summaries WHERE owner_id='QX' AND member_id=ANY($1)",[gone]);
+  sqls.length=0;let r=await rq('a');for(let i=0;i<4&&r.status!=='ok';i++){r=await rq('a');}assert.equal(r.status,'ok',JSON.stringify(r));
+  assert.ok(sqls.filter(anti).length>=1,'repair arm ran when needed');
+  sqls.length=0;const again=await rq('a');assert.equal(again.status,'ok');assert.equal(again.recomputed,0);assert.equal(sqls.filter(anti).length,0,'and not again once converged');
+  // unstamped (NULL-branch) summaries only (v2 and clean): found missing by the branch-scoped read, repaired within the budget
+  await db.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id='QX'");
+  let q=await rq('b');for(let i=0;i<4&&q.status!=='ok';i++){q=await rq('b');}assert.equal(q.status,'ok',JSON.stringify(q));
+});

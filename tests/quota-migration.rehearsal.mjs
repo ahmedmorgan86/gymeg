@@ -35,6 +35,26 @@ try{
   const nulls=Number((await pool.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND branch IS NULL",[O])).rows[0].n),withB=Number((await pool.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND branch IS NOT NULL",[O])).rows[0].n);
   console.log('dirty marks: NULL-branch (old trigger)',nulls,'with branch (new trigger)',withB);check('both generations present and compatible',nulls>0&&withB>0);
   const bad=Number((await pool.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id WHERE d.owner_id=$1 AND d.branch IS NOT NULL AND d.branch<>e.branch",[O])).rows[0].n);check('new marks carry the member branch',bad===0);
+  // 4. the migration's SET LOCAL needs a transaction: one multi-statement simple query is one implicit transaction on the wire (what a runner that sends the file text does)
+  {const c=await pool.connect();try{
+    await c.query('DROP INDEX IF EXISTS gymos.gym_member_summaries_branch');
+    const res=await c.query(mig.replace(/\s*$/,'')+";SELECT current_setting('lock_timeout') AS lt,current_setting('statement_timeout') AS st");
+    const last=Array.isArray(res)?res.at(-1):res;const after=(await c.query("SELECT current_setting('lock_timeout') AS lt")).rows[0].lt;
+    check('SET LOCAL applies inside the migration file sent as one query, and does not leak after',last.rows[0].lt==='5s'&&last.rows[0].st==='1min'&&after==='0',`inside lock_timeout=${last.rows[0].lt} statement_timeout=${last.rows[0].st}; after=${after}`);
+  }finally{c.release();}}
+  // 5. bounded resumable prewarm: stamp the NULL-branch summaries and marks with no recompute, under a concurrent writer
+  {const {stampBranches}=await import('../scripts/summary-branch-stamp.mjs');
+   await pool.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id=$1",[O]);
+   const need=async()=>Number((await pool.query("SELECT count(*) n FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id AND s.branch=e.branch WHERE e.owner_id=$1 AND e.collection='members' AND (s.member_id IS NULL OR s.stored->>'v'<>'2')",[O])).rows[0].n);
+   const before=await need();const storedBefore=(await pool.query("SELECT md5(string_agg(stored::text,'|' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id=$1",[O])).rows[0].h;
+   let stop2=false,n2=0,w2=0,e2=0;const wr=(async()=>{while(!stop2){const t=performance.now();const k=n2++;try{await pool.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,'visits',$2,$3,'a',$4)",[O,'sv'+k,950000+k,JSON.stringify({id:'sv'+k,member:'m'+(5000+k%10000),branch:'a',day:'2026-03-02',at:'2026-03-02T09:00:00.000Z',leftAt:'2026-03-02T10:00:00.000Z'})]);}catch(e){e2++;if(e2<3)console.log('stamp-writer error',e.message.slice(0,100));}w2=Math.max(w2,performance.now()-t);await new Promise(r=>setTimeout(r,2));}})();
+   const t0=performance.now();const tot=await stampBranches(pool,{batch:500});const ms=Math.round(performance.now()-t0);stop2=true;await wr;
+   const after=await need();const storedAfter=(await pool.query("SELECT md5(string_agg(stored::text,'|' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id=$1",[O])).rows[0].h;
+   const nullLeft=Number((await pool.query("SELECT (SELECT count(*) FROM gymos.gym_member_summaries WHERE owner_id=$1 AND branch IS NULL)+(SELECT count(*) FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id WHERE d.owner_id=$1 AND d.branch IS NULL) n",[O])).rows[0].n);
+   console.log('stamp:',JSON.stringify(tot),ms+' ms; members needing a recompute before',before,'after',after,'; concurrent writer commits',n2,'errors',e2,'worst ms',Math.round(w2));
+   check('stamp makes every live member current without recompute (stored bytes unchanged)',before>0&&after===0&&storedBefore===storedAfter&&nullLeft===0,`before=${before} after=${after} nullLeft=${nullLeft}`);
+   check('stamp ran under a concurrent writer with no writer error',e2===0);
+   const again=await stampBranches(pool,{batch:500});check('re-run is a no-op (resumable)',again.summaries===0&&again.marks===0,JSON.stringify(again));}
 }catch(e){console.error('ERROR',e);failed++;}
 finally{for(const t of ['gym_entities','gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id=$1`,[O]).catch(()=>{});await pool.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[O]).catch(()=>{});await pool.end();}
 process.exit(failed?1:0);

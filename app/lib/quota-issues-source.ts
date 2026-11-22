@@ -23,13 +23,24 @@ export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaI
     // or QUOTA_WAVE_MS elapsed. Progress commits with this transaction, so a large backlog drains over successive reads; a failure rolls the whole transaction back. Total work of one wave is also
     // bounded by the owner's state (recompute is refused above the state byte limit and each visit belongs to one member), whatever the history shape.
     const t0=Date.now();
-    const w=await drainBranchDirty(c,q.owner,q.branch,{budget:QUOTA_MAX_DIRTY,batch:q.batch??QUOTA_BATCH,deadlineAt:t0+(q.waveMs??QUOTA_WAVE_MS),asOf:q.now});
+    // Steady state does NOT scan the branch for summary-less members: wave 1 is mark-driven only (branch-indexed marks plus live members whose mark carries another branch). The candidate read below
+    // (which already pays one branch pass) is what detects a missing/old/unstamped summary; only then does a repair wave (the anti-join arm) run, and the read is repeated once.
+    let done=0;
+    const drain=async(repair:boolean)=>drainBranchDirty(c,q.owner,q.branch,{budget:Math.max(1,QUOTA_MAX_DIRTY-done),batch:q.batch??QUOTA_BATCH,deadlineAt:t0+(q.waveMs??QUOTA_WAVE_MS),asOf:q.now,repair});
+    const read=()=>readMemberCandidates(c,q.owner,[q.branch],{refresh:false,now:q.now,photo:false}); // refresh:false: ALL recompute work runs in a unit-and-deadline drain, never unbounded here
+    const w=await drain(false);
     if(w.status!=='ok')return{status:'fallback',reason:w.status} as const;
-    const done=w.refreshed;
+    done+=w.refreshed;
     if(w.more)return{status:'fallback',reason:'draining',more:true,recomputed:done} as const;
-    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:false,now:q.now,photo:false});
-    // refresh:false on purpose: ALL recompute work runs in the unit-and-deadline drain above. Rows dirtied after it (a concurrent writer) are an explicit draining, never unbounded work here.
-    if(r.status==='stale')return{status:'fallback',reason:'draining',more:true,recomputed:done} as const;
+    let r=await read();
+    if(r.status==='stale'||r.status==='too-many-dirty'){
+      const w2=await drain(true);
+      if(w2.status!=='ok')return{status:'fallback',reason:w2.status} as const;
+      done+=w2.refreshed;
+      if(w2.more||w2.refreshed===0)return{status:'fallback',reason:'draining',more:true,recomputed:done} as const;
+      r=await read();
+    }
+    if(r.status==='stale'||r.status==='too-many-dirty')return{status:'fallback',reason:'draining',more:true,recomputed:done} as const; // rows changed after the drain (concurrent writer): explicit draining
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const quota:string[]=[];
     for(const {member,stored} of r.candidates){
