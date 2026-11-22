@@ -105,7 +105,7 @@ test('cost: no photo hashing, bounded dirty work (explicit fallback over the bud
   const d0=await dirtyN();
   for(;calls<20;calls++){const before=await dirtyN();last=await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});peak=Math.max(peak,before-await dirtyN());if(last.status==='ok')break;assert.deepEqual([last.status,last.reason],['fallback','draining']);}
   console.log('quota-issues drain: dirty',d0,'requests until ok',calls+1,'max recomputed per request',peak);
-  assert.equal(last.status,'ok');assert.ok(peak<=QUOTA_MAX_DIRTY&&calls>=2);
+  assert.equal(last.status,'ok');assert.ok(peak<=QUOTA_MAX_DIRTY&&calls>=1);
   // forced failure mid-wave: the transaction rolls back (marks and summaries unchanged) and the connection is usable afterwards
   await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,5000+g FROM generate_series(0,60) g ON CONFLICT DO NOTHING");
   const before=await dirtyN(),sumBefore=(await db.query("SELECT md5(string_agg(stored::text,'' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id='QC'")).rows[0].h;
@@ -116,4 +116,41 @@ test('cost: no photo hashing, bounded dirty work (explicit fallback over the bud
   assert.equal((await db.query("SELECT md5(string_agg(stored::text,'' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id='QC'")).rows[0].h,sumBefore,'summaries unchanged by the rolled-back wave');
   assert.equal((await db.query('SELECT 1 AS x')).rows[0].x,1,'connection usable');
   assert.ok(['ok','fallback'].includes((await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]})).status));
+});
+test('worst-case history: one member with 6000 visits among 150 dirty members; wave time-bounded by the deadline (slow statements), progress kept, per-request time measured',async()=>{
+  const {QUOTA_WAVE_MS,QUOTA_BATCH,QUOTA_MAX_DIRTY}=await import('../app/lib/quota-issues-source.ts');
+  const s=club();s.members=[];s.visits=[];
+  for(let i=0;i<150;i++)s.members.push({id:'h'+i,branch:'a',joined:'2025-01-01',expires:'2026-12-31',membershipPeriods:[{id:'ph'+i,plan:'pl',start:'2025-01-01',end:'2026-12-31',visits:i%2?null:50}]});
+  for(let k=0;k<6000;k++){const d=new Date(Date.UTC(2025,0,1)+(k%400)*86400000).toISOString().slice(0,10);s.visits.push({id:'hv'+k,member:'h0',branch:'a',day:d,at:d+'T0'+(k%9)+':00:00.000Z',leftAt:d+'T0'+(k%9)+':30:00.000Z',sessions:[{},{}]});}
+  await seed('QH',s);const st=await current('QH');
+  const dirty=async()=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QH'")).rows[0].n);
+  const d0=await dirty();let calls=0,worst=0,last;
+  for(;calls<30;calls++){const t0=performance.now();last=await readQuotaIssues(scopeFor('QH'),{owner:'QH',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});worst=Math.max(worst,Math.round(performance.now()-t0));if(last.status==='ok')break;assert.equal(last.reason,'draining',JSON.stringify(last));}
+  console.log('quota-issues worst-case: dirty',d0,'requests',calls+1,'worst request ms',worst);assert.equal(last.status,'ok');
+  // oracle still exact for the heavy member
+  const day=dayAt(NOWS2[0],st.settings.timezone);const want=st.members.filter(m=>!m.archived&&membershipIssue(st,m,day)==='quota').map(m=>m.id).sort();assert.deepEqual([...last.quota].sort(),want);
+  // deadline: every statement costs 400 ms, so the wave must stop at the deadline (not at the 100-recompute budget), keep its progress and report draining
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QH','h'||g,9000+g FROM generate_series(0,99) g ON CONFLICT DO NOTHING");
+  const slow=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QH',true)");return work({query:async(q,v)=>{await new Promise(r=>setTimeout(r,400));return c.query(q,v);}});});
+  const b=await dirty(),t1=Date.now();const r=await readQuotaIssues(slow,{owner:'QH',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});const el=Date.now()-t1;
+  console.log('quota-issues deadline: ms',el,'status',r.status,r.reason,'dirty',b,'->',await dirty());
+  assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.ok(el<QUOTA_WAVE_MS+QUOTA_BATCH*20*400,'bounded by deadline plus one batch');
+  const afterN=await dirty();assert.ok(afterN<b&&b-afterN<QUOTA_MAX_DIRTY,'some progress kept, stopped before the budget: '+(b-afterN));
+});
+test('scoped + shared budget + concurrency: a branch-a request never writes or waits on branch-b marks; recomputed <= budget in total; concurrent drainers converge without double work',async()=>{
+  const {QUOTA_MAX_DIRTY}=await import('../app/lib/quota-issues-source.ts');
+  const s=club();s.members=[];s.visits=[];
+  for(let i=0;i<260;i++)s.members.push({id:'s'+i,branch:i%2?'a':'b',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[{id:'ps'+i,plan:'pl',start:'2026-02-01',end:'2026-12-31',visits:i%3?null:2}]});
+  await seed('QS',s);const st=await current('QS');
+  const dirty=async b=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id WHERE d.owner_id='QS' AND ($1::text IS NULL OR e.branch=$1)",[b])).rows[0].n);
+  const rq=(b,extra={})=>readQuotaIssues(scopeFor('QS'),{owner:'QS',branch:b,branches:null,settings:st.settings,now:NOWS2[0],...extra});
+  const bB=await dirty('b'),bA=await dirty('a');assert.ok(bB>=130&&bA>=130);
+  let r=await rq('a');assert.equal(r.status,'fallback');assert.equal(r.reason,'draining');assert.equal(r.remaining,bA-QUOTA_MAX_DIRTY,'remaining counts only the branch');assert.equal(r.recomputed,QUOTA_MAX_DIRTY);
+  assert.equal(await dirty('b'),bB,'branch b marks untouched by a branch-a request');assert.equal(await dirty('a'),bA-QUOTA_MAX_DIRTY);
+  r=await rq('a');assert.equal(r.status,'ok',JSON.stringify(r));assert.ok(r.recomputed<=QUOTA_MAX_DIRTY,'one shared budget across wave and candidate read: '+r.recomputed);assert.equal(await dirty('b'),bB,'still untouched');
+  // concurrent drainers on branch b: both finish, total recomputed work equals the backlog (no member recomputed twice by the winner/loser pair), final answers equal
+  const outs=[];for(let i=0;i<12;i++){const pair=await Promise.all([rq('b'),rq('b')]);outs.push(pair.map(p=>p.status+':'+(p.reason??'')));if(pair.some(p=>p.status==='ok')&&await dirty('b')===0)break;}
+  console.log('quota-issues concurrent',JSON.stringify(outs));assert.equal(await dirty('b'),0);
+  const a=await rq('b'),b=await rq('b');assert.equal(a.status,'ok');assert.deepEqual(a.quota,b.quota);
+  const day=dayAt(NOWS2[0],st.settings.timezone);assert.deepEqual([...a.quota].sort(),st.members.filter(m=>m.branch==='b'&&membershipIssue(st,m,day)==='quota').map(m=>m.id).sort());
 });

@@ -8,8 +8,8 @@ import {dayAt} from './domain.ts';
 import type {GymState} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
 /** Read budget of one request: at most this many dirty members are recomputed (write-on-read) before the answer is an explicit fallback; photos are never hashed (the aggregate does not use photoV). */
-export const QUOTA_MAX_DIRTY=100,QUOTA_STATEMENT_MS=4000;
-export type QuotaIssues={status:'ok';version:string;day:string;quota:string[];members:number}|{status:'unchanged';version:string}|{status:'fallback';reason:string;remaining?:number}|{status:'forbidden'};
+export const QUOTA_MAX_DIRTY=100,QUOTA_BATCH=10,QUOTA_WAVE_MS=2500,QUOTA_STATEMENT_MS=4000;
+export type QuotaIssues={status:'ok';version:string;day:string;quota:string[];members:number;recomputed:number}|{status:'unchanged';version:string}|{status:'fallback';reason:string;remaining?:number;recomputed?:number}|{status:'forbidden'};
 export type QuotaRequest={owner:string;branch:string;branches:string[]|null;settings:GymState['settings'];now:string;since?:string|null};
 export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaIssues>{
   if(!q.branch||q.branch.length>200)return{status:'fallback',reason:'invalid-branch'};
@@ -19,12 +19,17 @@ export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaI
     const v1=await readOwnerVersion(c,q.owner);if(v1===null)return{status:'fallback',reason:'no-version'} as const;
     const day=dayAt(q.now,q.settings.timezone);
     if(q.since&&q.since===v1+'|'+day)return{status:'unchanged',version:v1} as const; // the token covers the day too: a day change must recompute
-    // Convergence: ONE bounded wave per request (<= QUOTA_MAX_DIRTY recomputes, savepointed in recompute; the progress commits with this transaction), so a large dirty backlog drains over successive reads
-    // instead of returning fallback forever, and no request does more than the budget. A wave that leaves marks behind is an explicit {fallback,draining}.
-    const w=await refreshDirtySummaries(c,q.owner,QUOTA_MAX_DIRTY,q.now);
-    if(w.status!=='ok')return{status:'fallback',reason:w.status} as const;
-    if(w.remaining>0)return{status:'fallback',reason:'draining',remaining:w.remaining} as const;
-    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:true,now:q.now,photo:false,maxDirty:QUOTA_MAX_DIRTY});
+    // Convergence with a wall-clock bound: the dirty backlog is drained in small batches (QUOTA_BATCH recomputes each, savepointed inside recompute) until the budget of QUOTA_MAX_DIRTY recomputes
+    // or QUOTA_WAVE_MS elapsed. Progress commits with this transaction, so a large backlog drains over successive reads; a failure rolls the whole transaction back. Total work of one wave is also
+    // bounded by the owner's state (recompute is refused above the state byte limit and each visit belongs to one member), whatever the history shape.
+    const t0=Date.now();let left=1,done=0;
+    while(left>0&&done<QUOTA_MAX_DIRTY&&Date.now()-t0<QUOTA_WAVE_MS){
+      const w=await refreshDirtySummaries(c,q.owner,Math.min(QUOTA_BATCH,QUOTA_MAX_DIRTY-done),q.now,q.branch);
+      if(w.status!=='ok')return{status:'fallback',reason:w.status} as const;
+      done+=w.refreshed;left=w.remaining;if(w.refreshed===0)break;
+    }
+    if(left>0)return{status:'fallback',reason:'draining',remaining:left,recomputed:done} as const;
+    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:Date.now()-t0<QUOTA_WAVE_MS,now:q.now,photo:false,maxDirty:QUOTA_MAX_DIRTY-done});
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const quota:string[]=[];
     for(const {member,stored} of r.candidates){
@@ -33,6 +38,6 @@ export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaI
       if(x.issue==='quota')quota.push(member.id);
     }
     if((await readOwnerVersion(c,q.owner))!==v1)return{status:'fallback',reason:'changed-during-read'} as const;
-    return{status:'ok',version:v1+'|'+day,day,quota,members:r.candidates.length} as const;
+    return{status:'ok',version:v1+'|'+day,day,quota,members:r.candidates.length,recomputed:done+r.refreshed} as const;
   });
 }

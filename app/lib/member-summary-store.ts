@@ -126,12 +126,15 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
 
 /** Bounded refresher for the (separately gated) backfill and for mass-dirty events such as a restore: recomputes up to `max` dirty members under one bound check and
  * one lock, and reports how many marks are left. Also forgets marks and rows of deleted members. */
-export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,asOf?:string):Promise<RefreshResult>{
+export async function refreshDirtySummaries(c:Sql,owner:string,max=REFRESH_MAX,asOf?:string,branch?:string):Promise<RefreshResult>{
   if(!await ready(c,owner))return refuse('unready');
   // Bounded waves only: each call recomputes at most `max` (<= REFRESH_MAX) dirty members by per-member index lookups; callers loop until remaining is 0.
-  const ids=(await c.query('SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2',[owner,Math.min(max,REFRESH_MAX)])).rows.map(r=>(r as {member_id:string}).member_id);
+  // `branch` (optional) scopes BOTH the members recomputed and the `remaining` count to that branch's members (a restricted caller never writes or waits on another branch's marks).
+  const sel=branch===undefined?'SELECT member_id FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 ORDER BY gen LIMIT $2':"SELECT d.member_id FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$3 WHERE d.owner_id=$1 ORDER BY d.gen LIMIT $2";
+  const ids=(await c.query(sel,branch===undefined?[owner,Math.min(max,REFRESH_MAX)]:[owner,Math.min(max,REFRESH_MAX),branch])).rows.map(r=>(r as {member_id:string}).member_id);
   const out=new Map<string,Candidate>();const why=await recompute(c,owner,ids,out,asOf);if(why)return refuse(why);
-  const left=Number((await c.query('SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner])).rows[0]?.['n' as never]??0);
+  const cnt=branch===undefined?['SELECT count(*) AS n FROM gymos.gym_member_summary_dirty WHERE owner_id=$1',[owner]] as const:["SELECT count(*) AS n FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$2 WHERE d.owner_id=$1",[owner,branch]] as const;
+  const left=Number((await c.query(cnt[0],[...cnt[1]])).rows[0]?.['n' as never]??0);
   return{status:'ok',refreshed:ids.length,remaining:left};
 }
 
