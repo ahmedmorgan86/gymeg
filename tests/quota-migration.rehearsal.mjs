@@ -48,32 +48,33 @@ try{
    const need=async()=>Number((await pool.query("SELECT count(*) n FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id AND s.branch=e.branch WHERE e.owner_id=$1 AND e.collection='members' AND (s.member_id IS NULL OR s.stored->>'v'<>'2')",[O])).rows[0].n);
    const before=await need();const storedBefore=(await pool.query("SELECT md5(string_agg(stored::text,'|' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id=$1",[O])).rows[0].h;
    let stop2=false,n2=0,w2=0,e2=0;const wr=(async()=>{while(!stop2){const t=performance.now();const k=n2++;try{await pool.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES($1,'visits',$2,$3,'a',$4)",[O,'sv'+k,950000+k,JSON.stringify({id:'sv'+k,member:'m'+(5000+k%10000),branch:'a',day:'2026-03-02',at:'2026-03-02T09:00:00.000Z',leftAt:'2026-03-02T10:00:00.000Z'})]);}catch(e){e2++;if(e2<3)console.log('stamp-writer error',e.message.slice(0,100));}w2=Math.max(w2,performance.now()-t);await new Promise(r=>setTimeout(r,2));}})();
-   const t0=performance.now();const tot=await stampBranches(pool,{batch:500});const ms=Math.round(performance.now()-t0);stop2=true;await wr;
+   const t0=performance.now();const tot=await stampBranches(pool,{batch:500,confirmedTriggerHistory:true});const ms=Math.round(performance.now()-t0);stop2=true;await wr;
    const after=await need();const storedAfter=(await pool.query("SELECT md5(string_agg(stored::text,'|' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id=$1",[O])).rows[0].h;
    const nullLeft=Number((await pool.query("SELECT (SELECT count(*) FROM gymos.gym_member_summaries WHERE owner_id=$1 AND branch IS NULL)+(SELECT count(*) FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id WHERE d.owner_id=$1 AND d.branch IS NULL) n",[O])).rows[0].n);
    console.log('stamp:',JSON.stringify(tot),ms+' ms; members needing a recompute before',before,'after',after,'; concurrent writer commits',n2,'errors',e2,'worst ms',Math.round(w2));
    check('stamp makes every live member current without recompute (stored bytes unchanged)',before>0&&after===0&&storedBefore===storedAfter&&nullLeft===0,`before=${before} after=${after} nullLeft=${nullLeft}`);
    check('stamp ran under a concurrent writer with no writer error',e2===0);
-   const again=await stampBranches(pool,{batch:500});check('re-run is a no-op (resumable)',again.summaries===0&&again.marks===0,JSON.stringify(again));}
+   const again=await stampBranches(pool,{batch:500,confirmedTriggerHistory:true});check('re-run is a no-op (resumable)',again.summaries===0&&again.marks===0,JSON.stringify(again));}
+  {const {stampBranches:sb}=await import('../scripts/summary-branch-stamp.mjs');let e0=null;try{await sb(pool,{batch:500});}catch(e){e0=e;}check('stamp refuses by default without confirmed trigger history (full backfill is the default rollout)',!!e0&&/not confirmed/.test(e0.message),e0?.message.slice(0,70));}
   // 6. stamp guards: runtime role (FORCE RLS, no BYPASSRLS) is refused loudly; disabled triggers are refused; residual report; moved member with its mark is recomputed, not trusted
   {const {stampBranches,preflight}=await import('../scripts/summary-branch-stamp.mjs');
    const asApp={query:async(sql,v)=>{const c=await pool.connect();try{await c.query('BEGIN');await c.query('SET LOCAL ROLE gymos_app');const r=await c.query(sql,v);await c.query('COMMIT');return r;}catch(e){await c.query('ROLLBACK').catch(()=>{});throw e;}finally{c.release();}},connect:()=>pool.connect()};
-   let e1=null;try{await preflight(asApp);}catch(e){e1=e;}check('preflight refuses a non-bypass role under FORCE RLS',!!e1&&/BYPASSRLS|FORCE ROW LEVEL|permission/i.test(e1.message),e1?.message.slice(0,90));
-   await pool.query('ALTER TABLE gymos.gym_entities DISABLE TRIGGER gym_entities_msum_upd');let e2=null;try{await preflight(pool);}catch(e){e2=e;}await pool.query('ALTER TABLE gymos.gym_entities ENABLE TRIGGER gym_entities_msum_upd');
+   let e1=null;try{await preflight(asApp,{confirmedTriggerHistory:true});}catch(e){e1=e;}check('preflight refuses a non-bypass role under FORCE RLS',!!e1&&/BYPASSRLS|FORCE ROW LEVEL|permission/i.test(e1.message),e1?.message.slice(0,90));
+   await pool.query('ALTER TABLE gymos.gym_entities DISABLE TRIGGER gym_entities_msum_upd');let e2=null;try{await preflight(pool,{confirmedTriggerHistory:true});}catch(e){e2=e;}await pool.query('ALTER TABLE gymos.gym_entities ENABLE TRIGGER gym_entities_msum_upd');
    check('preflight refuses when a summary trigger is disabled',!!e2&&/triggers/.test(e2.message),e2?.message.slice(0,80));
    // moved member pre-stamp: summary NULL-branch, member moves (mark written), stamp, then the mark still forces a recompute
    await pool.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id=$1",[O]);await pool.query("DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1",[O]);
    await pool.query("UPDATE gymos.gym_entities SET branch='b',payload=jsonb_set(payload,'{branch}','\"b\"') WHERE owner_id=$1 AND collection='members' AND entity_id='m3'",[O]);
    const mk=(await pool.query("SELECT branch FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m3'",[O])).rows[0];check('move wrote a dirty mark carrying the new branch',mk?.branch==='b');
-   const tot=await stampBranches(pool,{batch:500});const after=(await pool.query("SELECT (SELECT branch FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m3') sb,(SELECT count(*) FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m3') marks",[O])).rows[0];
+   const tot=await stampBranches(pool,{batch:500,confirmedTriggerHistory:true});const after=(await pool.query("SELECT (SELECT branch FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m3') sb,(SELECT count(*) FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id='m3') marks",[O])).rows[0];
    check('moved member keeps its mark after stamping (recompute still forced)',Number(after.marks)===1,JSON.stringify(after));
    console.log('residual after stamp',JSON.stringify(tot.residual));check('no live NULL-branch rows remain',tot.residual.liveSummariesNull===0&&tot.residual.liveMarksNull===0);
    // loud failure when nothing is stamped but live NULLs remain: lock a row, stamp skips it
    await pool.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id=$1 AND member_id='m7'",[O]);
    const lk=await pool.connect();await lk.query('BEGIN');await lk.query("SELECT 1 FROM gymos.gym_member_summaries WHERE owner_id=$1 AND member_id='m7' FOR UPDATE",[O]);
-   let e3=null;try{await stampBranches(pool,{batch:500});}catch(e){e3=e;}await lk.query('ROLLBACK');lk.release();
+   let e3=null;try{await stampBranches(pool,{batch:500,confirmedTriggerHistory:true});}catch(e){e3=e;}await lk.query('ROLLBACK');lk.release();
    check('stamped 0 with a live NULL row left (locked) FAILS LOUDLY with the residual counts',!!e3&&/stamped 0 rows but live NULL/.test(e3.message)&&/"liveSummariesNull":1/.test(e3.message),e3?.message.slice(0,120));
-   const t3=await stampBranches(pool,{batch:500});check('re-run after the lock clears reaches residual 0',t3.residual.liveSummariesNull===0&&t3.summaries===1,JSON.stringify(t3));}
+   const t3=await stampBranches(pool,{batch:500,confirmedTriggerHistory:true});check('re-run after the lock clears reaches residual 0',t3.residual.liveSummariesNull===0&&t3.summaries===1,JSON.stringify(t3));}
 }catch(e){console.error('ERROR',e);failed++;}
 finally{for(const t of ['gym_entities','gym_member_summaries','gym_member_summary_dirty','gym_member_summary_ready'])await pool.query(`DELETE FROM gymos.${t} WHERE owner_id=$1`,[O]).catch(()=>{});await pool.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[O]).catch(()=>{});await pool.end();}
 process.exit(failed?1:0);
