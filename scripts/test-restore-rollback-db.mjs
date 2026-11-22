@@ -73,6 +73,10 @@ try{
  // 3) gym_recovery_photos holds the FULL pre-restore set for that recovery id.
  const kept=(await withScope(owner,c=>c.query('SELECT member_id,content FROM gymos.gym_recovery_photos WHERE owner_id=$1 AND recovery_id=$2 ORDER BY member_id',[owner,rec.id]))).rows;
  assert.deepEqual(kept,preRestore,'preserved set equals the exact pre-restore photo set');
+ // 3a) Composite FK: even with a known recovery id, another owner's scope cannot reference it.
+ let fkBlocked=false;
+ try{await withScope('intruder-'+randomUUID(),c=>c.query("INSERT INTO gymos.gym_recovery_photos(recovery_id,owner_id,member_id,content) VALUES($1,$2,'x','data:image/jpeg;base64,/9j/AAAA')",[rec.id,'intruder-'+owner]));}catch(e){fkBlocked=true;}
+ assert.ok(fkBlocked,'cross-owner recovery reference rejected (RLS scope + composite FK)');
  // 3b) Tenant scoping: another owner sees nothing (RLS).
  await withScope('someone-else-'+randomUUID(),async c=>{
   const n=(await c.query('SELECT count(*)::int n FROM gymos.gym_recovery_photos WHERE recovery_id=$1',[rec.id])).rows[0].n;
