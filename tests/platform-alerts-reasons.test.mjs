@@ -42,10 +42,44 @@ test('config not ok keeps configured:false without a reason',async()=>{
   assert.equal(r.remote,false);assert.equal(r.configured,false);assert.equal(r.reason,undefined);
 });
 
-test('push subscribe failure maps to push-subscribe',async()=>{
+test('push subscribe plain Error maps to unknown (allowlist rejects arbitrary names)',async()=>{
   setup({subscribe:async()=>{throw new Error('push service error');}});
   const r=await requestNotificationPermission('main');
-  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-sub-unknown-sub0-keyna-swother-permg');
+});
+
+test('push subscribe InvalidStateError maps through allowlist with state fields',async()=>{
+  const err=new Error('stale key');err.name='InvalidStateError';
+  setup({subscribe:async()=>{throw err;}});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-sub-invalidstate-sub0-keyna-swother-permg');
+});
+
+test('push subscribe AbortError maps through allowlist',async()=>{
+  const err=new Error('aborted');err.name='AbortError';
+  setup({subscribe:async()=>{throw err;}});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-sub-abort-sub0-keyna-swother-permg');
+});
+
+test('arbitrary exception name never leaks (allowlist, not sanitization)',async()=>{
+  const err=new Error('secret');err.name='Weird Name https://endpoint.example/token';
+  setup({subscribe:async()=>{throw err;}});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-sub-unknown-sub0-keyna-swother-permg');
+});
+
+test('push subscribe non-object throw falls back to unknown',async()=>{
+  setup({subscribe:async()=>{throw 'boom';}});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-sub-unknown-sub0-keyna-swother-permg');
+});
+
+test('getSubscription failure maps to get stage',async()=>{
+  const err=new Error('x');err.name='AbortError';
+  setup({swRegister:async()=>({active:{},pushManager:{getSubscription:async()=>{throw err;},subscribe:async()=>({toJSON:()=>subscriptionJson})}})});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.remote,false);assert.equal(r.reason,'push-subscribe-get-abort-sub0-keyna-swact-permg');
 });
 
 test('POST network/timeout failure maps to post-network',async()=>{

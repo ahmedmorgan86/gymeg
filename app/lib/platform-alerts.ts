@@ -145,11 +145,37 @@ export async function requestNotificationPermission(branch?:string,audience?:'su
   config=await configResponse.json() as {configured?:boolean;publicKey?:string|null};
  }catch{return fail('config-fetch');}
  if(!config.configured||!config.publicKey)return{granted:true,native:false,prompted,remote:false,configured:false};
+ const key=Uint8Array.from(atob(config.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
+ // Structured support code: which call failed, the DOMException name mapped
+ // through a fixed allowlist from the W3C Push API (never arbitrary names or
+ // message text), plus non-sensitive state: existing-subscription presence,
+ // applicationServerKey match, active service worker, notification permission.
+ const pushExceptionNames:Record<string,string>={invalidstateerror:'invalidstate',aborterror:'abort',notallowederror:'notallowed',notsupportederror:'notsupported',operationerror:'operation',securityerror:'security'};
+ const pushReason=(stage:'get'|'sub',err:unknown,existing:PushSubscription|null):string=>{
+  const raw=err&&typeof err==='object'&&'name'in err?(err as {name?:unknown}).name:'';
+  const lowered=typeof raw==='string'?raw.toLowerCase():'';
+  const name=pushExceptionNames[lowered]??'unknown';
+  let keyState='keyna';
+  if(existing){
+   try{
+    const existingKey=existing.options?.applicationServerKey;
+    const existingBytes=existingKey?new Uint8Array(existingKey):null;
+    keyState=existingBytes&&existingBytes.length===key.length&&existingBytes.every((b,i)=>b===key[i])?'keymatch':'keydiff';
+   }catch{keyState='keyna';}
+  }
+  const swState=registration.active?'swact':'swother';
+  const perm=Notification.permission==='granted'?'permg':Notification.permission==='denied'?'permd':'permp';
+  return `push-subscribe-${stage}-${name}-sub${existing?'1':'0'}-${keyState}-${swState}-${perm}`;
+ };
  let subscription:PushSubscription;
- try{
-  const key=Uint8Array.from(atob(config.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
-  subscription=await registration.pushManager.getSubscription()??await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
- }catch{return fail('push-subscribe');}
+ let existing:PushSubscription|null=null;
+ try{existing=await registration.pushManager.getSubscription();}
+ catch(err){return fail(pushReason('get',err,null));}
+ if(existing)subscription=existing;
+ else{
+  try{subscription=await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});}
+  catch(err){return fail(pushReason('sub',err,null));}
+ }
  let response:Response;
  try{
   response=await fetch('/api/push-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'subscribe',...(branch?{branch}:{}),subscription:subscription.toJSON()}),signal:AbortSignal.timeout(10000)});
