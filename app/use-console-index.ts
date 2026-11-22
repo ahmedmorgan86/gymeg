@@ -11,9 +11,10 @@ export function useConsoleIndex(state:GymState,branch:string,owner:string,permis
  const cache=useRef(new CandidateCache());
  const[cands,setCands]=useState<{owner:string;branch:string;scope:string;forState:GymState;list:ConsoleCandidate[]}|null>(null);
  const scope=permission+(financial?':fin':':nofin');
- useEffect(()=>{ // sign-out / tenant switch / permission change drops everything
-  cache.current.clear();setCands(null);
- },[owner,scope]);
+ const scopeKey=owner+'|'+scope;
+ const [prevScopeKey,setPrevScopeKey]=useState(scopeKey);
+ if(prevScopeKey!==scopeKey){setPrevScopeKey(scopeKey);setCands(null);} // sign-out / tenant switch / permission change drops cached rows
+ useEffect(()=>{cache.current.clear();},[owner,scope]);
  useEffect(()=>{
   if(!SUMMARIES_ON)return;
   const ac=new AbortController();

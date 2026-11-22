@@ -10,7 +10,7 @@ import {getPool} from './database';
 import {CommercialError,licenseGrant,limits,priceMinor,type License} from './licensing';
 import type {ChatGPTUser} from '../chatgpt-auth';
 import {emptyState} from './domain';
-import {useFirestorePersistence} from './firestore-db.ts';
+import {isFirestorePersistence} from './firestore-db.ts';
 import {firebaseAction,firebaseClub,firebaseDirectory} from './firestore-commercial';
 export const commercialEnabled=()=>process.env.GYMOS_COMMERCIAL==='1';
 export function normalizeLicense(row:License):License{for(const field of ['starts_at','ends_at','maintenance_until'] as const){const value=row[field] as unknown;if(value instanceof Date)row[field]=value.toISOString();}return row;}
@@ -29,10 +29,10 @@ export async function selectClub(client:PoolClient,actor:string,id?:string,platf
  for(const membership of rows){await client.query("SELECT set_config('app.tenant',$1,true)",[membership.tenant_id]);const row=(await client.query('SELECT id,storage_key,name FROM gymos.tenants WHERE id=$1',[membership.tenant_id])).rows[0];if(row&&(!id||id===row.id||id===row.storage_key))return{...row,role:membership.role,branches:membership.branches};}
  return null;
 }
-export async function commercialContext(user:ChatGPTUser,id?:string,supportToken?:string){if(useFirestorePersistence())return firebaseClub(user,id);return commercialTransaction(user,async(client,platform)=>{if(supportToken){const result=await resolveSupport(client,platform,user.userId,id,supportToken);result.license=normalizeLicense(result.license);return {...result,platformOwnerAccess:false};}const club=await selectClub(client,user.userId,id,platform);if(!club)throw new CommercialError('chooseClub',409);const licenseRow=(await client.query('SELECT * FROM gymos.tenant_licenses WHERE tenant_id=$1',[club.id])).rows[0] as License|undefined;if(!licenseRow)throw new CommercialError('licenseReadOnly',403);const license=normalizeLicense(licenseRow);return{...club,license,platformOwnerAccess:ownerComplimentary(platform,user.userId),support:undefined};});}
+export async function commercialContext(user:ChatGPTUser,id?:string,supportToken?:string){if(isFirestorePersistence())return firebaseClub(user,id);return commercialTransaction(user,async(client,platform)=>{if(supportToken){const result=await resolveSupport(client,platform,user.userId,id,supportToken);result.license=normalizeLicense(result.license);return {...result,platformOwnerAccess:false};}const club=await selectClub(client,user.userId,id,platform);if(!club)throw new CommercialError('chooseClub',409);const licenseRow=(await client.query('SELECT * FROM gymos.tenant_licenses WHERE tenant_id=$1',[club.id])).rows[0] as License|undefined;if(!licenseRow)throw new CommercialError('licenseReadOnly',403);const license=normalizeLicense(licenseRow);return{...club,license,platformOwnerAccess:ownerComplimentary(platform,user.userId),support:undefined};});}
 async function audit(client:PoolClient,user:ChatGPTUser,tenant:string|null,action:string,details:unknown={}){await client.query('INSERT INTO gymos.commercial_audit(id,actor,tenant_id,action,details) VALUES($1,$2,$3,$4,$5)',[randomUUID(),user.userId,tenant,action,JSON.stringify(details)]);}
 function text(value:unknown,max=120){if(typeof value!=='string'||!value.trim()||value.trim().length>max)throw new CommercialError('invalid');return value.trim();}
-export async function commercialDirectory(user:ChatGPTUser,platformView=false){if(useFirestorePersistence())return firebaseDirectory(user,platformView);return commercialTransaction(user,async(client,platform)=>{
+export async function commercialDirectory(user:ChatGPTUser,platformView=false){if(isFirestorePersistence())return firebaseDirectory(user,platformView);return commercialTransaction(user,async(client,platform)=>{
  if(platformView&&!platform)throw new CommercialError('forbidden',403);
  let clubs:CommercialClub[]=[];
  if(platformView)clubs=(await client.query('SELECT t.id,t.name,t.created_at,l.* FROM gymos.tenants t JOIN gymos.tenant_licenses l ON l.tenant_id=t.id ORDER BY t.created_at DESC LIMIT 500')).rows;
@@ -45,7 +45,7 @@ export async function commercialDirectory(user:ChatGPTUser,platformView=false){i
  const events=platformView?(await client.query('SELECT * FROM gymos.commercial_audit ORDER BY at DESC LIMIT 100')).rows:[];
  const trialUsed=(await client.query('SELECT owner_id FROM gymos.trial_claims WHERE owner_id=$1',[user.userId])).rowCount!==0;return{account:{name:user.displayName,email:user.email},platform,ownerComplimentary:ownerComplimentary(platform,user.userId),clubs,plans,settings,orders,events,trialUsed};
  });}
-export async function commercialAction(user:ChatGPTUser,body:Record<string,unknown>){if(useFirestorePersistence())return firebaseAction(user,body);return commercialTransaction(user,(client,platform)=>commercialWork(client,platform,user,body));}
+export async function commercialAction(user:ChatGPTUser,body:Record<string,unknown>){if(isFirestorePersistence())return firebaseAction(user,body);return commercialTransaction(user,(client,platform)=>commercialWork(client,platform,user,body));}
 export async function commercialWork(client:PoolClient,platform:boolean,user:ChatGPTUser,body:Record<string,unknown>){
  const action=body.action;
  if(action==='create'||action==='setup'){

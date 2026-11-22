@@ -16,7 +16,7 @@ registerHooks({
     }
   },
   load(url, context, next) {
-    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>globalThis.__mode.firebaseConfigured;export const useFirestorePersistence=()=>globalThis.__mode.firestorePersistence;' };
+    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>globalThis.__mode.firebaseConfigured;export const isFirestorePersistence=()=>globalThis.__mode.firestorePersistence;' };
     if (url.endsWith('/app/lib/firestore-commercial.ts')) return { format: 'module', shortCircuit: true, source: 'export const firebasePlatform=async()=>{globalThis.__calls.firestore++;return true;};' };
     if (url.endsWith('/app/lib/commercial.ts')) return { format: 'module', shortCircuit: true, source: 'export const commercialTransaction=async(_user,fn)=>{globalThis.__calls.postgres++;return fn(null,true);};' };
     return next(url, context);

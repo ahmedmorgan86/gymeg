@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync,readdirSync,statSync} from 'node:fs';
 import {join,relative} from 'node:path';
-import {isFirebaseConfigured,useFirestorePersistence} from '../app/lib/firestore-db.ts';
+import {isFirebaseConfigured,isFirestorePersistence} from '../app/lib/firestore-db.ts';
 
 const FIREBASE_ENV=['GYMEG_FIREBASE_SERVICE_ACCOUNT','FIREBASE_PROJECT_ID','NEXT_PUBLIC_FIREBASE_PROJECT_ID'];
 function withEnv(env,fn){
@@ -16,32 +16,32 @@ function withEnv(env,fn){
 test('persistence backend selector follows GYMOS_DATA_BACKEND independently of Firebase auth env',()=>{
   withEnv({},()=>{
     assert.equal(isFirebaseConfigured(),false);
-    assert.equal(useFirestorePersistence(),false);
+    assert.equal(isFirestorePersistence(),false);
   });
   withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}'},()=>{
     assert.equal(isFirebaseConfigured(),true);
-    assert.equal(useFirestorePersistence(),true);
+    assert.equal(isFirestorePersistence(),true);
   });
   withEnv({FIREBASE_PROJECT_ID:'proj'},()=>{
-    assert.equal(useFirestorePersistence(),true);
+    assert.equal(isFirestorePersistence(),true);
   });
   // Mixed mode: Firebase stays configured for auth/push while data lives in Postgres.
   withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:'postgres'},()=>{
     assert.equal(isFirebaseConfigured(),true);
-    assert.equal(useFirestorePersistence(),false);
+    assert.equal(isFirestorePersistence(),false);
   });
   // Explicit unknown values fail closed: no silent fallback to either backend.
   for (const bad of ['firestore','postgrs','POSTGRES','sqlite']) {
     withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:bad},()=>{
-      assert.throws(()=>useFirestorePersistence(),/GYMOS_DATA_BACKEND/);
+      assert.throws(()=>isFirestorePersistence(),/GYMOS_DATA_BACKEND/);
     });
     withEnv({GYMOS_DATA_BACKEND:bad},()=>{
-      assert.throws(()=>useFirestorePersistence(),/GYMOS_DATA_BACKEND/);
+      assert.throws(()=>isFirestorePersistence(),/GYMOS_DATA_BACKEND/);
     });
   }
   // Empty string behaves as unset (legacy).
   withEnv({GYMEG_FIREBASE_SERVICE_ACCOUNT:'{}',GYMOS_DATA_BACKEND:''},()=>{
-    assert.equal(useFirestorePersistence(),true);
+    assert.equal(isFirestorePersistence(),true);
   });
 });
 

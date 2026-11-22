@@ -8,7 +8,7 @@ import {CommercialError,licenseState} from '../../lib/licensing';
 import {normalizeLicense} from '../../lib/commercial';
 import {encryptFcmToken,fcmTokenDigest,pushEncryptionConfigured} from '../../lib/push-crypto';
 import {firebaseMessagingConfigured} from '../../lib/firebase-messaging';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {firebaseMemberLicense} from '../../lib/firebase-member-auth';
 import {setFcmSubscription} from '../../lib/firestore-fcm';
 
@@ -29,7 +29,7 @@ export async function POST(request:Request){
   // then scope the token to this user only. Never take a user id from the body.
   if(body.audience==='support'){
    const user=await getChatGPTUser();if(!user)return reply({error:'auth'},401);
-   if(useFirestorePersistence()||(body.action==='register'&&!(await platformAuthority(user))))return reply({error:'forbidden'},403);
+   if(isFirestorePersistence()||(body.action==='register'&&!(await platformAuthority(user))))return reply({error:'forbidden'},403);
    const tokenHash=fcmTokenDigest(body.token);
    await withScope(user.userId,async client=>{if(body.action==='register')await client.query(`INSERT INTO gymos.support_fcm_subscriptions(user_id,token_hash,token_ciphertext) VALUES($1,$2,$3) ON CONFLICT(user_id,token_hash) DO UPDATE SET token_ciphertext=excluded.token_ciphertext,updated_at=now()`,[user.userId,tokenHash,encryptFcmToken(body.token)]);else await client.query('DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2',[user.userId,tokenHash]);});
    return reply({ok:true,registered:body.action==='register'});
@@ -42,13 +42,13 @@ export async function POST(request:Request){
    const {state}=await readSpaceCore(owner);if(!state.members.some(m=>m.id===recipientId&&m.branch===branch&&!m.demo&&!m.archived))return reply({error:'notLinked'},404);
    // Registration is a license-gated write; unregistration is the recipient's
    // own opt-out and must stay available even when the club is read-only.
-   const license=useFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
+   const license=isFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(body.action==='register'&&license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
    // Opt-out stays available even when the club workspace is trial-locked.
    const ctx=await context(body.action!=='register');if(!ctx)return reply({error:'auth'},401);
    if(ctx.support){
-    if(useFirestorePersistence())return reply({error:'supportUnavailable'},503);
+    if(isFirestorePersistence())return reply({error:'supportUnavailable'},503);
     const tokenHash=fcmTokenDigest(body.token),userId=ctx.user.userId;
     await withScope(userId,async client=>{if(body.action==='register')await client.query(`INSERT INTO gymos.support_fcm_subscriptions(user_id,token_hash,token_ciphertext) VALUES($1,$2,$3) ON CONFLICT(user_id,token_hash) DO UPDATE SET token_ciphertext=excluded.token_ciphertext,updated_at=now()`,[userId,tokenHash,encryptFcmToken(body.token)]);else await client.query('DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2',[userId,tokenHash]);});
     return reply({ok:true,registered:body.action==='register'});
@@ -60,7 +60,7 @@ export async function POST(request:Request){
    const {state}=await readSpaceCore(owner);if(!state.branches.some(b=>b.id===branch))return reply({error:'notFound'},404);
   }
   const tokenHash=fcmTokenDigest(body.token);
-  if(useFirestorePersistence()){await setFcmSubscription(owner,branch,recipientType,recipientId,body.token,body.action==='register');return reply({ok:true,registered:body.action==='register'});}
+  if(isFirestorePersistence()){await setFcmSubscription(owner,branch,recipientType,recipientId,body.token,body.action==='register');return reply({ok:true,registered:body.action==='register'});}
   await withScope(owner,async client=>{
    if(body.action==='register')await client.query(
     `INSERT INTO gymos.fcm_subscriptions(owner_id,branch,recipient_type,recipient_id,token_hash,token_ciphertext)

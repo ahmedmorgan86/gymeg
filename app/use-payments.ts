@@ -44,7 +44,7 @@ export function usePaymentsSummary(active:boolean,state:GymState|undefined,owner
       fail();
     }catch{fail();}})();},bump?0:REFETCH_DEBOUNCE_MS);
     return()=>{clearTimeout(timer);ac.abort();};
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   },[active,owner,branch,today,period,state,bump]);
   return{data:state?choosePayments(PAYMENTS_ON&&active,got,state,owner??'',branch,today,period):null,failed:PAYMENTS_ON&&active&&failedFor!==null&&failedFor===state,retry};
 }

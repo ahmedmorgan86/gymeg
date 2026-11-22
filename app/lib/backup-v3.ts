@@ -36,8 +36,11 @@ import {processWorkspaceOutbox} from './realtime-broadcast.ts';
 import {STATE_BYTE_LIMIT} from './workspace-slice.ts';
 import {validateBackup} from './backup.ts';
 import {RECENT_EVENTS} from './activity-archive.ts';
-import {MEMBER_PHOTO_MAX} from './member-photo-input.ts';
-import {useFirestorePersistence,getFirestoreDb} from './firestore-db.ts';
+import {MEMBER_PHOTO_MAX,MEMBER_PHOTO_SIZE} from './member-photo-input.ts';
+import {webpStateOk,webpPhotoEntryOk,restoreBudgetFor,withDecodeGate,DecodeBusy,stateHasWebp,requestClock} from './photo-admission.ts';
+import {photoWebpEnabled} from './photo-data-url.ts';
+import {isPhotoDataUrl} from './photo-data-url.ts';
+import {isFirestorePersistence,getFirestoreDb} from './firestore-db.ts';
 import {db} from './database.ts';
 import {emptyState,type Event,type GymState} from './domain.ts';
 import {normalize} from './extensions.ts';
@@ -59,8 +62,8 @@ const utf8=(v:unknown)=>new TextEncoder().encode(typeof v==='string'?v:JSON.stri
 const hex64=/^[a-f0-9]{64}$/;
 const validUuid=(v:unknown)=>typeof v==='string'&&/^[a-f0-9-]{36}$/i.test(v);
 
-// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
-export function postgresOnlyV3(){if(useFirestorePersistence())throw new TransferError('unsupportedBackend',400);}
+ 
+export function postgresOnlyV3(){if(isFirestorePersistence())throw new TransferError('unsupportedBackend',400);}
 
 async function scoped<T>(owner:string,actor:string,run:(c:PoolClient)=>Promise<T>):Promise<T>{
  const c=await getPool().connect();
@@ -247,8 +250,8 @@ export function reattachRecoveryPhotos(state:GymState,preserved:{member_id:strin
 export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
  let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false,preservedPhotos:{member_id:string;content:string}[]=[];
  if(recovery){
-// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
-  const firestore=useFirestorePersistence();
+ 
+  const firestore=isFirestorePersistence();
   const row=firestore?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
   if(!row||firestore&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
   const parsed=JSON.parse((row as {payload:string}).payload) as GymState;
@@ -326,8 +329,7 @@ export function validateManifest(value:unknown):BackupV3Manifest{
  return m;
 }
 
-const PHOTO_RE=/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
-const validPhotoEntry=(id:unknown,content:unknown):id is string=>typeof id==='string'&&id.length>=1&&id.length<=250&&typeof content==='string'&&content.length<=MEMBER_PHOTO_MAX&&PHOTO_RE.test(content);
+export const validPhotoEntry=(id:unknown,content:unknown):id is string=>typeof id==='string'&&id.length>=1&&id.length<=250&&typeof content==='string'&&isPhotoDataUrl(content,MEMBER_PHOTO_MAX,MEMBER_PHOTO_SIZE);
 const validEvent=(e:unknown):e is Event=>!!e&&typeof e==='object'&&Buffer.byteLength(JSON.stringify(e),'utf8')<=65536&&typeof (e as Event).id==='string'&&(e as Event).id.length>=1&&(e as Event).id.length<=250&&typeof (e as Event).at==='string'&&Number.isFinite(Date.parse((e as Event).at))&&typeof (e as Event).kind==='string'&&(e as Event).kind.length<=100&&typeof (e as Event).subject==='string'&&(e as Event).subject.length<=250&&typeof (e as Event).actor==='string'&&(e as Event).actor.length<=500&&typeof (e as Event).branch==='string'&&(e as Event).branch.length<=250&&((e as Event).detail===undefined||typeof (e as Event).detail==='string'&&(e as Event).detail!.length<=500);
 
 export async function readValidatedCore(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest):Promise<GymState>{
@@ -348,9 +350,76 @@ async function sectionRows(owner:string,actor:string,sessionId:string):Promise<S
  * itself re-reads the same digest-pinned sections inside the restore transaction, one page
  * at a time; any failure rolls the whole restore back.
  */
-export async function commitRestoreV3(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest,current:{state:GymState;revision:number},adjust?:(state:GymState,current:{state:GymState;revision:number})=>GymState):Promise<boolean>{
+/** WebP full-decode admission for a v3 restore. Runs BEFORE the restore transaction opens (never while holding its row locks), one
+ * restore at a time per process, against the same digest-pinned sections the commit will read: a section is looked up by the
+ * manifest's own id+kind+ordinal+digest and re-assembled with its digest verified, so the decoded bytes ARE the bytes the commit
+ * applies. The work budget comes from the core (members, products), see restoreBudgetFor. No-op when the flag is OFF. */
+async function prevalidateWebpSections(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest,signal?:AbortSignal):Promise<boolean>{
+ if(!photoWebpEnabled())return false;
+ {
+  const tick=requestClock(signal);let anyWebp=false;
+  const text=(buf:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(buf);
+  const rows=await sectionRows(owner,actor,sessionId);
+  if(rows.length!==1+manifest.photos.pages.length+manifest.events.pages.length)throw new TransferError('invalidBackup',400); // exact complete section set, nothing extra staged
+  const coreRow=rows.find(r=>r.kind==='core'&&r.ordinal===0);
+  if(!coreRow||coreRow.bytes!==manifest.core.bytes||coreRow.digest!==manifest.core.digest)throw new TransferError('invalidBackup',400);
+  // CHEAP checks first, nothing decoded yet: the core goes through the full schema and cardinality validation (member/product caps),
+  // then every photo page is read and shape-checked (entry shape, member binding, no duplicates, exact count) exactly as the commit does.
+  const core=validateBackup(JSON.parse(text(await sectionContent(owner,actor,coreRow.id,'upload'))));tick();
+  if(stateHasWebp(core))anyWebp=true;
+  const memberIds=new Set(core.members.map(m=>m.id));
+  const pageOf=async(p:SectionRef)=>{
+   const r=rows.find(x=>x.kind==='photos'&&x.ordinal===p.ordinal&&x.id===p.transfer&&x.bytes===p.bytes&&x.digest===p.digest);
+   if(!r)throw new TransferError('invalidBackup',400);
+   const page=JSON.parse(text(await sectionContent(owner,actor,r.id,'upload')));
+   if(!page||typeof page!=='object'||Array.isArray(page))throw new TransferError('invalidBackup',400);
+   tick();
+   return page as Record<string,string>;
+  };
+  let total=0;const seen=new Set<string>();
+  for(const p of manifest.photos.pages){
+   for(const [id,content] of Object.entries(await pageOf(p))){
+    if(!validPhotoEntry(id,content)||!memberIds.has(id)||seen.has(id))throw new TransferError('invalidBackup',400);
+    seen.add(id);total++;if(typeof content==='string'&&content.startsWith('data:image/webp'))anyWebp=true;
+   }
+  }
+  if(total!==manifest.photos.count)throw new TransferError('invalidBackup',400);
+  // Event pages too: binding, array shape, validEvent on every entry, exact count. (Cross-page duplicate event ids stay a commit-side
+  // check on its DB temp table, so a duplicate-only defect can still reach the decoder; it never writes.)
+  let eventTotal=0;
+  for(const p of manifest.events.pages){
+   const r=rows.find(x=>x.kind==='events'&&x.ordinal===p.ordinal&&x.id===p.transfer&&x.bytes===p.bytes&&x.digest===p.digest);
+   if(!r)throw new TransferError('invalidBackup',400);
+   const page=JSON.parse(text(await sectionContent(owner,actor,r.id,'upload')));
+   if(!Array.isArray(page)||!page.every(validEvent))throw new TransferError('invalidBackup',400);
+   tick();eventTotal+=page.length;
+  }
+  if(eventTotal!==manifest.events.count)throw new TransferError('invalidBackup',400);
+  tick();
+  if(!anyWebp)return false; // zero-WebP restore (JPEG/null portraits only): nothing to decode, never enters the gate
+  // Only now the expensive full decode, inside the bounded gate (queue/wait/work limits), with a budget derived from the validated core.
+  // Same digest-pinned sections as the commit. Busy/deadline is a retryable 503, not a verdict on the backup.
+  try{
+   await withDecodeGate(async d=>{
+    const budget=restoreBudgetFor(core,d);
+    if(!await webpStateOk(core,budget))throw new TransferError('invalidBackup',400);
+    for(const p of manifest.photos.pages)for(const content of Object.values(await pageOf(p))){tick();if(!await webpPhotoEntryOk(content,budget))throw new TransferError('invalidBackup',400);}
+    tick();
+   },signal);
+  }catch(e){if(e instanceof DecodeBusy)throw new TransferError('busy',503);throw e;}
+  return true;
+ }
+}
+
+export async function commitRestoreV3(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest,current:{state:GymState;revision:number},adjust?:(state:GymState,current:{state:GymState;revision:number})=>GymState,signal?:AbortSignal):Promise<boolean>{
  if(!validUuid(sessionId))throw new TransferError('invalid');
+ // One request clock (abort signal + wait/work budget) lives from here to COMMIT, but only for restores that carry WebP (admission work).
+ const clock=requestClock(signal);let guarded=false;
+ const tick=()=>{if(!guarded)return;try{clock();}catch(e){if(e instanceof DecodeBusy)throw new TransferError('busy',503);throw e;}};
+ try{guarded=await prevalidateWebpSections(owner,actor,sessionId,manifest,signal);tick();}
+ catch(e){if(e instanceof DecodeBusy)throw new TransferError('busy',503);throw e;} // no connection, no BEGIN, no write on busy/abort/expiry
  const client=await getPool().connect();
+ try{tick();}catch(e){client.release();throw e;} // connection acquisition is an await: re-check immediately before BEGIN
  try{
   await client.query('BEGIN');
   await client.query("SELECT set_config('app.gym_owner',$1,true),set_config('app.gym_actor',$2,true)",[owner,actor]);
@@ -416,6 +485,7 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
   const recoveryId=randomUUID();
   const applied=await persistSpaceTx(client,owner,current,state,true,undefined,staged,recoveryId);
   if(!applied){await client.query('ROLLBACK');return false;}
+  tick(); // last point an abort/expiry can still roll the whole restore back; after COMMIT nothing is cancelled
   await client.query('COMMIT');
   try{void processWorkspaceOutbox(owner);}catch{}
   return true;

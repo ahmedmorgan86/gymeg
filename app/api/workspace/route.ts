@@ -2,8 +2,10 @@ import {fullName,memberPhone} from '../../lib/member-console';
 import {assertRequestTenant} from '../../lib/request-tenant';
 import {CommercialError,licenseState} from '../../lib/licensing';
 import {persistSpace} from '../../lib/entity-store';
+import {photoWebpEnabled} from '../../lib/photo-data-url';
+import {webpOperationOk,DecodeBusy,operationHasWebp,requestClock} from '../../lib/photo-admission';
 import {envelopeStateBytes,PhotoQuotaExceeded} from '../../lib/photo-budget';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {STATE_BYTE_LIMIT} from '../../lib/workspace-slice';
 import {tryHotOperation} from '../../lib/hot-route';
 import {sliceBackend} from '../../lib/workspace-reads';
@@ -28,11 +30,14 @@ export async function POST(request:Request){try{
  if(!ctx.support){const hotDigest=await hash(JSON.stringify(body.operation));const hot=await tryHotOperation(sliceBackend(),{owner:ctx.owner,userId:ctx.user.userId,displayName:ctx.user.displayName,role:ctx.role,branches:ctx.branches,requestId:body.requestId,digest:hotDigest,revision:body.revision,operation:body.operation,deltaMode});if(hot)return reply({ok:true,revision:hot.revision});}
  const current=await readSpace(ctx.owner);if(!receptionPermitted(ctx.role,body.operation.type,current.state.settings.receptionGrants?.[ctx.user.userId])||(ctx.branches&&!ctx.branches.includes(body.operation.branch)))return reply({error:'forbidden'},403);
  if(['legacy.import','settings.save','logo.set','branch.add','demo.seed','demo.clear'].includes(body.operation.type)&&!(await administrator(ctx)))return reply({error:'forbidden'},403);
+ const webpClock=photoWebpEnabled()&&body.operation&&operationHasWebp(body.operation as never)?requestClock(request.signal):null; // one clock from admission to persist, WebP-bearing writes only
+ {let ok:boolean;try{ok=await webpOperationOk(body.operation,undefined,request.signal);}catch(e){if(e instanceof DecodeBusy)return reply({error:'busy'},503);throw e;}if(!ok)return reply({error:'invalid'},400);}
  if(['member.save','member.daypass'].includes(body.operation.type)){body.operation.name=fullName(body.operation.name);body.operation.phone=memberPhone(body.operation.phone);}
  const digest=await hash(JSON.stringify(body.operation)),receipt=current.state.receipts.find(r=>r.id===ctx.user.userId+':'+body.requestId);
  if(receipt){if(receipt.digest!==digest)return reply({error:'replay'},409);return reply(deltaMode?{ok:true,revision:current.revision,replay:true}:packet(current,ctx,undefined,packetOmit(request)));}if(body.revision!==current.revision)return reply({error:'conflict'},409);
-// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
- let state=applyOperation(current.state,body.operation,new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());if(body.operation.type==='member.save'&&!body.operation.id){const added=state.members.at(-1)!;state=applyOperation(state,{type:'card.issue',branch:body.operation.branch,id:added.id},new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());}state.receipts.push({id:ctx.user.userId+':'+body.requestId,digest});if(state.receipts.length>1000)state.receipts.shift();if(envelopeStateBytes(state,!useFirestorePersistence())>STATE_BYTE_LIMIT)return reply({error:'limit'},413);
+ 
+ let state=applyOperation(current.state,body.operation,new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());if(body.operation.type==='member.save'&&!body.operation.id){const added=state.members.at(-1)!;state=applyOperation(state,{type:'card.issue',branch:body.operation.branch,id:added.id},new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());}state.receipts.push({id:ctx.user.userId+':'+body.requestId,digest});if(state.receipts.length>1000)state.receipts.shift();if(envelopeStateBytes(state,!isFirestorePersistence())>STATE_BYTE_LIMIT)return reply({error:'limit'},413);
+ if(webpClock){try{webpClock();}catch(e){if(e instanceof DecodeBusy)return reply({error:'busy'},503);throw e;}} // every await since admission (hash, receipt) is behind us: abort/expiry means no write
  if(!await persistSpace(ctx.owner,current,state))return reply({error:'conflict'},409);if(body.operation.type==='community.reply'){const target=body.operation.member,message=state.community?.messages.at(-1);if(message&&message.member===target)try{after(async()=>{try{await sendCommunityPush(ctx.owner,message.branch,'member',target,'/member',message.id);}catch{}});}catch{}}
  const nextRev=current.revision+1;
  return reply(deltaMode?{ok:true,revision:nextRev}:packet({state,revision:nextRev},ctx,undefined,packetOmit(request)));

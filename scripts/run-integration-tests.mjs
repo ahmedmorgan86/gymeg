@@ -9,8 +9,14 @@ const testsDir = resolve(root, 'tests');
 
 // Suites that run entirely with local mocks. No external database or server.
 const testSuites = [
+  { name: 'Consumer route flag, role and branch boundaries (PGlite)', file: 'tests/consumer-routes.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'Quota issues source parity and bounded drain (PGlite)', file: 'tests/quota-issues-source.integration.mjs' },
   { name: 'Public homepage and explicit management entry', file: 'tests/homepage.integration.mjs', loader: './tests/homepage-loader.mjs' },
   { name: 'API role boundaries', file: 'tests/role-api.integration.mjs', loader: './tests/role-api-loader.mjs' },
+  { name: 'WebP photo admission through the REAL workspace route (PGlite): typed slots only, flag-gated', file: 'tests/photo-admission-route.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
+  { name: 'WebP photo admission through the REAL v2 restore route: typed slots, flag-gated', file: 'tests/photo-admission-restore.integration.mjs', loader: './tests/role-api-loader.mjs' },
+  { name: 'WebP photo admission through a REAL backup v3 session and commit (PGlite): validate then decode before BEGIN', file: 'tests/photo-admission-v3.integration.mjs' },
+  { name: 'Backup v3 photo entry predicate (JPEG legacy, WebP flag-gated)', file: 'tests/photo-v3.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Backup restore authorization and provenance', file: 'tests/backup-api.integration.mjs', loader: './tests/role-api-loader.mjs' },
   { name: 'Member app integration boundaries', file: 'tests/member-api.integration.mjs', loader: './tests/member-api-loader.mjs' },
   { name: 'Phone sign-in boundaries', file: 'tests/member-session.integration.mjs', loader: './tests/member-session-loader.mjs' },
@@ -30,6 +36,7 @@ const testSuites = [
   { name: 'Private credit gate, blob layout and backend refusal (PGlite)', file: 'tests/private-credit-gates.integration.mjs' },
   { name: 'Restore epoch and owner version atomicity (PGlite)', file: 'tests/restore-epoch.integration.mjs' },
   { name: 'Entity counters and size bound across every writer, recount, gate (PGlite)', file: 'tests/entity-counters.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'changes feed: events log behind the authoritative revision gives a snapshot (forced events insert failure)', file: 'tests/changes-gap.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Hot write cannot pass the 20,000,000-byte rule (reopened visit with huge timestamp)', file: 'tests/hot-size.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Member summary inputs: every writer marks dirty, refresh is exact vs memberSummary, fail-closed bounds', file: 'tests/member-summary-store.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'jsonb byte count is never below compact JSON bytes', file: 'tests/jsonb-byte-bound.integration.mjs', loader: './tests/workspace-post-loader.mjs' },

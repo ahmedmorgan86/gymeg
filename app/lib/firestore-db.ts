@@ -71,7 +71,7 @@ export function isFirebaseConfigured(): boolean {
 // deployment keeps Firebase Auth/FCM while storing gym data in Postgres by
 // setting GYMOS_DATA_BACKEND=postgres. Auth/session/push-provider code keeps
 // checking isFirebaseConfigured(); data-access code checks this instead.
-export function useFirestorePersistence(): boolean {
+export function isFirestorePersistence(): boolean {
   const backend = process.env.GYMOS_DATA_BACKEND;
   // Unset/empty is the legitimate legacy configuration: Firestore whenever
   // Firebase is configured (today's production behavior, unchanged).

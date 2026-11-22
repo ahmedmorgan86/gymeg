@@ -2,7 +2,7 @@ import {context, reply} from '../../../lib/server-workspace';
 import {CommercialError} from '../../../lib/licensing';
 import {assertRequestTenant} from '../../../lib/request-tenant';
 import {withScope} from '../../../lib/database';
-import { firestoreReadRevision, getFirestoreDb,useFirestorePersistence} from '../../../lib/firestore-db';
+import { firestoreReadRevision, getFirestoreDb,isFirestorePersistence} from '../../../lib/firestore-db';
 
 export async function GET(request: Request) {
   try {
@@ -30,7 +30,7 @@ export async function GET(request: Request) {
       });
     }
 
-    if (useFirestorePersistence()) {
+    if (isFirestorePersistence()) {
       // Revision check costs a single document read; when the client is
       // current, no entity document is touched at all.
       const revision = await firestoreReadRevision(ctx.owner);
@@ -135,6 +135,18 @@ export async function GET(request: Request) {
       const minRev = bounds?.min_rev ?? null;
       const maxRev = bounds?.max_rev ?? null;
 
+      // The authoritative revision lives on gym_states. An event log that does not reach it (the event insert is a savepoint that can roll back
+      // while the revision still advances, or the table was never populated) cannot prove "nothing changed": a client behind the authoritative
+      // revision gets a snapshot, never an empty delta that would leave it on a stale revision.
+      const authoritative = (await client.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1', [ctx.owner])).rows[0] as {revision: number | string} | undefined;
+      const authRev = authoritative ? Number(authoritative.revision) : null;
+      if (authRev !== null && after >= authRev) {
+        return {requiresSnapshot: false, fromRevision: after, toRevision: after, hasMore: false, events: []};
+      }
+      if (authRev !== null && (maxRev === null || maxRev < authRev)) {
+        return {requiresSnapshot: true, fromRevision: after, toRevision: authRev, hasMore: false, events: []};
+      }
+
       // If client revision is already at or ahead of latest database revision
       if (maxRev !== null && after >= maxRev) {
         return {
@@ -160,14 +172,26 @@ export async function GET(request: Request) {
 
       // 2. Query deltas up to 250 items per batch
       const limit = 250;
-      const rawEvents = (await client.query(
+      const fetched = (await client.query(
         `SELECT id, revision, event_type, collection, entity_id, branch, payload, created_at
          FROM gymos.workspace_events
          WHERE owner_id = $1 AND revision > $2
          ORDER BY revision ASC, id ASC
          LIMIT $3`,
-        [ctx.owner, after, limit]
+        [ctx.owner, after, limit + 1]
       )).rows;
+      // A batch never ends inside a revision: the client's next pull resumes at the last applied revision, so events of a partly served revision would be skipped for good.
+      // The extra row shows whether the last revision is complete; if not, the whole trailing revision waits for the next batch.
+      const more = fetched.length > limit;
+      let rawEvents = fetched;
+      if (more) {
+        const boundary = fetched[limit].revision;
+        rawEvents = fetched[limit - 1].revision === boundary ? fetched.filter(ev => ev.revision < boundary) : fetched.slice(0, limit);
+        if (!rawEvents.length) {
+          // one revision alone exceeds the batch: it cannot be delivered atomically, so the client takes a snapshot
+          return {requiresSnapshot: true, fromRevision: after, toRevision: authRev ?? boundary, hasMore: false, events: []};
+        }
+      }
 
       if (!rawEvents.length) {
         // No new events found
@@ -207,7 +231,14 @@ export async function GET(request: Request) {
       });
 
       const lastRev = rawEvents[rawEvents.length - 1].revision;
-      const hasMore = rawEvents.length === limit;
+      // Continuity: every revision in (after, lastRev] must have at least one event row. A revision with none is either a failed event insert
+      // (the savepoint rolled back while the revision advanced) or a write with no entity change; the two cannot be told apart, so the client takes a
+      // snapshot instead of applying a feed with a hole (a later healthy revision must not hide an earlier failed one).
+      const covered = Number((await client.query('SELECT count(DISTINCT revision)::int AS n FROM gymos.workspace_events WHERE owner_id=$1 AND revision>$2 AND revision<=$3', [ctx.owner, after, lastRev])).rows[0]?.n ?? 0);
+      if (covered !== lastRev - after) {
+        return {requiresSnapshot: true, fromRevision: after, toRevision: authRev ?? lastRev, hasMore: false, events: []};
+      }
+      const hasMore = more;
 
       return {
         requiresSnapshot: false,

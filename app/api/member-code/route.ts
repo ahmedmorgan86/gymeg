@@ -6,7 +6,7 @@ import {assertRequestTenant} from '../../lib/request-tenant';
 import {licenseState,CommercialError} from '../../lib/licensing';
 import {newMemberPin,normalizeMemberPhone,normalizeMemberPin,isSharedLegacyPin} from '../../lib/member-phone';
 import {receptionPermitted} from '../../lib/access';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {firebaseMemberCredentials} from '../../lib/firebase-member-credentials';
 
 export async function POST(request:Request){try{
@@ -26,7 +26,7 @@ export async function POST(request:Request){try{
  const m=state.members.find(m=>m.id===body.member&&!m.demo&&!m.archived);
  if(!m||ctx.branches&&!ctx.branches.includes(m.branch))return reply({error:'forbidden'},403);
  if(!['read','rotate','revoke','requireChange','setPin'].includes(body.action))return reply({error:'invalid'},400);
- if(useFirestorePersistence()){const result=await firebaseMemberCredentials(ctx.owner,ctx.user.userId,m,body.action,body.pin);return 'invalidPin'in result?reply({error:'invalidPin'},400):reply(result);}
+ if(isFirestorePersistence()){const result=await firebaseMemberCredentials(ctx.owner,ctx.user.userId,m,body.action,body.pin);return 'invalidPin'in result?reply({error:'invalidPin'},400):reply(result);}
 
  const result=await withScope(ctx.owner,async c=>{
   const audit=async(action:string)=>c.query('INSERT INTO gymos.gym_access_events(id,owner_id,actor,target,action,details) VALUES($1,$2,$3,$4,$5,$6::jsonb)',[crypto.randomUUID(),ctx.owner,ctx.user.userId,m.id,action,JSON.stringify({branch:m.branch})]);

@@ -13,7 +13,7 @@ export type RateLimitStore = 'firestore' | 'postgres' | 'local';
 // the per-process Map regardless of backend envs.
 export function rateLimitStoreFor(env: Record<string, string | undefined> = process.env): RateLimitStore {
   if (env.NODE_ENV === 'test') return 'local';
-  // Mirror useFirestorePersistence(): only unset/empty or "postgres" is a
+  // Mirror isFirestorePersistence(): only unset/empty or "postgres" is a
   // valid GYMOS_DATA_BACKEND. Anything else is a typo or drift and must stop
   // the process, never silently pick a backend.
   const backend = env.GYMOS_DATA_BACKEND;

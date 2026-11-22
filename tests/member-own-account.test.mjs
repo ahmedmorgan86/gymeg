@@ -5,7 +5,7 @@ registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODUL
  if(url.endsWith('/app/lib/member-code-session.ts'))return{format:'module',shortCircuit:true,source:'export const codeMemberIdentity=async()=>globalThis.__ownIdentity;'};
  if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>{throw Error("unscoped DB")};export const withScope=(o,work)=>globalThis.__ownDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[o]);return work(c);});`};
  if(url.endsWith('/app/lib/server-workspace.ts'))return{format:'module',shortCircuit:true,source:'export const reply=(data,status=200)=>Response.json(data,{status});'};
- if(url.endsWith('/app/lib/firestore-db.ts'))return{format:'module',shortCircuit:true,source:'export const useFirestorePersistence=()=>false;export const getFirestoreDb=()=>{throw Error("no firestore")};'};
+ if(url.endsWith('/app/lib/firestore-db.ts'))return{format:'module',shortCircuit:true,source:'export const isFirestorePersistence=()=>false;export const getFirestoreDb=()=>{throw Error("no firestore")};'};
  if(url.endsWith('/app/lib/commercial.ts'))return{format:'module',shortCircuit:true,source:'export const normalizeLicense=x=>x;'};return n(url,c);
 }});
 const {GET}=await import('../app/api/member-account-detail/route.ts');const {readOwnMemberAccount}=await import('../app/lib/member-own-account.ts');const {withScope}=await import('../app/lib/database.ts');const {splitState}=await import('../app/lib/entity-state.ts');const {fixture}=await import('./member-summary-fixture.mjs');const {memberCredit,invoiceOutstanding}=await import('../app/lib/member-ledger.ts');

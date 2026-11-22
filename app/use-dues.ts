@@ -15,31 +15,35 @@ export function chooseDues(on:boolean,got:Got|null,state:GymState,owner:string,b
 }
 export function useDues(active:boolean,state:GymState|undefined,owner:string|undefined,branch:string,member:string):{view:DuesView|null;failed:boolean;retry:()=>void;loadMore:()=>void;loadingMore:boolean}{
   const [got,setGot]=useState<Got|null>(null),[failedFor,setFailedFor]=useState<GymState|null>(null),[bump,setBump]=useState(0),[loadingMore,setLoadingMore]=useState(false);
-  const gotRef=useRef<Got|null>(null);gotRef.current=got;
+  // latest tracks the committed value synchronously (a passive effect sync lags a commit, and two completions in that window could drop a page). commit() is the only writer.
+  const latest=useRef<Got|null>(null),moreFlight=useRef(false);
+  const commit=useCallback((v:Got|null)=>{latest.current=v;setGot(v);},[]);
   const retry=useCallback(()=>setBump(n=>n+1),[]);
   const q=(extra:string)=>'/api/workspace/dues?branch='+encodeURIComponent(branch)+(member?'&member='+encodeURIComponent(member):'')+extra;
   const loadMore=useCallback(()=>{
-    const g=gotRef.current;if(!g||!g.data.next||!owner||!state||g.forState!==state)return;setLoadingMore(true);
+    const g=latest.current;if(!g||!g.data.next||!owner||!state||g.forState!==state||moreFlight.current)return;moreFlight.current=true;setLoadingMore(true); // single-flight: a second call while one is in flight returns, so two completions cannot interleave appends
     (async()=>{try{
       const r=await fetch(q('&after='+g.data.next!.pos+'&afterId='+encodeURIComponent(g.data.next!.id)+'&ver='+encodeURIComponent(g.data.version)),{headers:{'X-GymOS-Tenant':owner},cache:'no-store'});
       const d=r.ok?await r.json() as {status?:string;version?:string;rows?:DueRow[];next?:Cur|null}:null;
       if(d&&d.status==='irregular')return;
-      if(d&&d.status==='ok'&&d.version===g.data.version&&Array.isArray(d.rows)){setGot({...g,data:{...g.data,rows:[...g.data.rows,...d.rows],next:d.next??null}});}
+      if(d&&d.status==='ok'&&d.version===g.data.version&&Array.isArray(d.rows)){
+        if(latest.current!==g){setBump(n=>n+1);return;} // a page-1 reload (or anything else) committed underneath: restart from page 1, never append onto a replaced base
+        commit({...g,data:{...g.data,rows:[...g.data.rows,...d.rows],next:d.next??null}});}
       else setBump(n=>n+1); // stale or failed: restart from page 1 (the effect shows the failure state if it fails again)
-    }catch{setBump(n=>n+1);}finally{setLoadingMore(false);}})();
+    }catch{setBump(n=>n+1);}finally{moreFlight.current=false;setLoadingMore(false);}})();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[owner,state,branch,member]);
+  },[owner,state,branch,member,commit]);
   useEffect(()=>{
     if(!DUES_ON||!active||!owner||!state)return;const ac=new AbortController();
-    const fail=()=>{if(!ac.signal.aborted){setGot(null);setFailedFor(state);}};
+    const fail=()=>{if(!ac.signal.aborted){commit(null);setFailedFor(state);}};
     const timer=setTimeout(()=>{(async()=>{try{
       const r=await fetch(q(''),{headers:{'X-GymOS-Tenant':owner},signal:ac.signal,cache:'no-store'});
       const d=r.ok?await r.json() as {status?:string;version?:string;total?:number;rows?:DueRow[];next?:Cur|null}:null;
-      if(d&&d.status==='ok'&&typeof d.total==='number'&&typeof d.version==='string'&&Array.isArray(d.rows)){setGot({owner,branch,member,forState:state,data:{total:d.total,rows:d.rows,version:d.version,next:d.next??null}});setFailedFor(null);return;}
+      if(d&&d.status==='ok'&&typeof d.total==='number'&&typeof d.version==='string'&&Array.isArray(d.rows)){commit({owner,branch,member,forState:state,data:{total:d.total,rows:d.rows,version:d.version,next:d.next??null}});setFailedFor(null);return;}
       fail();
     }catch{fail();}})();},bump?0:REFETCH_DEBOUNCE_MS);
     return()=>{clearTimeout(timer);ac.abort();};
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[active,owner,branch,member,state,bump]);
+  },[active,owner,branch,member,state,bump,commit]);
   return{view:state?chooseDues(DUES_ON&&active,got,state,owner??'',branch,member):null,failed:DUES_ON&&active&&failedFor!==null&&failedFor===state,retry,loadMore,loadingMore};
 }

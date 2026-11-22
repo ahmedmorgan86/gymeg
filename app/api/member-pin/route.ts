@@ -6,7 +6,7 @@ import {withScope} from '../../lib/database';
 import {reply,sameOrigin} from '../../lib/server-workspace';
 import {licenseState,type License} from '../../lib/licensing';
 import {normalizeLicense} from '../../lib/commercial';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {firebaseChangeMemberPin,firebaseMemberLicense} from '../../lib/firebase-member-auth';
 export async function POST(request:Request){
  if(!sameOrigin(request))return reply({error:'origin'},403);
@@ -14,7 +14,7 @@ export async function POST(request:Request){
  try{const raw=await request.text();if(raw.length>2048)return reply({error:'invalid'},413);const body=JSON.parse(raw),current=normalizeMemberPin(body.currentPin),pin=normalizeMemberPin(body.newPin),confirm=normalizeMemberPin(body.confirmPin);
   if(!current||!pin||pin!==confirm||isSharedLegacyPin(pin)||pin===current)return reply({error:'invalidPin'},400);
   const identity=await codeMemberIdentity(request),oldToken=memberSessionToken(request);if(!identity||!oldToken)return reply({error:'auth'},401);
-  if(useFirestorePersistence()){const license=await firebaseMemberLicense(identity.owner_id);if(license&&!licenseState(license as License).writable)return reply({error:'licenseReadOnly'},403);const token=randomBytes(32).toString('hex');const status=await firebaseChangeMemberPin(identity.owner_id,identity.member_id,identity.version,current,pin,oldToken,token);if(status!==200){const r=reply({error:status===429?'rateLimit':'invalidCredentials'},status);if(status===429)r.headers.set('Retry-After','900');return r;}const r=reply({ok:true});r.headers.append('Set-Cookie',`${memberCookie}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${7*86400}`);return r;}
+  if(isFirestorePersistence()){const license=await firebaseMemberLicense(identity.owner_id);if(license&&!licenseState(license as License).writable)return reply({error:'licenseReadOnly'},403);const token=randomBytes(32).toString('hex');const status=await firebaseChangeMemberPin(identity.owner_id,identity.member_id,identity.version,current,pin,oldToken,token);if(status!==200){const r=reply({error:status===429?'rateLimit':'invalidCredentials'},status);if(status===429)r.headers.set('Retry-After','900');return r;}const r=reply({ok:true});r.headers.append('Set-Cookie',`${memberCookie}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${7*86400}`);return r;}
   const license=await withScope(identity.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[identity.owner_id])).rows[0] as License|undefined);
    if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
    const token=randomBytes(32).toString('hex');const status=await withScope(identity.owner_id,async c=>{

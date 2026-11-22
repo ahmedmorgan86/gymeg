@@ -3,7 +3,7 @@ import webPush from 'web-push';
 import {withScope} from './database';
 import {decryptPushSubscription,pushEncryptionConfigured} from './push-crypto';
 import {sendCommunityFcm,firebaseMessagingConfigured} from './firebase-messaging';
-import {useFirestorePersistence} from './firestore-db.ts';
+import {isFirestorePersistence} from './firestore-db.ts';
 import {eligibleWebPushSubscriptions} from './firestore-web-push';
 export type PushRecipient='staff'|'member';
 const subject=()=>process.env.GYMEG_VAPID_SUBJECT?.trim()||'';
@@ -21,7 +21,7 @@ export async function sendCommunityPush(owner:string,branch:string,recipient:Pus
  if(!webConfigured&&!fcmConfigured)return {configured:false,sent:0,failed:0};
  const native=await sendCommunityFcm(owner,branch,recipient,recipientId,url,tag);
  if(!webConfigured)return native;
- if(useFirestorePersistence()){
+ if(isFirestorePersistence()){
   const rows=await eligibleWebPushSubscriptions(owner,branch,recipient,recipientId);
   webPush.setVapidDetails(subject(),publicKey(),privateKey());
   let sent=0,failed=0;

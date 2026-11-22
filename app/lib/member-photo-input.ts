@@ -1,3 +1,4 @@
+import {photoDataUrlKind,photoWebpEnabled} from './photo-data-url.ts';
 export function validateMemberPhotoFile(file:Pick<File,'type'|'size'>){
  if(!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size<1||file.size>12*1024*1024)throw Error('photoFile');
 }
@@ -8,6 +9,8 @@ export function validateMemberPhotoFile(file:Pick<File,'type'|'size'>){
  * gymos.gym_photos CHECK constraint - change all together. */
 export const MEMBER_PHOTO_MAX=96000;
 export const MEMBER_PHOTO_SIZE=320;
+/** Default OFF (same flag as server admission, NEXT_PUBLIC_PHOTO_WEBP). Servers must accept WebP (photo-data-url.ts) before clients may emit it: an older server rejects a WebP photo with 'invalid'. */
+export function memberPhotoPreferWebp(){return photoWebpEnabled();}
 const MEMBER_PHOTO_QUALITIES=[.85,.75,.65] as const;
 /** Shared encoder for both capture and upload: same size, same ladder, same cap.
  * Tries the approved quality first, degrades only when the result would exceed
@@ -15,6 +18,9 @@ const MEMBER_PHOTO_QUALITIES=[.85,.75,.65] as const;
 export function encodeMemberPhoto(draw:(ctx:CanvasRenderingContext2D,size:number)=>void){
  const canvas=document.createElement('canvas');canvas.width=MEMBER_PHOTO_SIZE;canvas.height=MEMBER_PHOTO_SIZE;const ctx=canvas.getContext('2d');if(!ctx)throw Error('photoDecode');
  ctx.fillStyle='#ffffff';ctx.fillRect(0,0,MEMBER_PHOTO_SIZE,MEMBER_PHOTO_SIZE);draw(ctx,MEMBER_PHOTO_SIZE);
+ if(memberPhotoPreferWebp()){// Opt-in: only once every server and restore path accepts WebP. Browsers that cannot encode WebP return PNG, which fails the byte check and falls through to the JPEG ladder.
+  for(const quality of MEMBER_PHOTO_QUALITIES){const value=canvas.toDataURL('image/webp',quality);if(photoDataUrlKind(value,MEMBER_PHOTO_MAX,MEMBER_PHOTO_SIZE)==='webp')return value;}
+ }
  for(const quality of MEMBER_PHOTO_QUALITIES){const value=canvas.toDataURL('image/jpeg',quality);if(/^data:image\/jpeg;base64,\/9j\//.test(value)&&value.length<=MEMBER_PHOTO_MAX)return value;}
  throw Error('photoSize');
 }

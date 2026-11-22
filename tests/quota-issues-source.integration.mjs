@@ -239,3 +239,31 @@ test('steady state: a clean request never runs the branch anti-join (repair arm)
   await db.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id='QX'");
   let q=await rq('b');for(let i=0;i<4&&q.status!=='ok';i++){q=await rq('b');}assert.equal(q.status,'ok',JSON.stringify(q));
 });
+test('remote-shaped schema: each missing prerequisite table yields a typed fallback/unready, never a thrown query error',async()=>{
+  const s=club();s.visits=[];await seed('QM',s);const st=await current('QM');
+  const cases=[['gym_member_summaries'],['gym_member_summary_ready'],['gym_entity_counters'],['gym_owner_version'],['gym_member_summaries','gym_member_summary_ready','gym_entity_counters','gym_owner_version']];
+  for(const drop of cases){
+    const out=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QM',true)");
+      for(const t of drop)await c.query(`DROP TABLE IF EXISTS gymos.${t} CASCADE`);
+      const cand=await readMemberCandidates(c,'QM',null,{refresh:false,now:AS});
+      let q;try{q=await readQuotaIssues((o,work)=>work(c),{owner:'QM',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});}catch(e){q={threw:String(e.message)};}
+      throw Object.assign(new Error('ROLLBACK_PROBE'),{probe:{cand,q}});}).then(()=>({txError:'no rollback'}),e=>e.probe?e.probe:({txError:String(e.message)}));
+    assert.ok(!out.txError,'transaction aborted for drop '+drop.join(',')+': '+out.txError);
+    assert.ok(!out.q?.threw,'readQuotaIssues threw for drop '+drop.join(',')+': '+out.q?.threw);
+    assert.notEqual(out.q.status,'ok','must not claim ok without its tables: '+drop.join(','));
+    assert.ok(['fallback','unchanged'].includes(out.q.status),drop.join(',')+' -> '+out.q.status);
+    await db.query('SELECT 1');
+  }
+});
+test('actual route code + the real client drain policy: a backlog needing more than 25 requests stops at the 25 cap with a fallback (never a partial ok); a backlog within the cap converges to ok',async()=>{
+  const {drainDecision,DRAIN_MAX_ATTEMPTS}=await import('../app/use-quota-issues.ts');
+  const {QUOTA_MAX_DIRTY}=await import('../app/lib/quota-issues-source.ts');
+  const s=club();s.visits=[];await seed('QZ',s);const st=await current('QZ');
+  const mark=n=>db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) SELECT 'QZ','zz'||g,5000+g,'a' FROM generate_series(1,$1) g ON CONFLICT DO NOTHING",[n]);
+  const dirtyN=async()=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QZ' AND branch='a'")).rows[0].n);
+  const follow=async()=>{let n=0,zero=0,last;for(;;){last=await readQuotaIssues(scopeFor('QZ'),{owner:'QZ',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});n++;if(last.status==='ok')return{n,last,stopped:false};if(last.reason==='draining')zero=last.recomputed>0?0:zero+1;if(drainDecision(last,n,zero)!=='retry')return{n,last,stopped:true};}};
+  await mark(QUOTA_MAX_DIRTY*(DRAIN_MAX_ATTEMPTS+2));const before=await dirtyN();
+  const over=await follow();console.log('25-cap over-budget: dirty',before,'requests',over.n,'status',over.last.status,over.last.reason??'','remaining',await dirtyN());
+  assert.equal(over.n,DRAIN_MAX_ATTEMPTS,'client stops exactly at the cap');assert.equal(over.stopped,true);assert.equal(over.last.status,'fallback');assert.ok(await dirtyN()>0,'work remains, nothing claimed done');
+  const again=await follow();console.log('after Retry: requests',again.n,again.last.status);assert.equal(again.last.status,'ok');assert.ok(again.n<=DRAIN_MAX_ATTEMPTS);
+});

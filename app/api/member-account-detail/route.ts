@@ -1,7 +1,7 @@
 import {codeMemberIdentity} from '../../lib/member-code-session';
 import {reply} from '../../lib/server-workspace';
 import {readDeadlineScope} from '../../lib/read-transaction';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {normalizeLicense} from '../../lib/commercial';
 import {licenseState,type License} from '../../lib/licensing';
 import {readOwnMemberAccount} from '../../lib/member-own-account';
@@ -12,7 +12,7 @@ export async function GET(request:Request){try{
  const deadline=Date.now()+4000,scope=readDeadlineScope(deadline);
  const identity=await codeMemberIdentity(request,deadline);if(!identity)return reply({error:'auth'},401);
  if(identity.pin_must_change)return reply({error:'pinChangeRequired'},403);
- if(useFirestorePersistence())return reply({error:'unsupported'},501);
+ if(isFirestorePersistence())return reply({error:'unsupported'},501);
  const license=await scope(identity.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[identity.owner_id])).rows[0] as License|undefined);
  if(license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
  const out=await readOwnMemberAccount(scope,{owner:identity.owner_id,member:identity.member_id,branch:identity.branch,deadline});

@@ -1,12 +1,12 @@
 import { getPool } from '../../lib/database.ts';
-import { firestoreCheckHealth ,useFirestorePersistence} from '../../lib/firestore-db.ts';
+import { firestoreCheckHealth ,isFirestorePersistence} from '../../lib/firestore-db.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    if (useFirestorePersistence()) {
+    if (isFirestorePersistence()) {
       const ready = await firestoreCheckHealth();
       if (!ready) throw Error('Firestore not ready');
       return Response.json({ status: 'ready', provider: 'firebase' }, { headers: { 'Cache-Control': 'no-store' } });

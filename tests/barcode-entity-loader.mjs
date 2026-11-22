@@ -6,12 +6,13 @@ const sliceUrl=new URL('../app/lib/workspace-slice.ts',import.meta.url).href,ext
 registerHooks({load(url,ctx,next){
   if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>({connect:async()=>({query:(sql,v)=>globalThis.__entityDb.query(sql,v),release(){}})});export async function withScope(owner,work){return globalThis.__entityDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);});}`};
   if(url.endsWith('/app/lib/server-workspace.ts')){const real=next(url,ctx);let src=String(real.source);
-    src=src.replace('export const readSpace=async()=>structuredClone(globalThis.__qaSpace);','').replace('readSpaceMeta=(...a)=>readSpace(...a),','');
+    src=src.replace('export const readSpace=async()=>structuredClone(globalThis.__qaSpace);','').replace('readSpaceCore=(...a)=>readSpace(...a),','').replace('readSpaceMeta=(...a)=>readSpace(...a),','');
     return{...real,source:src+`
 import {postgresBackend,readSlice} from ${JSON.stringify(sliceUrl)};import {normalize as __n} from ${JSON.stringify(extUrl)};
 const __be=()=>postgresBackend(async(owner,work)=>globalThis.__entityDb.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);return work(c);}));
 const __all=['members','visits','payments','invoices','plans','classes','shifts','programs','trainingAssignments','trainingSessions','coaching','coaches'];
 export const readSpace=async owner=>{const r=await readSlice(__be(),owner,{collections:__all},__n);return{state:r.state,revision:r.revision};};
+export const readSpaceCore=(...a)=>readSpace(...a);
 export const readSpaceMeta=async owner=>{const r=await readSlice(__be(),owner,null,__n);return{state:r.state,revision:r.revision};};
 `};}
   return next(url,ctx);

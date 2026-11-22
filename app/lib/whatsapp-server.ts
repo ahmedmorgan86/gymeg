@@ -2,12 +2,12 @@ import {createHash,createHmac,timingSafeEqual} from 'node:crypto';
 import {getPool,withScope} from './database';
 import {readSpaceCore} from './server-workspace';
 import {readWhatsAppJobPage} from './whatsapp-job-page';
-import {useFirestorePersistence} from './firestore-db';
+import {isFirestorePersistence} from './firestore-db';
 import {deadlineScope,enqueueWhatsAppPage,remaining,WhatsAppDeferred} from './whatsapp-demand-run';
 import {dueMessages,whatsappRule,whatsappPhone,templateMessage} from './whatsapp';
 import {normalizeLicense} from './commercial';
 import {licenseState,type License} from './licensing';
-const demandWhatsAppReads=()=>process.env.GYMOS_WHATSAPP_READS==='1'&&!useFirestorePersistence();
+const demandWhatsAppReads=()=>process.env.GYMOS_WHATSAPP_READS==='1'&&!isFirestorePersistence();
 async function latestJob(owner:string,rule:Parameters<typeof dueMessages>[1],memberId:string,occurrence:string,now:string,deadline:number){
  if(demandWhatsAppReads()){
   const page=await readWhatsAppJobPage(deadlineScope(withScope,deadline),{owner,rule,now,memberId});

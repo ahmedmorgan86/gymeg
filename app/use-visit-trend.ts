@@ -28,7 +28,7 @@ export function useVisitTrend(state:GymState|undefined,owner:string|undefined,br
       fail();
     }catch{fail();}})();},bump?0:REFETCH_DEBOUNCE_MS);
     return()=>{clearTimeout(timer);ac.abort();};
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   },[owner,branch,today,period,state,bump]);
   const unavailable=VISIT_TREND_ON&&unavailFor!==null&&unavailFor===state;
   return{days:state&&!unavailable?chooseVisitTrend(VISIT_TREND_ON,got,state,owner??'',branch,today,period):null,held:VISIT_TREND_ON&&!unavailable?heldVisitTrend(got,owner??'',branch,today,period):null,failed:VISIT_TREND_ON&&failedFor!==null&&failedFor===state,unavailable,retry};

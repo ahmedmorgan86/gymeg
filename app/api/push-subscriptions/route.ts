@@ -6,7 +6,7 @@ import {CommercialError,licenseState} from '../../lib/licensing';
 import {normalizeLicense} from '../../lib/commercial';
 import {webPushConfigured,webPushPublicKey} from '../../lib/web-push';
 import {endpointDigest,encryptPushSubscription,isAllowedWebPushEndpoint,type WebPushSubscription} from '../../lib/push-crypto';
-import {useFirestorePersistence} from '../../lib/firestore-db';
+import {isFirestorePersistence} from '../../lib/firestore-db';
 import {firebaseMemberLicense} from '../../lib/firebase-member-auth';
 import {setWebPushSubscription} from '../../lib/firestore-web-push';
 
@@ -33,7 +33,7 @@ export async function POST(request:Request){
    const {state}=await readSpaceCore(owner);if(!state.members.some(m=>m.id===recipientId&&m.branch===branch&&!m.demo&&!m.archived))return reply({error:'notLinked'},404);
    // Subscription is a license-gated write; unsubscription is the recipient's
    // own opt-out and must stay available even when the club is read-only.
-   const license=useFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
+   const license=isFirestorePersistence()?await firebaseMemberLicense(owner):await withScope(owner,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[owner])).rows[0]);
    if(body.action==='subscribe'&&license&&!licenseState(normalizeLicense(license)).writable)return reply({error:'licenseReadOnly'},403);
   }else{
    // Opt-out stays available even when the club workspace is trial-locked.
@@ -43,7 +43,7 @@ export async function POST(request:Request){
    if(!branch||(ctx.branches&&!ctx.branches.includes(branch)))return reply({error:'forbidden'},403);
    const {state}=await readSpaceCore(owner);if(!state.branches.some(b=>b.id===branch))return reply({error:'notFound'},404);
   }
-  if(useFirestorePersistence()){
+  if(isFirestorePersistence()){
    await setWebPushSubscription(owner,branch,recipientType,recipientId,subscription,body.action==='subscribe');
    return reply({ok:true,subscribed:body.action==='subscribe'});
   }

@@ -76,8 +76,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
       }
       return all;
     };
-    let visits:Rows|'raced',payments:Rows|'raced',invoices:Rows|'raced';
-    visits=await rowsOf('visits');payments=await rowsOf('payments');invoices=await rowsOf('invoices');
+    const visits:Rows|'raced'=await rowsOf('visits'),payments:Rows|'raced'=await rowsOf('payments'),invoices:Rows|'raced'=await rowsOf('invoices');
     if(visits==='raced'||payments==='raced'||invoices==='raced'){await c.query('ROLLBACK TO SAVEPOINT msum_refresh');await c.query("SELECT set_config('lock_timeout',$1,true)",[prev]);return 'raced';}
     const by=(rows:Rows)=>{const m=new Map<string,unknown[]>();for(const r of rows){const l=m.get(r.member_id)??[];l.push(r.payload);m.set(r.member_id,l);}return m;};
     const V=by(visits),P=by(payments),I=by(invoices);

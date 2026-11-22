@@ -31,7 +31,7 @@ registerHooks({
     catch (error) { if (error.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier)) return next(specifier + '.ts', context); throw error; }
   },
   load(url, context, next) {
-    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>true;export const useFirestorePersistence=()=>true;export const getFirestoreDb=()=>globalThis.__firebaseMemberTestDb;' };
+    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>true;export const isFirestorePersistence=()=>true;export const getFirestoreDb=()=>globalThis.__firebaseMemberTestDb;' };
     if (url.endsWith('/app/lib/server-workspace.ts')) return { format: 'module', shortCircuit: true, source: 'export const readSpace=async()=>({state:{members:[{id:"member-1",branch:"main",phone:"+201000000000",demo:false,archived:false}],settings:{name:"Test Gym"},branches:[{id:"main",name:"Main"}]}});export const readSpaceSlice=readSpace;' };
     return next(url, context);
   },

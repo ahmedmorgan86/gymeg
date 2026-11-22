@@ -17,7 +17,7 @@ registerHooks({
     }
   },
   load(url, context, next) {
-    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>true;export const useFirestorePersistence=()=>true;export const getFirestoreDb=()=>({});' };
+    if (url.endsWith('/app/lib/firestore-db.ts')) return { format: 'module', shortCircuit: true, source: 'export const isFirebaseConfigured=()=>true;export const isFirestorePersistence=()=>true;export const getFirestoreDb=()=>({});' };
     return next(url, context);
   }
 });
