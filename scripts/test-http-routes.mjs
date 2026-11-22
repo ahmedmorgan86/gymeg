@@ -81,6 +81,7 @@ try{
  // --- auth gates
  ok('no cookie -> 401',(await call('/api/backup',{tok:null})).status===401);
  ok('bad token -> 401',(await call('/api/backup',{tok:'bogus'})).status===401);
+ ok('dev-panel-preview test artifact not routed (removed from release source)',(await call('/dev-panel-preview')).status===404);
 
  // --- cross-access + role gates
  const cross=await call('/api/backup',{space:USERS['test-access-over']});
