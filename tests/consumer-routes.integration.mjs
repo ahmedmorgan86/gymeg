@@ -65,3 +65,27 @@ test('visit-trend route: only the UI periods and a day within +-2 of the club cl
   for(const d of [shift(-1),shift(1)])assert.equal((await call({branch:'a',today:d,period:'7'})).status,200,'day '+d);
   delete process.env.GYMOS_VISIT_TREND;
 });
+test('member-detail route: foreign-branch member, role gate, finance gating, flag, auth, 400',async()=>{
+  const s=await seed('D');process.env.GYMOS_MEMBER_SUMMARIES='1';
+  const call=async q=>(await import('../app/api/workspace/member-detail/route.ts')).GET(new Request('https://example.test/api/workspace/member-detail?'+new URLSearchParams(q),{headers:{'X-GymOS-Tenant':'t-D'}}));
+  const branches=[...new Set(s.members.map(m=>m.branch))];assert.ok(branches.length>=2,'fixture has 2+ branches: '+branches);
+  const mine=s.members.find(m=>m.branch===branches[0]),theirs=s.members.find(m=>m.branch===branches[1]);
+  const out={};
+  try{
+    delete process.env.GYMOS_MEMBER_SUMMARIES;ctx('D');assert.equal((await call({member:mine.id})).status,404,'flag off');process.env.GYMOS_MEMBER_SUMMARIES='1';
+    globalThis.__qaContext=null;assert.equal((await call({member:mine.id})).status,401,'anon');
+    ctx('D');assert.equal((await call({})).status,400,'no member');
+    ctx('D',{role:'owner',branches:null});const ow=await (await call({member:theirs.id})).json();out.owner=ow.status;assert.equal(ow.status,'ok');
+    ctx('D',{role:'manager',branches:[branches[0]]});
+    const ok=await call({member:mine.id});assert.equal(ok.status,200);const okj=await ok.json();out.ownBranch=okj.status;
+    const fr=await call({member:theirs.id});const frt=await fr.text();out.foreign=fr.status+':'+(JSON.parse(frt).status??JSON.parse(frt).error);
+    assert.ok(fr.status===404||(fr.status===200&&JSON.parse(frt).status!=='ok'),'foreign branch member never served: '+out.foreign);
+    assert.ok(!frt.includes(theirs.name)&&!frt.includes(theirs.phone??'\u0000'),'foreign member name/phone not in body');
+    for(const role of ['owner','manager','reception']){ctx('D',{role,branches:role==='owner'?null:[branches[0]]});
+      const have=new Set(packetQueries(globalThis.__qaContext,s.settings).flatMap(x=>x.collections));const r=await call({member:mine.id});
+      const exp=have.has('members')&&have.has('visits')?200:403;assert.equal(r.status,exp,'role '+role);
+      if(exp===200){const j=await r.json();const txt=JSON.stringify(j);out[role]={fin:have.has('payments')&&have.has('invoices'),keys:Object.keys(j).join(',')};
+        if(!(have.has('payments')&&have.has('invoices'))){assert.deepEqual([j.payments,j.invoices],[[],[]],'no finance rows for a role without payments/invoices');out[role].financeRows=0;}else out[role].financeRows=(j.payments?.length??0)+(j.invoices?.length??0);}}
+  }finally{delete process.env.GYMOS_MEMBER_SUMMARIES;}
+  console.log('member-detail route',JSON.stringify(out));
+});
