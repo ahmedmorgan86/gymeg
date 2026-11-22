@@ -3,11 +3,15 @@
 -- depend on the whole owner's rows. A branch column plus (owner_id,branch...) indexes lets a request touch only its branch's marks and summaries.
 -- Semantics preserved: a dirty mark is still written for EVERY affected member, including members that no longer exist (their invoices keep the dues-only v:0 row, see recompute).
 -- branch of a mark = the member row's CURRENT branch (a move rewrites it through the update trigger); for a member with no row it is the branch of the row that caused the mark.
--- Summary rows carry the branch of the member they were computed for; dues-only v:0 rows keep NULL (they are never candidates). NULL-branch rows are visible only to owner-wide refreshers.
+-- Summary rows carry the branch of the member they were computed for; dues-only v:0 rows keep NULL (they are never candidates).
+-- Transition is lazy and cheap: ADD COLUMN (nullable, no default) is catalog-only, there is NO table-wide UPDATE. A summary row with NULL branch is "not found" by the branch-scoped
+-- readers and is recomputed (which writes its branch); a live member's mark with NULL or a different branch is still found by the member-key probe and drained by its branch's wave.
+-- NULL-branch marks of members that no longer exist stay visible only to the owner-wide refresher. Lock/statement timeouts make the DDL fail fast instead of queueing behind writers.
+SET LOCAL lock_timeout='5s';SET LOCAL statement_timeout='60s';
 ALTER TABLE gymos.gym_member_summaries ADD COLUMN IF NOT EXISTS branch text;
 ALTER TABLE gymos.gym_member_summary_dirty ADD COLUMN IF NOT EXISTS branch text;
-UPDATE gymos.gym_member_summaries s SET branch=e.branch FROM gymos.gym_entities e WHERE s.branch IS NULL AND e.owner_id=s.owner_id AND e.collection='members' AND e.entity_id=s.member_id AND (s.stored->>'v')::int<>0;
-UPDATE gymos.gym_member_summary_dirty d SET branch=e.branch FROM gymos.gym_entities e WHERE d.branch IS NULL AND e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id;
+-- Plain CREATE INDEX takes a SHARE lock on these two derived tables (writers wait, bounded by lock_timeout above). For a large deployment run the same two statements with
+-- CREATE INDEX CONCURRENTLY outside a transaction first; IF NOT EXISTS makes this migration a no-op for them.
 CREATE INDEX IF NOT EXISTS gym_member_summaries_branch ON gymos.gym_member_summaries(owner_id,branch,member_id);
 CREATE INDEX IF NOT EXISTS gym_member_summary_dirty_branch ON gymos.gym_member_summary_dirty(owner_id,branch,gen);
 

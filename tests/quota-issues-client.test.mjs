@@ -30,11 +30,13 @@ test('flag/set/strict combinations: never a wrong Active; strict-without-set is 
   const strict=m=>composeIssue(omitted,m,day,true,null,true);                             // loading/error in strict
   assert.equal(strict(q),'unknown');assert.equal(strict(u),null,'unlimited member has no visit-dependent issue');assert.equal(strict(f),'frozen','other issues stay exact');
 });
-const {drainDecision,DRAIN_MAX_ATTEMPTS}=await import('../app/use-quota-issues.ts');
+const {drainDecision,drainDelay,DRAIN_MAX_ATTEMPTS,DRAIN_ZERO_MAX}=await import('../app/use-quota-issues.ts');
 test('bounded drain follow-up: retry only with progress or busy, never past the cap, never on other failures',()=>{
   assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:100},1),'retry');
   assert.equal(drainDecision({status:'fallback',reason:'busy'},3),'retry');
-  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:0},1),'stop','no progress: stop');
+  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:0},1,0),'retry','one zero-progress race is tolerated');
+  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:0},4,DRAIN_ZERO_MAX),'stop','repeated zero progress stops');
+  assert.ok(drainDelay(1,true,()=>0)>=1500&&drainDelay(5,true,()=>0)>drainDelay(1,true,()=>0),'busy backs off');assert.notEqual(drainDelay(2,true,()=>0.1),drainDelay(2,true,()=>0.9),'jitter');
   assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:100},DRAIN_MAX_ATTEMPTS),'stop','cap');
   for(const r of ['null-derivation','unready','too-many-members','unavailable'])assert.equal(drainDecision({status:'fallback',reason:r},1),'stop',r);
   assert.equal(drainDecision(null,1),'stop');assert.equal(drainDecision({status:'ok'},1),'stop');

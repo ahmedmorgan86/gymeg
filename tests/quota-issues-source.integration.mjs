@@ -190,3 +190,33 @@ test('branch-scoped marks: every writer path carries the member branch; moves re
   const rows=(await db.query("SELECT member_id,stored->>'v' v,branch FROM gymos.gym_member_summaries WHERE owner_id='QB' AND member_id=ANY($1)",[victim.map(v=>v.entity_id)])).rows;assert.deepEqual(rows.map(r=>r.v),['2','2']);assert.ok(rows.every(r=>r.branch));
   console.log('quota-issues branch marks',JSON.stringify(seen));
 });
+test('P1: a LIVE member with a v2 summary and a NULL-branch or wrong-branch mark is never trusted as ok; the wave drains it; lazy migration of NULL-branch summaries/marks converges; legacy NULL orphans drain owner-wide',async()=>{
+  const s=club();s.visits=[];s.members=s.members.slice(0,12);await seed('QP',s);const st=await current('QP');
+  for(let i=0;i<20;i++){const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QP',true)");return refreshDirtySummaries(c,'QP',500,AS);});if(!r.remaining)break;}
+  const rq=b=>readQuotaIssues(scopeFor('QP'),{owner:'QP',branch:b,branches:null,settings:st.settings,now:NOWS2[0]});
+  for(const b of ['a','b','c'])assert.equal((await rq(b)).status,'ok');
+  const live=(await db.query("SELECT entity_id,branch FROM gymos.gym_entities WHERE owner_id='QP' AND collection='members' ORDER BY position LIMIT 3")).rows;
+  // a visit written while the member is capped changes the truth; the mark is then corrupted to NULL / foreign branch (as a pre-migration or direct-SQL row would be)
+  const stored=async id=>(await db.query("SELECT stored FROM gymos.gym_member_summaries WHERE owner_id='QP' AND member_id=$1",[id])).rows[0].stored;
+  const before=await Promise.all(live.map(m=>stored(m.entity_id)));
+  for(const [i,m] of live.entries()){await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('QP','visits',$1,$2,$3,$4)",['pv'+i,60000+i,m.branch,JSON.stringify({id:'pv'+i,member:m.entity_id,branch:m.branch,day:'2026-03-02',at:'2026-03-02T09:00:00.000Z',leftAt:'2026-03-02T09:30:00.000Z'})]);}
+  await db.query("UPDATE gymos.gym_member_summary_dirty SET branch=NULL WHERE owner_id='QP' AND member_id=$1",[live[0].entity_id]);
+  await db.query("UPDATE gymos.gym_member_summary_dirty SET branch='zzz' WHERE owner_id='QP' AND member_id=$1",[live[1].entity_id]);
+  // candidate read alone (no refresh) must see them as stale, not ok
+  for(const m of live.slice(0,2)){const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QP',true)");return readMemberCandidates(c,'QP',[m.branch],{refresh:false,now:NOWS2[0],photo:false});});assert.equal(r.status,'stale','dirty live member with a bad-branch mark is stale: '+m.entity_id);}
+  // the quota request drains it (branch-bounded selection includes live members whose mark branch differs) and the answer equals the legacy oracle
+  const sNow=await current('QP');const day=dayAt(NOWS2[0],sNow.settings.timezone);
+  for(const b of ['a','b','c']){let r;for(let i=0;i<5;i++){r=await rq(b);if(r.status==='ok')break;}assert.equal(r.status,'ok',b+JSON.stringify(r));assert.deepEqual([...r.quota].sort(),sNow.members.filter(m=>m.branch===b&&!m.archived&&membershipIssue(sNow,m,day)==='quota').map(m=>m.id).sort());}
+  const after=await Promise.all(live.map(m=>stored(m.entity_id)));assert.ok(after.some((x,i)=>JSON.stringify(x)!==JSON.stringify(before[i])),'summaries were recomputed');
+  assert.equal(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QP' AND member_id=ANY($1)",[live.map(m=>m.entity_id)])).rows[0].n),0,'marks cleared');
+  // lazy migration: every summary and mark has NULL branch (pre-migration rows): the request converges to ok and writes the branches
+  await db.query("UPDATE gymos.gym_member_summaries SET branch=NULL WHERE owner_id='QP'");
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen'),NULL FROM gymos.gym_entities WHERE owner_id='QP' AND collection='members' ON CONFLICT(owner_id,member_id) DO UPDATE SET branch=NULL");
+  for(const b of ['a','b','c']){let r;for(let i=0;i<6;i++){r=await rq(b);if(r.status==='ok')break;}assert.equal(r.status,'ok','lazy '+b+JSON.stringify(r));}
+  assert.equal(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summaries WHERE owner_id='QP' AND branch IS NULL AND (stored->>'v')::int<>0")).rows[0].n),0,'branches written lazily');
+  // legacy NULL-branch orphan marks: never block a branch request, drained by the owner-wide refresher
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) VALUES('QP','legacy-ghost',123456,NULL)");
+  assert.equal((await rq('a')).status,'ok','NULL-branch orphan does not block');
+  const w=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QP',true)");return refreshDirtySummaries(c,'QP',500,AS);});assert.equal(w.remaining,0);
+  assert.equal(Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QP' AND member_id='legacy-ghost'")).rows[0].n),0,'owner-wide refresher drained it');
+});
