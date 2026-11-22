@@ -84,7 +84,7 @@ async function recompute(c:Sql,owner:string,need:string[],out:Map<string,Candida
       const m=members.get(id)!;
       const local={members:[m],visits:V.get(id)??[],payments:P.get(id)??[],invoices:I.get(id)??[]} as unknown as GymState;
       const s=computeStoredSummary(local,m,effective);
-      await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored) VALUES($1,$2,$3) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored',[owner,id,JSON.stringify(s)]);
+      await c.query('INSERT INTO gymos.gym_member_summaries(owner_id,member_id,stored,branch) VALUES($1,$2,$3,$4) ON CONFLICT(owner_id,member_id) DO UPDATE SET stored=EXCLUDED.stored,branch=EXCLUDED.branch',[owner,id,JSON.stringify(s),m.branch]);
       // Rows read above are at least as new as the marks read under the lock; a later writer leaves a newer gen and the member stays dirty.
       if(gens.has(id))await c.query('DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=$1 AND member_id=$2 AND gen=$3',[owner,id,gens.get(id)]);
       out.set(id,{member:m,stored:s});
@@ -108,8 +108,10 @@ export async function readMemberCandidates(c:Sql,owner:string,branches:string[]|
   if(!await ready(c,owner))return refuse('unready');
   const filter=branches?' AND e.branch=ANY($2::text[])':'';const args=branches?[owner,branches]:[owner];
   // ONE statement: each member payload, its stored inputs and its dirty mark come from the same snapshot, so a candidate is never an old member paired with newer inputs.
+  // Branch-scoped callers read only their branch's summary and mark rows (indexed by owner,branch). A row whose branch differs from its member's (stale summary) is simply not found = recomputed.
+  const bs=branches?' AND s.branch=ANY($2::text[])':'',bd=branches?' AND d.branch=ANY($2::text[])':'';
   const photoSql=opts.photo===false?'NULL::text':"CASE WHEN NULLIF(e.payload->>'photo','') IS NOT NULL THEN left(encode(sha256(convert_to(e.payload->>'photo','UTF8')),'hex'),16) ELSE (SELECT left(encode(sha256(convert_to(ph.content,'UTF8')),'hex'),16) FROM gymos.gym_photos ph WHERE ph.owner_id=e.owner_id AND ph.member_id=e.entity_id) END";
-  const rows=(await c.query(`SELECT e.entity_id,e.payload-'photo'-'health'-'vitals'-'measurements' AS payload,${photoSql} AS photo_v,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;photo_v:string|null;stored:StoredSummary|null;gen:string|number|null}[];
+  const rows=(await c.query(`SELECT e.entity_id,e.payload-'photo'-'health'-'vitals'-'measurements' AS payload,${photoSql} AS photo_v,s.stored,d.gen FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id${bs} LEFT JOIN gymos.gym_member_summary_dirty d ON d.owner_id=e.owner_id AND d.member_id=e.entity_id${bd} WHERE e.owner_id=$1 AND e.collection='members'${filter} ORDER BY e.position,e.entity_id LIMIT ${MEMBER_CANDIDATE_MAX+1}`,args)).rows as {entity_id:string;payload:Member;photo_v:string|null;stored:StoredSummary|null;gen:string|number|null}[];
   if(rows.length>MEMBER_CANDIDATE_MAX)return refuse('too-many-members');
   const members=rows.filter(r=>!r.payload.archived);
   const need=members.filter(r=>r.gen!==null||!r.stored||r.stored.v!==2).map(r=>r.entity_id); // a missing row is never trusted
@@ -145,7 +147,9 @@ export type DrainResult={status:'ok';refreshed:number;more:boolean;batches:numbe
 export async function drainBranchDirty(c:Sql,owner:string,branch:string,o:{budget:number;batch:number;deadlineAt:number;asOf?:string}):Promise<DrainResult>{
   if(!await ready(c,owner))return refuse('unready');
   const budget=Math.max(0,Math.min(o.budget,REFRESH_MAX)),batch=Math.max(1,o.batch);
-  const ids=(await c.query("SELECT d.member_id FROM gymos.gym_member_summary_dirty d JOIN gymos.gym_entities e ON e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id AND e.branch=$3 WHERE d.owner_id=$1 ORDER BY d.gen LIMIT $2",[owner,budget+1,branch])).rows.map(r=>(r as {member_id:string}).member_id);
+  // Work of this branch = its dirty marks (including marks of members that no longer exist: their dues-only rows) UNION its non-archived members without a current (v=2) summary row.
+  // Both sides are branch-indexed; the second is what keeps a never-marked or old-version row from leaving the read stuck on 'stale'.
+  const ids=(await c.query("SELECT member_id FROM (SELECT d.member_id,d.gen FROM gymos.gym_member_summary_dirty d WHERE d.owner_id=$1 AND d.branch=$3 UNION ALL SELECT e.entity_id,0 FROM gymos.gym_entities e LEFT JOIN gymos.gym_member_summaries s ON s.owner_id=e.owner_id AND s.member_id=e.entity_id AND s.branch=$3 WHERE e.owner_id=$1 AND e.collection='members' AND e.branch=$3 AND COALESCE(e.payload->>'archived','false')<>'true' AND (s.member_id IS NULL OR s.stored->>'v'<>'2') AND NOT gymos.msum_oversize(e.entity_id)) w GROUP BY member_id ORDER BY min(gen),member_id LIMIT $2",[owner,budget+1,branch])).rows.map(r=>(r as {member_id:string}).member_id);
   const work=ids.slice(0,budget);let done=0,batches=0;
   while(done<work.length&&Date.now()<o.deadlineAt){
     const unit=work.slice(done,done+batch);const why=await recompute(c,owner,unit,new Map<string,Candidate>(),o.asOf);if(why)return refuse(why);

@@ -27,7 +27,9 @@ export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaI
     if(w.status!=='ok')return{status:'fallback',reason:w.status} as const;
     const done=w.refreshed;
     if(w.more)return{status:'fallback',reason:'draining',more:true,recomputed:done} as const;
-    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:Date.now()-t0<(q.waveMs??QUOTA_WAVE_MS),now:q.now,photo:false,maxDirty:QUOTA_MAX_DIRTY-done});
+    const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:false,now:q.now,photo:false});
+    // refresh:false on purpose: ALL recompute work runs in the unit-and-deadline drain above. Rows dirtied after it (a concurrent writer) are an explicit draining, never unbounded work here.
+    if(r.status==='stale')return{status:'fallback',reason:'draining',more:true,recomputed:done} as const;
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const quota:string[]=[];
     for(const {member,stored} of r.candidates){

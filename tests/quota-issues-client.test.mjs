@@ -30,3 +30,12 @@ test('flag/set/strict combinations: never a wrong Active; strict-without-set is 
   const strict=m=>composeIssue(omitted,m,day,true,null,true);                             // loading/error in strict
   assert.equal(strict(q),'unknown');assert.equal(strict(u),null,'unlimited member has no visit-dependent issue');assert.equal(strict(f),'frozen','other issues stay exact');
 });
+const {drainDecision,DRAIN_MAX_ATTEMPTS}=await import('../app/use-quota-issues.ts');
+test('bounded drain follow-up: retry only with progress or busy, never past the cap, never on other failures',()=>{
+  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:100},1),'retry');
+  assert.equal(drainDecision({status:'fallback',reason:'busy'},3),'retry');
+  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:0},1),'stop','no progress: stop');
+  assert.equal(drainDecision({status:'fallback',reason:'draining',recomputed:100},DRAIN_MAX_ATTEMPTS),'stop','cap');
+  for(const r of ['null-derivation','unready','too-many-members','unavailable'])assert.equal(drainDecision({status:'fallback',reason:r},1),'stop',r);
+  assert.equal(drainDecision(null,1),'stop');assert.equal(drainDecision({status:'ok'},1),'stop');
+});

@@ -37,6 +37,8 @@ function club(){
       membershipPeriods:[{id:i%4===0?'shared':'p'+i,plan:'pl',start:'2026-02-01',end:'2026-12-31',visits:cap,quotaMode:i%5===0?'sessions':undefined}]});}
   return s;
 }
+
+const fixBranch=o=>db.query("UPDATE gymos.gym_member_summary_dirty d SET branch=e.branch FROM gymos.gym_entities e WHERE d.owner_id=$1 AND d.branch IS NULL AND e.owner_id=d.owner_id AND e.collection='members' AND e.entity_id=d.member_id",[o]);
 const NOWS2=['2026-03-15T12:00:00.000Z','2026-03-20T22:30:00.000Z','2026-04-01T00:30:00.000Z','2027-01-02T10:00:00.000Z'];
 async function oracleCheck(owner,label,branches=null){
   const s=await current(owner);const stats={compared:0,quota:0,crossBranchOnlyVisitors:0};
@@ -99,7 +101,7 @@ test('cost: no photo hashing, bounded dirty work (explicit fallback over the bud
   console.log('quota-issues cost: members',r.members,'statements',seen.length,'ms',ms);
   assert.ok(seen.length<=14,'constant statement count, not per member: '+seen.length);
   // dirty budget: mark more than the budget dirty -> explicit fallback, nothing partial, no unbounded write-on-read
-  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,1000+g FROM generate_series(0,$1) g ON CONFLICT DO NOTHING",[QUOTA_MAX_DIRTY*3]);
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,1000+g FROM generate_series(0,$1) g ON CONFLICT DO NOTHING",[QUOTA_MAX_DIRTY*3]);await fixBranch('QC');
   // convergence: each request drains at most the budget and says so; repeated reads reach ok with no request exceeding the budget
   let calls=0,last,peak=0;const dirtyN=async()=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QC'")).rows[0].n);
   const d0=await dirtyN();
@@ -107,7 +109,7 @@ test('cost: no photo hashing, bounded dirty work (explicit fallback over the bud
   console.log('quota-issues drain: dirty',d0,'requests until ok',calls+1,'max recomputed per request',peak);
   assert.equal(last.status,'ok');assert.ok(peak<=QUOTA_MAX_DIRTY&&calls>=1);
   // forced failure mid-wave: the transaction rolls back (marks and summaries unchanged) and the connection is usable afterwards
-  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,5000+g FROM generate_series(0,60) g ON CONFLICT DO NOTHING");
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,5000+g FROM generate_series(0,60) g ON CONFLICT DO NOTHING");await fixBranch('QC');
   const before=await dirtyN(),sumBefore=(await db.query("SELECT md5(string_agg(stored::text,'' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id='QC'")).rows[0].h;
   let n=0;const failing=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QC',true)");return work({query:async(q,v)=>{if(/gym_member_summaries/.test(String(q))&&/INSERT|UPDATE/i.test(String(q))&&++n===10)throw new Error('forced');return c.query(q,v);}});});
   await assert.rejects(readQuotaIssues(failing,{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]}),/forced/);
@@ -131,7 +133,7 @@ test('worst-case history: one member with 6000 visits among 150 dirty members; w
   const day=dayAt(NOWS2[0],st.settings.timezone);const want=st.members.filter(m=>!m.archived&&membershipIssue(st,m,day)==='quota').map(m=>m.id).sort();assert.deepEqual([...last.quota].sort(),want);
   // deadline with near-bound assertions: every statement costs 20 ms, units of 1 member, wave deadline 1200 ms. The deadline is checked before each unit, so the last unit must START before
   // t0+waveMs and the whole wave ends at most one unit (the largest observed gap between consecutive summary writes) plus the candidate-read tail after it.
-  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QH','h'||g,9000+g FROM generate_series(0,99) g ON CONFLICT DO NOTHING");
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QH','h'||g,9000+g FROM generate_series(0,99) g ON CONFLICT DO NOTHING");await fixBranch('QH');
   const writes=[];const slow=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QH',true)");return work({query:async(q,v)=>{await new Promise(r=>setTimeout(r,20));const r=await c.query(q,v);if(/INSERT INTO gymos.gym_member_summaries/.test(String(q)))writes.push(Date.now());return r;}});});
   const b=await dirty(),t1=Date.now(),WAVE=1200;const r=await readQuotaIssues(slow,{owner:'QH',branch:'a',branches:null,settings:st.settings,now:NOWS2[0],batch:1,waveMs:WAVE});const el=Date.now()-t1;
   const gaps=writes.slice(1).map((x,i)=>x-writes[i]),unit=Math.max(...gaps);
@@ -157,4 +159,34 @@ test('scoped + shared budget + concurrency: a branch-a request never writes or w
   console.log('quota-issues concurrent',JSON.stringify(outs));assert.equal(await dirty('b'),0);
   const a=await rq('b'),b=await rq('b');assert.equal(a.status,'ok');assert.deepEqual(a.quota,b.quota);
   const day=dayAt(NOWS2[0],st.settings.timezone);assert.deepEqual([...a.quota].sort(),st.members.filter(m=>m.branch==='b'&&membershipIssue(st,m,day)==='quota').map(m=>m.id).sort());
+});
+test('branch-scoped marks: every writer path carries the member branch; moves rewrite it; orphans carry the causing row branch and drain; NULL-branch and foreign-branch marks never block a request; unmarked missing/old summaries drain too',async()=>{
+  const s=club();s.visits=[];s.members=s.members.slice(0,9);await seed('QB',s);const st=await current('QB');
+  for(let i=0;i<20;i++){const r=await db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QB',true)");return refreshDirtySummaries(c,'QB',500,AS);});if(!r.remaining)break;}
+  const marks=async()=>Object.fromEntries((await db.query("SELECT member_id,branch,gen FROM gymos.gym_member_summary_dirty WHERE owner_id='QB'")).rows.map(r=>[r.member_id,r.branch]));
+  const mem=(await db.query("SELECT entity_id,branch FROM gymos.gym_entities WHERE owner_id='QB' AND collection='members' ORDER BY position LIMIT 3")).rows;
+  const ins=(id,m,b)=>db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('QB','visits',$1,$2,$3,$4)",[id,50000+Math.floor(rnd()*1e6),b,JSON.stringify({id,member:m,branch:b,day:'2026-03-02',at:'2026-03-02T09:00:00.000Z',leftAt:'2026-03-02T09:30:00.000Z'})]);
+  // a cross-branch visit marks the MEMBER's branch, not the visit's
+  const other=['a','b','c'].find(b=>b!==mem[0].branch);await ins('xv',mem[0].entity_id,other);let m=await marks();assert.equal(m[mem[0].entity_id],mem[0].branch,'member branch, not the visit branch');
+  // a move rewrites the mark branch through the update trigger
+  await db.query("UPDATE gymos.gym_entities SET branch=$1,payload=jsonb_set(payload,'{branch}',to_jsonb($1::text)) WHERE owner_id='QB' AND collection='members' AND entity_id=$2",[other,mem[1].entity_id]);m=await marks();assert.equal(m[mem[1].entity_id],other,'moved member: mark follows');
+  // orphans: a visit and an invoice of a member without a row take the causing row's branch; a member row deletion keeps its mark with the old branch
+  await ins('ov','ghost1','a');await db.query("INSERT INTO gymos.gym_entities(owner_id,collection,entity_id,position,branch,payload) VALUES('QB','invoices','gi1',77777,'a','{\"id\":\"gi1\",\"member\":\"ghost2\",\"branch\":\"a\",\"total\":500,\"allocations\":[]}')");
+  await db.query("DELETE FROM gymos.gym_entities WHERE owner_id='QB' AND collection='members' AND entity_id=$1",[mem[2].entity_id]);
+  m=await marks();assert.equal(m.ghost1,'a');assert.equal(m.ghost2,'a');assert.equal(m[mem[2].entity_id],mem[2].branch,'deleted member: mark kept with its last branch');
+  // foreign-branch and NULL-branch marks never block a branch request
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) VALUES('QB','nullbranch',99999,NULL),('QB','foreign',99998,'zzz')");
+  const rq=b=>readQuotaIssues(scopeFor('QB'),{owner:'QB',branch:b,branches:null,settings:st.settings,now:NOWS2[0]});
+  const deleted=mem[2].branch;let seen=[];
+  for(const b of ['a','b','c']){let r;for(let i=0;i<5;i++){r=await rq(b);seen.push(b+':'+r.status);if(r.status==='ok')break;}assert.equal(r.status,'ok',b+' '+JSON.stringify(r));}
+  assert.equal((await marks()).ghost1,undefined,'orphan visit mark drained by its branch request');assert.equal((await marks()).ghost2,undefined);
+  assert.ok('nullbranch' in await marks()&&'foreign' in await marks(),'NULL-branch and foreign-branch marks untouched');
+  // unmarked missing summary and an old-version row: the same wave computes them (never stuck on stale)
+  const victim=(await db.query("SELECT entity_id,branch FROM gymos.gym_entities WHERE owner_id='QB' AND collection='members' LIMIT 2")).rows;
+  await db.query("DELETE FROM gymos.gym_member_summaries WHERE owner_id='QB' AND member_id=$1",[victim[0].entity_id]);
+  await db.query("UPDATE gymos.gym_member_summaries SET stored=jsonb_set(stored,'{v}','1') WHERE owner_id='QB' AND member_id=$1",[victim[1].entity_id]);
+  assert.equal((await marks())[victim[0].entity_id],undefined,'not marked');
+  for(const v of victim){let r;for(let i=0;i<4;i++){r=await rq(v.branch);if(r.status==='ok')break;}assert.equal(r.status,'ok',JSON.stringify(r));}
+  const rows=(await db.query("SELECT member_id,stored->>'v' v,branch FROM gymos.gym_member_summaries WHERE owner_id='QB' AND member_id=ANY($1)",[victim.map(v=>v.entity_id)])).rows;assert.deepEqual(rows.map(r=>r.v),['2','2']);assert.ok(rows.every(r=>r.branch));
+  console.log('quota-issues branch marks',JSON.stringify(seen));
 });

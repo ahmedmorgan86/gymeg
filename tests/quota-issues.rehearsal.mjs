@@ -50,7 +50,7 @@ try{
   check('no double work: total recomputed equals the initial backlog of b and c',totalRecomputed===startB+startC,`${totalRecomputed} vs ${startB+startC}`);
   check('neither branch starved (each made progress)',wins.b>0&&wins.c>0,JSON.stringify(wins));
   // same-branch concurrent drainers on a fresh backlog of branch a
-  await pool.query(`INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen') FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND branch='a' ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen`,[O]);
+  await pool.query(`INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen'),branch FROM gymos.gym_entities WHERE owner_id=$1 AND collection='members' AND branch='a' ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen,branch=EXCLUDED.branch`,[O]);
   const sameA=[];let tot=0;const startA=await dirty(O,'a');
   for(let k=0;k<30;k++){const rs=await Promise.all([req(O,'a'),req(O,'a'),req(O,'a')]);for(const r of rs)if(r.reason!=='busy')tot+=r.recomputed??0;sameA.push(rs.map(r=>r.status+(r.reason?':'+r.reason:'')).join(' '));if(await dirty(O,'a')===0&&rs.some(r=>r.status==='ok'))break;}
   console.log('\nsame-branch (3 connections) rounds:\n'+sameA.join('\n'));check('same-branch drainers converge with total recomputed == backlog',await dirty(O,'a')===0&&tot===startA,`${tot} vs ${startA}`);
