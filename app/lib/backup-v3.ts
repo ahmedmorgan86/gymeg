@@ -59,6 +59,7 @@ const utf8=(v:unknown)=>new TextEncoder().encode(typeof v==='string'?v:JSON.stri
 const hex64=/^[a-f0-9]{64}$/;
 const validUuid=(v:unknown)=>typeof v==='string'&&/^[a-f0-9-]{36}$/i.test(v);
 
+// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
 export function postgresOnlyV3(){if(useFirestorePersistence())throw new TransferError('unsupportedBackend',400);}
 
 async function scoped<T>(owner:string,actor:string,run:(c:PoolClient)=>Promise<T>):Promise<T>{
@@ -246,6 +247,7 @@ export function reattachRecoveryPhotos(state:GymState,preserved:{member_id:strin
 export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
  let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false,preservedPhotos:{member_id:string;content:string}[]=[];
  if(recovery){
+// eslint-disable-next-line react-hooks/rules-of-hooks -- server module; useFirestorePersistence is a backend toggle, not a React hook
   const firestore=useFirestorePersistence();
   const row=firestore?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
   if(!row||firestore&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
