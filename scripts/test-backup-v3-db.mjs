@@ -1,0 +1,126 @@
+// Real-PostgreSQL backup format v3 contract proof. Needs DATABASE_URL (app role) and
+// DATABASE_URL_ADMIN (privileged, ONLY for archive-row tampering the app role cannot do).
+// Mirrors scripts/test-photo-quota-db.mjs; not part of npm test.
+import assert from 'node:assert/strict';
+import {randomUUID,createHash} from 'node:crypto';
+import pg from 'pg';
+import {getPool,withScope} from '../app/lib/database.ts';
+import {emptyState,applyOperation} from '../app/lib/domain.ts';
+import {persistSpace,readEntitySpace} from '../app/lib/entity-store.ts';
+import {validateBackup} from '../app/lib/backup.ts';
+import {backupDigest,BACKUP_CHUNK_BYTES} from '../app/lib/backup-transfer.ts';
+import {createSession,stageSection,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,photoCount,archiveCount,validateManifest,readValidatedCore,commitRestoreV3,discardSession} from '../app/lib/backup-v3.ts';
+import {TransferError} from '../app/lib/backup-transfer.ts';
+
+const pool=getPool(),owner='gymos-backup-v3-'+randomUUID(),actor='tester';
+const admin=new pg.Client(process.env.DATABASE_URL_ADMIN||process.env.DATABASE_URL);await admin.connect();
+const jpeg=(n,salt='')=>'data:image/jpeg;base64,/9j/'+salt+'A'.repeat(n-27-salt.length);
+const save=(state,name,photo)=>applyOperation(state,{type:'member.save',branch:'main',name,phone:'',joined:'2026-10-01',expires:'2026-11-01',photo},'2026-10-18T12:00:00Z','Test',randomUUID);
+const sha=(b)=>createHash('sha256').update(b).digest('hex');
+async function uploadSection(session,kind,ordinal,buffer){
+ const s=await openUploadSection(owner,actor,session,kind,ordinal,buffer.length,backupDigest(buffer));
+ const parts=Math.ceil(buffer.length/BACKUP_CHUNK_BYTES);
+ for(let i=0;i<parts;i++)await putSectionChunk(owner,actor,s.id,i,buffer.subarray(i*BACKUP_CHUNK_BYTES,(i+1)*BACKUP_CHUNK_BYTES).toString('base64'));
+ return{ordinal,bytes:buffer.length,digest:backupDigest(buffer),transfer:s.id};
+}
+const manifestWith=(rev,coreRef,photoRefs,eventRefs,photoN,eventN)=>{const m={format:'gymos-backup',version:3,tenant:'t1',createdAt:'2026-11-22T01:00:00.000Z',revision:rev,core:coreRef,photos:{count:photoN,pages:photoRefs},events:{count:eventN,pages:eventRefs}};return{...m,digest:sha(Buffer.from(JSON.stringify(m),'utf8'))};};
+
+try{
+ // Seed: 25 members with 96k photos (forces 2 photo pages at the 2MB cap) + 90k archive events (forces 2 event pages at the 8MB cap).
+ let state=emptyState();
+ for(let i=0;i<25;i+=1)state=save(state,'Member '+i,jpeg(96000,i.toString(36).padStart(2,'0')));
+ await withScope(owner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,0,$3)',[owner,JSON.stringify(emptyState()),new Date().toISOString()]));
+ assert.equal(await persistSpace(owner,{state:emptyState(),revision:0},state),true,'seed persist');
+ await withScope(owner,c=>c.query("INSERT INTO gymos.gym_activity_archive(owner_id,event_id,branch,at,payload) SELECT $1,'ev-'||g,'main','2026-10-0'||((g%9)+1)||'T10:00:00.000Z',jsonb_build_object('id','ev-'||g,'at','2026-10-0'||((g%9)+1)||'T10:00:00.000Z','kind','seed','subject','s'||g,'actor','seed','branch','main') FROM generate_series(1,90000) g",[owner]));
+ const totalEvents=await archiveCount(owner);assert.equal(await photoCount(owner),25);assert.ok(totalEvents>=90000,'seed events + member.save events archived: '+totalEvents);
+
+ // DOWNLOAD: core staged once, pages staged incrementally.
+ const dl=await createSession(owner,actor,'download');
+ const {buffer:coreBuf,revision}=await buildCoreBuffer(owner);
+ const coreSection=await stageSection(owner,actor,dl,'core',0,coreBuf);
+ const core=JSON.parse(coreBuf.toString('utf8'));
+ assert.ok(core.members.every(m=>m.photo===undefined),'core excludes photo bodies');
+ assert.ok(core.members.length===25&&core.events.length<=2000,'core keeps members, recent events only');
+ const photoBufs=[];let pc=null,ord=0;
+ for(;;){const r=await nextPhotoPage(owner,pc);if(r.done&&!Object.keys(r.page).length)break;const b=Buffer.from(JSON.stringify(r.page),'utf8');photoBufs.push(b);await stageSection(owner,actor,dl,'photos',ord++,b);assert.ok(b.length<=2_000_000+120000,'photo page byte-capped');pc=r.nextCursor;if(r.done)break;}
+ assert.ok(photoBufs.length>=2,'25 max-size photos force multiple photo pages, got '+photoBufs.length);
+ const photoMap=Object.assign({},...photoBufs.map(b=>JSON.parse(b.toString('utf8'))));
+ assert.equal(Object.keys(photoMap).length,25,'photo pages cover all photos exactly');
+ const eventBufs=[];let ec=null;ord=0;let eventN=0;
+ for(;;){const r=await nextEventPage(owner,ec);if(r.done&&!r.page.length)break;const b=Buffer.from(JSON.stringify(r.page),'utf8');eventBufs.push(b);await stageSection(owner,actor,dl,'events',ord++,b);assert.ok(b.length<=8_000_000+2000,'event page byte-capped');eventN+=r.page.length;ec=r.nextCursor;if(r.done)break;}
+ assert.ok(eventBufs.length>=2,'90k archive events force multiple event pages, got '+eventBufs.length);
+ assert.equal(eventN,totalEvents,'event pages cover the whole archive');
+ const evts=eventBufs.flatMap(b=>JSON.parse(b.toString('utf8')));
+ assert.equal(new Set(evts.map(e=>e.id)).size,totalEvents,'no duplicate/omitted events across pages');
+ console.log('PASS: v3 download derives photo-free core at read and pages photos/events under byte caps');
+
+ // Mutate live data so restore has something to repair: change one photo, rename a member, delete one archive row, tamper one payload.
+ await withScope(owner,c=>c.query("UPDATE gymos.gym_photos SET content=$2 WHERE owner_id=$1 AND member_id=(SELECT member_id FROM gymos.gym_photos WHERE owner_id=$1 ORDER BY member_id LIMIT 1)",[owner,jpeg(50000,'mut')]));
+ const renamed=await readEntitySpace(owner);const renameTarget=renamed.state.members[3].id;
+ assert.equal(await persistSpace(owner,{state:renamed.state,revision:renamed.revision},{...renamed.state,members:renamed.state.members.map((m,i)=>i===3?{...m,name:'RENAMED-LIVE'}:m)}),true,'live rename persist');
+ await admin.query("DELETE FROM gymos.gym_activity_archive WHERE owner_id=$1 AND event_id='ev-777'",[owner]);
+ await admin.query("UPDATE gymos.gym_activity_archive SET payload=jsonb_build_object('id','ev-778','at','2026-10-01T10:00:00.000Z','kind','seed','subject','s778','actor','TAMPERED','branch','main') WHERE owner_id=$1 AND event_id='ev-778'",[owner]);
+
+ // UPLOAD session from the downloaded buffers + rebuild manifest against upload transfer ids (client-side flow).
+ const ul=await createSession(owner,actor,'upload');
+ const coreRef=await uploadSection(ul,'core',0,coreBuf);
+ const photoRefs=[];for(let i=0;i<photoBufs.length;i++)photoRefs.push(await uploadSection(ul,'photos',i,photoBufs[i]));
+ const eventRefs=[];for(let i=0;i<eventBufs.length;i++)eventRefs.push(await uploadSection(ul,'events',i,eventBufs[i]));
+ const manifest=manifestWith(revision,{bytes:coreRef.bytes,digest:coreRef.digest},photoRefs,eventRefs,25,totalEvents);
+ assert.doesNotThrow(()=>validateManifest(manifest),'manifest validates');
+
+ // Case: immutable archive conflict (ev-778 tampered after download) must roll the WHOLE restore back, including photo writes.
+ const before=(await readEntitySpace(owner)).revision;
+ const coreState=await readValidatedCore(owner,actor,ul,manifest);
+ const restoredState=validateBackup(coreState);
+ const current=await readEntitySpace(owner);
+ let conflicted=false;
+ try{await commitRestoreV3(owner,actor,ul,manifest,current,restoredState);}catch(e){conflicted=e instanceof Error&&/Immutable activity/.test(e.message);}
+ assert.ok(conflicted,'tampered archive row triggers immutable-activity conflict');
+ const afterFail=await readEntitySpace(owner);
+ assert.equal(afterFail.revision,before,'rollback: revision unchanged');
+ assert.equal(afterFail.state.members.find(m=>m.id===renameTarget)?.name,'RENAMED-LIVE','rollback: core-apply rolled back, live rename survives');
+ assert.equal((await withScope(owner,c=>c.query("SELECT length(content) n FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=(SELECT member_id FROM gymos.gym_photos WHERE owner_id=$1 ORDER BY member_id LIMIT 1)",[owner]))).rows[0].n,50000,'rollback: photo writes rolled back, mutation still present');
+ console.log('PASS: mid-apply immutable-activity conflict rolls back the entire restore atomically');
+
+ // Repair the tamper, commit again: full success.
+ await admin.query("UPDATE gymos.gym_activity_archive SET payload=jsonb_build_object('id','ev-778','at','2026-10-05T10:00:00.000Z','kind','seed','subject','s778','actor','seed','branch','main') WHERE owner_id=$1 AND event_id='ev-778'",[owner]);
+ const ok=await commitRestoreV3(owner,actor,ul,manifest,await readEntitySpace(owner),restoredState);
+ assert.equal(ok,true,'commit succeeds');
+ const final=await readEntitySpace(owner);
+ assert.equal(final.revision,before+1,'exactly one revision bump');
+ const finalPhotos=(await withScope(owner,c=>c.query('SELECT member_id,content FROM gymos.gym_photos WHERE owner_id=$1 ORDER BY member_id',[owner]))).rows;
+ assert.equal(finalPhotos.length,25,'all photos restored');
+ assert.ok(finalPhotos.every(r=>photoMap[r.member_id]===r.content),'restored photo contents match the backup exactly');
+ assert.equal((await withScope(owner,c=>c.query("SELECT count(*)::int n FROM gymos.gym_activity_archive WHERE owner_id=$1 AND event_id='ev-777'",[owner]))).rows[0].n,1,'deleted archive event restored');
+ assert.equal((await withScope(owner,c=>c.query('SELECT count(*)::int n FROM gymos.gym_activity_archive WHERE owner_id=$1',[owner]))).rows[0].n,totalEvents,'archive complete');
+ // Restored name: the backup predates the live rename, so the successful restore reverted it.
+ assert.equal(final.state.members.find(m=>m.id===renameTarget)?.name,'Member 3','restore reverted the live rename to the backup state');
+ await discardSession(owner,actor,ul);
+ console.log('PASS: v3 restore applies core+photos+archive in one transaction with exact contents');
+
+ // Manifest binding cases.
+ assert.throws(()=>validateManifest({...manifest,digest:'0'.repeat(64)}),(e)=>e instanceof TransferError&&e.code==='digestMismatch','forged manifest digest rejected');
+ const ul2=await createSession(owner,actor,'upload');
+ const c2=await uploadSection(ul2,'core',0,coreBuf);
+ for(let i=0;i<photoBufs.length;i++)await uploadSection(ul2,'photos',i,photoBufs[i]);
+ for(let i=0;i<eventBufs.length;i++)await uploadSection(ul2,'events',i,eventBufs[i]);
+ // Manifest claims 24 photos while 25 are staged: count mismatch must reject before any destructive write.
+ const m2b=manifestWith(final.revision,{bytes:c2.bytes,digest:c2.digest},photoRefs,eventRefs,24,totalEvents);
+ let wrongCount=false;
+ try{await commitRestoreV3(owner,actor,ul2,m2b,await readEntitySpace(owner),restoredState);}catch(e){wrongCount=e instanceof TransferError;}
+ assert.ok(wrongCount,'count/section mismatch rejected before destructive writes');
+ assert.equal((await withScope(owner,c=>c.query('SELECT count(*)::int n FROM gymos.gym_photos WHERE owner_id=$1',[owner]))).rows[0].n,25,'rejected commit left photos untouched');
+ await discardSession(owner,actor,ul2);
+ console.log('PASS: manifest digest/count/section binding rejects tampered or incomplete restores');
+ console.log('PASS: backup v3 round trip complete');
+}finally{
+ const client=await pool.connect();
+ try{await client.query('BEGIN');await client.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
+  for(const t of ['gym_entities','gym_photos','gym_recovery','member_code_access'])await client.query('DELETE FROM gymos.'+t+' WHERE owner_id=$1',[owner]);
+  await client.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[owner]);
+  await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+ await admin.query('DELETE FROM gymos.gym_activity_archive WHERE owner_id=$1',[owner]);
+ await admin.query('DELETE FROM gymos.gym_backup_sections WHERE owner_id=$1',[owner]);
+ await admin.end();await pool.end();
+}
