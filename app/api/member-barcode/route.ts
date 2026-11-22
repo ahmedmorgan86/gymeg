@@ -1,5 +1,5 @@
 import {reserveDailyCard} from '../../lib/card-number';
-import {context,readSpaceCore,reply,sameOrigin} from '../../lib/server-workspace';
+import {context,readSpace,reply,sameOrigin} from '../../lib/server-workspace';
 import {assertRequestTenant} from '../../lib/request-tenant';
 import {withScope} from '../../lib/database';
 import {receptionPermitted} from '../../lib/access';
@@ -10,7 +10,7 @@ import {useFirestorePersistence} from '../../lib/firestore-db';
 import {reserveFirestoreCard} from '../../lib/firestore-card';
 export async function POST(request:Request){try{
  if(!sameOrigin(request))return reply({error:'origin'},403);const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));if(ctx.support||ctx.license&&!licenseState(ctx.license).writable)return reply({error:'forbidden'},403);
- const raw=await request.text();if(raw.length>1000)return reply({error:'invalid'},400);const b=JSON.parse(raw);if(!b||typeof b!=='object'||Array.isArray(b)||typeof b.member!=='string'||typeof b.branch!=='string'||b.code!==undefined&&typeof b.code!=='string')return reply({error:'invalid'},400);const {state}=await readSpaceCore(ctx.owner);if(!state.branches.some(x=>x.id===b.branch)||ctx.branches&&!ctx.branches.includes(b.branch))return reply({error:'forbidden'},403);
+ const raw=await request.text();if(raw.length>1000)return reply({error:'invalid'},400);const b=JSON.parse(raw);if(!b||typeof b!=='object'||Array.isArray(b)||typeof b.member!=='string'||typeof b.branch!=='string'||b.code!==undefined&&typeof b.code!=='string')return reply({error:'invalid'},400);const {state}=await readSpace(ctx.owner);if(!state.branches.some(x=>x.id===b.branch)||ctx.branches&&!ctx.branches.includes(b.branch))return reply({error:'forbidden'},403);
  const existing=state.members.find(m=>m.id===b.member);if(existing&&existing.branch!==b.branch)return reply({error:'forbidden'},403);
  if(existing?.archived)return reply({error:'inactive'},400);if(!existing&&!/^[-a-zA-Z0-9]{16,80}$/.test(b.member))return reply({error:'invalid'},400);
  if(!receptionPermitted(ctx.role,state.members.some(m=>m.id===b.member)?'card.replace':'member.register',state.settings.receptionGrants?.[ctx.user.userId]))return reply({error:'forbidden'},403);

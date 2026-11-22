@@ -5,7 +5,7 @@ registerHooks({
  resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}},
  load(url,c,n){
   if(url.endsWith('/app/lib/database.ts'))return{format:'module',shortCircuit:true,source:`export const getPool=()=>{throw Error('NO LIVE DB');};export const withScope=(o,work)=>work({query:(s,p)=>globalThis.__wa.query(s,p)});`};
-  if(url.endsWith('/app/lib/server-workspace.ts'))return{format:'module',shortCircuit:true,source:`export const readSpace=async()=>{globalThis.__wa.full++;return{state:structuredClone(globalThis.__wa.state)};};`};
+  if(url.endsWith('/app/lib/server-workspace.ts'))return{format:'module',shortCircuit:true,source:`export const readSpace=async()=>{globalThis.__wa.full++;return{state:structuredClone(globalThis.__wa.state)};};export const readSpaceCore=readSpace;`};
   if(url.endsWith('/app/lib/firestore-db.ts'))return{format:'module',shortCircuit:true,source:`export const useFirestorePersistence=()=>false;`};
   if(url.endsWith('/app/lib/whatsapp-job-page.ts'))return{format:'module',shortCircuit:true,source:`export const readWhatsAppJobPage=async(s,q)=>{globalThis.__wa.pages.push(q);return globalThis.__wa.page(q);};`};
   if(url.endsWith('/app/lib/commercial.ts'))return{format:'module',shortCircuit:true,source:`export const normalizeLicense=x=>x;`};
