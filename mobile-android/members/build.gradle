@@ -26,8 +26,8 @@ android {
         }
         coexist {
             dimension 'target'
-            versionCode 11
-            versionName '1.1.8.1'
+            versionCode 12
+            versionName '1.1.8.2'
             applicationIdSuffix '.freshtest'
             buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
             manifestPlaceholders = [webHost: 'gymeg.vercel.app']

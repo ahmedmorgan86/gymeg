@@ -30,8 +30,8 @@ android {
         }
         coexist {
             dimension 'target'
-            versionCode 11
-            versionName '1.0.9.1'
+            versionCode 12
+            versionName '1.0.9.2'
             applicationIdSuffix '.freshtest'
             buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
             buildConfigField 'String', 'SUPABASE_HOST', '"aynycpumwcopbnkbkqhr.supabase.co"'
