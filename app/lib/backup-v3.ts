@@ -196,7 +196,8 @@ export function packPhotoPages(photos:Record<string,string>):Record<string,strin
 
 export function packEventPages(events:Event[]):Event[][]{
  const pages:Event[][]=[];let page:Event[]=[],bytes=2;
- for(const e of events){const cost=utf8(JSON.stringify(e))+2;if(bytes+cost>EVENT_PAGE_BYTES&&page.length){pages.push(page);page=[];bytes=2;}page.push(e);bytes+=cost;}
+ for(const e of events){const cost=utf8(JSON.stringify(e))+2;if(cost>EVENT_PAGE_BYTES)throw new TransferError('limit',413); // one malformed pre-existing event above the hard page cap fails BEFORE packing; the 64MiB section ceiling is not the page bound
+  if(bytes+cost>EVENT_PAGE_BYTES&&page.length){pages.push(page);page=[];bytes=2;}page.push(e);bytes+=cost;}
  if(page.length)pages.push(page);
  return pages;
 }
@@ -209,7 +210,7 @@ export function packEventPages(events:Event[]):Event[][]{
  * that row's stored size (same as v2 today), not by the section caps.
  */
 export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
- let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined;
+ let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined,legacy=false;
  if(recovery){
   const row=useFirestorePersistence()?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
   if(!row||useFirestorePersistence()&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
@@ -218,7 +219,8 @@ export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{bu
   snapshotEvents=state.events; // the snapshot's OWN history, complete: staged as event pages, never re-trimmed, never live archive rows
  }else{
   const current=await readEntityCore(owner);state=current.state;revision=current.revision;
-  if('legacy' in current&&current.legacy)snapshotEvents=state.events; // legacy blob: the normalized archive is never populated; the blob's own history must be staged, not the empty archive table
+  legacy=Boolean('legacy' in current&&current.legacy);
+  if(legacy)snapshotEvents=state.events; // legacy blob: the normalized archive is never populated; the blob's own history must be staged, not the empty archive table
  }
  snapshotPhotos={};
  state={...state,members:state.members.map(m=>{if(m.photo===undefined)return m;const rest={...m};snapshotPhotos![m.id]=m.photo as string;delete rest.photo;return rest;}),events:snapshotEvents?[]:state.events.slice(-RECENT_EVENTS),receipts:[]};
@@ -226,7 +228,7 @@ export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{bu
  if(!snapshotEvents?.length)snapshotEvents=undefined;
  const buffer=Buffer.from(JSON.stringify(state),'utf8');
  if(buffer.length>STATE_BYTE_LIMIT+1048576)throw new TransferError('limit',413); // core admission: the write-side invariant already keeps cores under STATE_BYTE_LIMIT; this is the loud bound, never an unbounded materialization
- return{buffer,revision,snapshotPhotos,snapshotEvents,selfContained:Boolean(recovery)||Boolean(snapshotEvents)};
+ return{buffer,revision,snapshotPhotos,snapshotEvents,selfContained:Boolean(recovery)||legacy}; // legacy identity is independent of event count: a legacy blob with photos but zero events is still self-contained
 }
 
 /** Next byte-capped photo page after cursor (keyset on member_id). Never exceeds PHOTO_PAGE_MAX_BYTES. */

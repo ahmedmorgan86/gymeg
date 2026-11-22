@@ -177,6 +177,20 @@ try{
  await withScope(snapOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[snapOwner]));
  await admin.query('DELETE FROM gymos.gym_recovery WHERE owner_id=$1',[snapOwner]);
  console.log('PASS: snapshot download exports complete history and portraits (reviewer repro: RECENT+7 loss closed)');
+ // Reviewer repro: one malformed 8100098-byte legacy event must fail BEFORE packing, not pass the 64MiB section ceiling.
+ let oversizedPacked=false;
+ try{packEventPages([{id:'huge',at:'2025-01-01T00:00:00.000Z',kind:'x',subject:'x'.repeat(8100000),actor:'x',branch:'main'}]);oversizedPacked=true;}catch(e){assert.ok(e instanceof TransferError&&e.code==='limit','oversized single event throws limit');}
+ assert.ok(!oversizedPacked,'packEventPages refused the 8100098-byte event');
+ // Legacy blob with photos but ZERO events is still self-contained.
+ const zeroOwner=owner+'-zero';
+ const zeroState={...save(emptyState(),'Zero Member',jpeg(40000,'zr')),events:[]};
+ await withScope(zeroOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,3,$3)',[zeroOwner,JSON.stringify(zeroState),new Date().toISOString()]));
+ const zeroBuilt=await buildCoreBuffer(zeroOwner);
+ assert.ok(zeroBuilt.selfContained,'legacy blob with photos and zero events is self-contained');
+ assert.equal(zeroBuilt.snapshotEvents,undefined,'zero history normalized away');
+ assert.equal(Object.keys(zeroBuilt.snapshotPhotos??{}).length,1,'portrait still staged');
+ await withScope(zeroOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[zeroOwner]));
+ console.log('PASS: oversized single events fail before packing; zero-event legacy stays self-contained');
  await withScope(legacyOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[legacyOwner]));
  // Reviewer repro 1: three actors x four 64MiB declarations = 805306368 bytes accepted above the 512MiB owner cap (actor-scoped FORCE RLS hid other actors' rows).
  await discardSession(owner,actor,dl); // drop the leftover download staging so the arithmetic below is exact
