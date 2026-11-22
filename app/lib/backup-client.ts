@@ -9,10 +9,15 @@ const V3_PHOTO_PAGE=2_000_000,V3_EVENT_PAGE=8_000_000,V3_FALLBACK_CAP=192*1024*1
 type V3Section={ordinal:number;bytes:number;digest:string;transfer:string;parts:number;chunkBytes:number};
 type V3Writer={write:(s:string|Uint8Array)=>Promise<void>;finish:()=>Promise<Blob|null>};
 export const v3Streams=()=>typeof window!=='undefined'&&window.isSecureContext&&'showSaveFilePicker' in window;
-async function v3Writer(name:string):Promise<V3Writer>{
- if(v3Streams()){const handle=await (window as unknown as {showSaveFilePicker:(o:object)=>Promise<{createWritable:()=>Promise<{write:(d:string|Uint8Array)=>Promise<void>;close:()=>Promise<void>}>}>}).showSaveFilePicker({suggestedName:name,types:[{description:'GymEG backup',accept:{'application/json':['.json']}}]});const stream=await handle.createWritable();return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;}};}
+type SaveHandle={createWritable:()=>Promise<{write:(d:string|Uint8Array)=>Promise<void>;close:()=>Promise<void>}>};
+async function openStream(name:string):Promise<V3Writer>{ // picker must run inside the click's transient activation: no awaits may precede it
+ const handle=await (window as unknown as {showSaveFilePicker:(o:object)=>Promise<SaveHandle>}).showSaveFilePicker({suggestedName:name,types:[{description:'GymEG backup',accept:{'application/json':['.json']}}]});
+ const stream=await handle.createWritable();
+ return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;}};
+}
+function collectWriter():V3Writer{ // fallback: accumulate with an ACTUAL byte cap; the estimate only preflights, this enforces
  const parts:Uint8Array[]=[];let total=0;const enc=new TextEncoder();
- return{write:async d=>{const b=typeof d==='string'?enc.encode(d):d;total+=b.length;if(total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');parts.push(b);},finish:async()=>new Blob(parts as BlobPart[],{type:'application/json'})}; // actual-byte cap: the estimate only preflights, this enforces
+ return{write:async d=>{const b=typeof d==='string'?enc.encode(d):d;total+=b.length;if(total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');parts.push(b);},finish:async()=>new Blob(parts as BlobPart[],{type:'application/json'})};
 }
 async function fetchSection(owner:string,sec0:V3Section,w:V3Writer,transform?:(text:string)=>string){
  const sec={...sec0,transfer:sec0.transfer??(sec0 as unknown as {id:string}).id}; // route returns id; manifests use transfer
@@ -22,12 +27,15 @@ async function fetchSection(owner:string,sec0:V3Section,w:V3Writer,transform?:(t
  await w.write(transform?transform(new TextDecoder('utf-8',{fatal:true}).decode(bytes)):bytes);
 }
 export async function downloadBackupV3(owner:string,recovery:string|undefined,onProgress:(done:number,total:number)=>void):Promise<Blob|null>{
+ // Chooser BEFORE any network await: transient activation expires across the downloadStart round-trip, and a picker AbortError then leaves no server session behind at all.
+ let picked:V3Writer|null=null;
+ if(v3Streams()){try{picked=await openStream('GymEG-backup-'+new Date().toISOString().slice(0,10)+'.json');}catch(e){throw e instanceof Error&&e.name==='AbortError'?Error('cancelled'):e;}}
  const start=await request(owner,{action:'downloadStart',format:3,recovery});start.tenant=owner;
  const total=start.core.bytes+start.estimate.photoBytes+start.estimate.eventBytes;
- if(!v3Streams()&&total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');
  let done=0;const tick=(n:number)=>{done+=n;onProgress(done,total);};
- try{ // session cleanup covers save-picker cancellation too
-  const w=await v3Writer('GymEG-backup-'+new Date().toISOString().slice(0,10)+'.json');
+ try{ // every failure past this point - including the size preflight - discards the session
+  if(!picked&&total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');
+  const w=picked??collectWriter();
   await w.write('{"format":"gymos-backup","version":3,"tenant":'+JSON.stringify(start.tenant??'')+',"createdAt":'+JSON.stringify(new Date().toISOString())+',"revision":'+start.revision+',"core":');
   await fetchSection(owner,start.core,w);tick(start.core.bytes);
   await w.write(',"photos":{');let first=true;
@@ -59,7 +67,7 @@ export async function restoreBackupV3(owner:string,file:File,revision:number,onP
  try{
   const coreRef=await stage('core',0,enc.encode(JSON.stringify(b.core)));
   const photoRefs:{ordinal:number;bytes:number;digest:string;transfer:string}[]=[];
-  {let page:Record<string,string>={},size=2,ordinal=0;for(const [id,content]of Object.entries(b.photos).sort((a,z)=>a[0]<z[0]?-1:1)){const cost=enc.encode(id).length+enc.encode(content).length+9;if(size+cost>V3_PHOTO_PAGE&&Object.keys(page).length){photoRefs.push(await stage('photos',ordinal++,enc.encode(JSON.stringify(page))));page={};size=2;}page[id]=content;size+=cost;}if(Object.keys(page).length)photoRefs.push(await stage('photos',ordinal,enc.encode(JSON.stringify(page))));} // one serialized page live at a time
+  {let page:Record<string,string>=Object.create(null),size=2,ordinal=0;for(const [id,content]of Object.entries(b.photos).sort((a,z)=>a[0]<z[0]?-1:1)){const cost=enc.encode(id).length+enc.encode(content).length+9;if(size+cost>V3_PHOTO_PAGE&&Object.keys(page).length){photoRefs.push(await stage('photos',ordinal++,enc.encode(JSON.stringify(page))));page=Object.create(null);size=2;}page[id]=content;size+=cost;}if(Object.keys(page).length)photoRefs.push(await stage('photos',ordinal,enc.encode(JSON.stringify(page))));} // one serialized page live at a time
   const eventRefs:{ordinal:number;bytes:number;digest:string;transfer:string}[]=[];
   {let page:unknown[]=[],size=2,ordinal=0;for(const e of b.events){const cost=enc.encode(JSON.stringify(e)).length+2;if(cost>V3_EVENT_PAGE)throw Error('invalidBackup');if(size+cost>V3_EVENT_PAGE&&page.length){eventRefs.push(await stage('events',ordinal++,enc.encode(JSON.stringify(page))));page=[];size=2;}page.push(e);size+=cost;}if(page.length)eventRefs.push(await stage('events',ordinal,enc.encode(JSON.stringify(page))));} // a single over-cap event fails before packing
   const manifest:Record<string,unknown>={format:'gymos-backup',version:3,tenant:b.tenant,createdAt:b.createdAt??new Date().toISOString(),revision:b.revision,core:{bytes:coreRef.bytes,digest:coreRef.digest},photos:{count:Object.keys(b.photos).length,pages:photoRefs},events:{count:b.events.length,pages:eventRefs}};

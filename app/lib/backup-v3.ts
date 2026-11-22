@@ -184,10 +184,10 @@ export async function discardSession(owner:string,actor:string,sessionId:unknown
 
 /** Pack a photos map into byte-capped pages (used for recovery snapshots; live photos page straight from gym_photos). */
 export function packPhotoPages(photos:Record<string,string>):Record<string,string>[]{
- const pages:Record<string,string>[]=[];let page:Record<string,string>={},bytes=2;
+ const pages:Record<string,string>[]=[];let page:Record<string,string>=Object.create(null),bytes=2; // null-prototype: reserved ids like __proto__ must be own entries, never lost to the prototype
  for(const [id,content]of Object.entries(photos).sort((a,b)=>a[0]<b[0]?-1:1)){
   const cost=utf8(id)+utf8(content)+9;
-  if(bytes+cost>PHOTO_PAGE_BYTES&&Object.keys(page).length){pages.push(page);page={};bytes=2;}
+  if(bytes+cost>PHOTO_PAGE_BYTES&&Object.keys(page).length){pages.push(page);page=Object.create(null);bytes=2;}
   page[id]=content;bytes+=cost;
  }
  if(Object.keys(page).length)pages.push(page);
@@ -222,9 +222,9 @@ export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{bu
   legacy=Boolean('legacy' in current&&current.legacy);
   if(legacy)snapshotEvents=state.events; // legacy blob: the normalized archive is never populated; the blob's own history must be staged, not the empty archive table
  }
- snapshotPhotos={};
+ snapshotPhotos=Object.create(null); // ids like __proto__ must survive assignment
  state={...state,members:state.members.map(m=>{if(m.photo===undefined)return m;const rest={...m};snapshotPhotos![m.id]=m.photo as string;delete rest.photo;return rest;}),events:snapshotEvents?[]:state.events.slice(-RECENT_EVENTS),receipts:[]};
- if(!Object.keys(snapshotPhotos).length)snapshotPhotos=undefined;
+ if(!Object.keys(snapshotPhotos!).length)snapshotPhotos=undefined;
  if(!snapshotEvents?.length)snapshotEvents=undefined;
  const buffer=Buffer.from(JSON.stringify(state),'utf8');
  if(buffer.length>STATE_BYTE_LIMIT+1048576)throw new TransferError('limit',413); // core admission: the write-side invariant already keeps cores under STATE_BYTE_LIMIT; this is the loud bound, never an unbounded materialization
@@ -236,7 +236,7 @@ export async function nextPhotoPage(owner:string,cursor:string|null,pinRevision?
  return scoped(owner,'system',async c=>{
   await assertPinned(c,owner,pinRevision);
   const rows=(await c.query(`WITH s AS (SELECT member_id,octet_length(content) AS n FROM gymos.gym_photos WHERE owner_id=$1 AND ($2::text IS NULL OR member_id>$2) ORDER BY member_id LIMIT 64), w AS (SELECT member_id,n,SUM(octet_length(member_id)+n+9) OVER (ORDER BY member_id) AS running, count(*) OVER () AS scanned FROM s) SELECT p.member_id,p.content,w.scanned FROM w JOIN gymos.gym_photos p ON p.owner_id=$1 AND p.member_id=w.member_id WHERE w.running<=$3 ORDER BY p.member_id`,[owner,cursor,PHOTO_PAGE_BYTES])).rows as {member_id:string;content:string;scanned:string}[]; // byte admission in SQL BEFORE any content transfer: candidates carry ids+sizes only, content fetched for admitted rows alone
-  const page:Record<string,string>={};for(const r of rows)page[r.member_id]=r.content;
+  const page:Record<string,string>=Object.create(null);for(const r of rows)page[r.member_id]=r.content;
   const scanned=Number(rows[0]?.scanned??0);
   return{page,nextCursor:rows.length?rows[rows.length-1].member_id:cursor,done:rows.length===scanned&&scanned<64};
  });

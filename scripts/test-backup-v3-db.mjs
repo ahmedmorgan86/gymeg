@@ -235,6 +235,24 @@ try{
  assert.equal((await sessionInfo(owner,actor,snap,'download')).snapshot,true,'snapshot flag persisted');
  await discardSession(owner,actor,snap);
  console.log('PASS: snapshot sessions are marked and reported');
+ // Reserved-ID fidelity (reviewer probe): a member whose id is __proto__ must roundtrip, never vanish into a prototype.
+ const protoOwner=owner+'-proto';
+ const protoPhoto=jpeg(40000,'pr');
+ const protoBase=save(emptyState(),'Proto Member',protoPhoto);
+ const protoState={...protoBase,members:protoBase.members.map(m=>({...m,id:'__proto__'})),events:[]};
+ await withScope(protoOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,4,$3)',[protoOwner,JSON.stringify(protoState),new Date().toISOString()]));
+ const pb=await buildCoreBuffer(protoOwner);
+ assert.ok(pb.snapshotPhotos&&Object.prototype.hasOwnProperty.call(pb.snapshotPhotos,'__proto__'),'__proto__ portrait is an own entry, not a prototype write');
+ const protoPages=packPhotoPages(pb.snapshotPhotos);
+ assert.equal(protoPages.length,1,'packPhotoPages returns the reserved-id page (was zero pages before)');
+ assert.equal(JSON.parse(JSON.stringify(protoPages[0]))['__proto__'],protoPhoto,'portrait survives packing + JSON roundtrip');
+ await withScope(protoOwner,c=>c.query('INSERT INTO gymos.gym_photos(owner_id,member_id,content) VALUES($1,$2,$3) ON CONFLICT (owner_id,member_id) DO UPDATE SET content=$3',[protoOwner,'__proto__',protoPhoto]));
+ const np=await nextPhotoPage(protoOwner,null);
+ assert.equal(np.page['__proto__'],protoPhoto,'nextPhotoPage returns the reserved-id photo');
+ assert.equal(Object.keys(np.page).length,1,'exactly one page entry');
+ await withScope(protoOwner,c=>c.query('DELETE FROM gymos.gym_photos WHERE owner_id=$1',[protoOwner]));
+ await withScope(protoOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[protoOwner]));
+ console.log('PASS: reserved portrait id __proto__ roundtrips through build, packing, JSON and DB paging');
  console.log('PASS: backup v3 round trip complete');
 }catch(e){console.error('TRY-ERR:',e);throw e;}finally{
  const client=await pool.connect();
