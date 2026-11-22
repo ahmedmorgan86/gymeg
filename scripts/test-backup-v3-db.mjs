@@ -9,7 +9,8 @@ import {emptyState,applyOperation} from '../app/lib/domain.ts';
 import {persistSpace,readEntitySpace} from '../app/lib/entity-store.ts';
 import {validateBackup} from '../app/lib/backup.ts';
 import {backupDigest,BACKUP_CHUNK_BYTES} from '../app/lib/backup-transfer.ts';
-import {createSession,stageSection,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,photoCount,archiveCount,validateManifest,readValidatedCore,commitRestoreV3,discardSession,sessionInfo} from '../app/lib/backup-v3.ts';
+import {createSession,stageSection,openUploadSection,putSectionChunk,buildCoreBuffer,nextPhotoPage,nextEventPage,photoCount,archiveCount,validateManifest,readValidatedCore,commitRestoreV3,discardSession,sessionInfo,packPhotoPages,packEventPages} from '../app/lib/backup-v3.ts';
+import {RECENT_EVENTS} from '../app/lib/activity-archive.ts';
 import {readEntityCore} from '../app/lib/entity-store.ts';
 import {TransferError} from '../app/lib/backup-transfer.ts';
 
@@ -72,11 +73,10 @@ try{
 
  // Case: immutable archive conflict (ev-778 tampered after download) must roll the WHOLE restore back, including photo writes.
  const before=(await readEntitySpace(owner)).revision;
- const coreState=await readValidatedCore(owner,actor,ul,manifest);
- const restoredState=validateBackup(coreState);
+ const restoredState=validateBackup(await readValidatedCore(owner,actor,ul,manifest)); // kept for the live-data assertions below
  const current=await readEntitySpace(owner);
  let conflicted=false;
- try{await commitRestoreV3(owner,actor,ul,manifest,current,restoredState);}catch(e){conflicted=e instanceof Error&&/Immutable activity/.test(e.message);}
+ try{await commitRestoreV3(owner,actor,ul,manifest,current);}catch(e){conflicted=e instanceof Error&&/Immutable activity/.test(e.message);}
  assert.ok(conflicted,'tampered archive row triggers immutable-activity conflict');
  const afterFail=await readEntitySpace(owner);
  assert.equal(afterFail.revision,before,'rollback: revision unchanged');
@@ -86,7 +86,7 @@ try{
 
  // Repair the tamper, commit again: full success.
  await admin.query("UPDATE gymos.gym_activity_archive SET payload=jsonb_build_object('id','ev-778','at','2026-10-05T10:00:00.000Z','kind','seed','subject','s778','actor','seed','branch','main') WHERE owner_id=$1 AND event_id='ev-778'",[owner]);
- const ok=await commitRestoreV3(owner,actor,ul,manifest,await readEntitySpace(owner),restoredState);
+ const ok=await commitRestoreV3(owner,actor,ul,manifest,await readEntitySpace(owner),undefined);
  assert.equal(ok,true,'commit succeeds');
  const final=await readEntitySpace(owner);
  assert.equal(final.revision,before+1,'exactly one revision bump');
@@ -109,7 +109,7 @@ try{
  // Manifest claims 24 photos while 25 are staged: count mismatch must reject before any destructive write.
  const m2b=manifestWith(final.revision,{bytes:c2.bytes,digest:c2.digest},photoRefs,eventRefs,24,totalEvents);
  let wrongCount=false;
- try{await commitRestoreV3(owner,actor,ul2,m2b,await readEntitySpace(owner),restoredState);}catch(e){wrongCount=e instanceof TransferError;}
+ try{await commitRestoreV3(owner,actor,ul2,m2b,await readEntitySpace(owner),undefined);}catch(e){wrongCount=e instanceof TransferError;}
  assert.ok(wrongCount,'count/section mismatch rejected before destructive writes');
  assert.equal((await withScope(owner,c=>c.query('SELECT count(*)::int n FROM gymos.gym_photos WHERE owner_id=$1',[owner]))).rows[0].n,25,'rejected commit left photos untouched');
  await discardSession(owner,actor,ul2);
@@ -138,7 +138,7 @@ try{
  const dupCount=JSON.parse(eventBufs[0].toString('utf8')).length*2;
  const mDup=manifestWith(final.revision,{bytes:c4.bytes,digest:c4.digest},photoRefs,[dupRef0,dupRef1],25,dupCount);
  let dupRejected=false;
- try{await commitRestoreV3(owner,actor,ul4,mDup,await readEntitySpace(owner),restoredState);}catch(e){dupRejected=e instanceof TransferError&&e.code==='invalidBackup';}
+ try{await commitRestoreV3(owner,actor,ul4,mDup,await readEntitySpace(owner),undefined);}catch(e){dupRejected=e instanceof TransferError&&e.code==='invalidBackup';}
  assert.ok(dupRejected,'cross-page duplicate events rejected');
  await discardSession(owner,actor,ul4);
  console.log('PASS: cross-page duplicate events rejected');
@@ -150,7 +150,7 @@ try{
  console.log('PASS: download revision pin enforced inside the page transaction');
  // Adversarial case: legacy blob workspace exports its real state (never silently empty).
  const legacyOwner=owner+'-legacy';
- const legacyState=save(emptyState(),'Legacy Member',jpeg(50000,'lg'));
+ const legacyState={...save(emptyState(),'Legacy Member',jpeg(50000,'lg')),events:[{id:'lg-ev-1',at:'2025-01-01T00:00:00.000Z',kind:'member.save',subject:'Legacy Member',actor:'Old',branch:'main'},{id:'lg-ev-2',at:'2025-01-02T00:00:00.000Z',kind:'member.save',subject:'Legacy Member',actor:'Old',branch:'main'}]};
  await withScope(legacyOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,7,$3)',[legacyOwner,JSON.stringify(legacyState),new Date().toISOString()]));
  const legacyCore=await readEntityCore(legacyOwner);
  assert.equal(legacyCore.state.members.length,1,'legacy blob read returns its members, not empty collections');
@@ -158,8 +158,26 @@ try{
  const legacyBuilt=await buildCoreBuffer(legacyOwner);
  assert.ok(legacyBuilt.snapshotPhotos&&Object.keys(legacyBuilt.snapshotPhotos).length===1,'legacy photos paged as snapshot');
  assert.ok(JSON.parse(legacyBuilt.buffer.toString('utf8')).members[0].photo===undefined,'legacy core strips photos for paging');
- await withScope(legacyOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[legacyOwner]));
+ assert.ok(legacyBuilt.selfContained,'legacy live download is self-contained (never continues into the empty normalized tables)');
+ assert.equal(legacyBuilt.snapshotEvents?.length,2,'legacy blob history exported complete, not trimmed to recent and not read from the empty archive');
  console.log('PASS: legacy blob workspaces export their real state with photos paged');
+ // Snapshot roundtrip fidelity (reviewer repro): a snapshot with RECENT+7 events and a portrait must export ALL of it.
+ const snapOwner=owner+'-snap';
+ const snapState={...save(emptyState(),'Snap Member',jpeg(30000,'sp')),events:Array.from({length:RECENT_EVENTS+7},(_,i)=>({id:'snap-ev-'+i,at:'2025-01-01T00:00:'+String(i%60).padStart(2,'0')+'.000Z',kind:'seed',subject:'x',actor:'x',branch:'main'}))};
+ await withScope(snapOwner,c=>c.query('INSERT INTO gymos.gym_states(user_id,payload,revision,updated_at) VALUES($1,$2,1,$3)',[snapOwner,JSON.stringify(snapState),new Date().toISOString()]));
+ const snapId=randomUUID();
+ await withScope(snapOwner,c=>c.query('INSERT INTO gymos.gym_recovery(id,owner_id,payload,created_at) VALUES($1,$2,$3,$4)',[snapId,snapOwner,JSON.stringify(snapState),new Date().toISOString()]));
+ const snapBuilt=await buildCoreBuffer(snapOwner,snapId);
+ assert.ok(snapBuilt.selfContained,'snapshot download is self-contained');
+ assert.equal(JSON.parse(snapBuilt.buffer.toString('utf8')).events.length,0,'snapshot core carries no events; all history stages as event pages');
+ assert.equal(snapBuilt.snapshotEvents?.length,RECENT_EVENTS+7,'ALL snapshot history staged, nothing trimmed');
+ assert.equal(Object.keys(snapBuilt.snapshotPhotos??{}).length,1,'snapshot portrait staged with a retrievable descriptor');
+ assert.deepEqual(packEventPages(snapBuilt.snapshotEvents).flat(),snapState.events,'event pages reproduce the snapshot history exactly');
+ assert.deepEqual(Object.assign({},...packPhotoPages(snapBuilt.snapshotPhotos)),{[snapState.members[0].id]:snapState.members[0].photo},'photo pages reproduce snapshot portraits exactly');
+ await withScope(snapOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[snapOwner]));
+ await admin.query('DELETE FROM gymos.gym_recovery WHERE owner_id=$1',[snapOwner]);
+ console.log('PASS: snapshot download exports complete history and portraits (reviewer repro: RECENT+7 loss closed)');
+ await withScope(legacyOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[legacyOwner]));
  // Reviewer repro 1: three actors x four 64MiB declarations = 805306368 bytes accepted above the 512MiB owner cap (actor-scoped FORCE RLS hid other actors' rows).
  await discardSession(owner,actor,dl); // drop the leftover download staging so the arithmetic below is exact
  const alreadyStaged=Number((await withScope(owner,c=>c.query('SELECT gymos.backup_owner_staged_bytes() AS b'))).rows[0].b);

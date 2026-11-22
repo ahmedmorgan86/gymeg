@@ -34,6 +34,7 @@ import {assembleTransfer,backupDigest,BACKUP_CHUNK_BYTES,decodeChunk,TransferErr
 import {readEntityCore,persistSpaceTx,type StagedRestore} from './entity-store.ts';
 import {processWorkspaceOutbox} from './realtime-broadcast.ts';
 import {STATE_BYTE_LIMIT} from './workspace-slice.ts';
+import {validateBackup} from './backup.ts';
 import {RECENT_EVENTS} from './activity-archive.ts';
 import {MEMBER_PHOTO_MAX} from './member-photo-input.ts';
 import {useFirestorePersistence,getFirestoreDb} from './firestore-db.ts';
@@ -193,6 +194,13 @@ export function packPhotoPages(photos:Record<string,string>):Record<string,strin
  return pages;
 }
 
+export function packEventPages(events:Event[]):Event[][]{
+ const pages:Event[][]=[];let page:Event[]=[],bytes=2;
+ for(const e of events){const cost=utf8(JSON.stringify(e))+2;if(bytes+cost>EVENT_PAGE_BYTES&&page.length){pages.push(page);page=[];bytes=2;}page.push(e);bytes+=cost;}
+ if(page.length)pages.push(page);
+ return pages;
+}
+
 /**
  * Core state JSON for v3: photos excluded at read, events trimmed to recent, receipts cleared.
  * Recovery snapshots are stripped at parse (never rehydrated into the live store) and their
@@ -200,32 +208,35 @@ export function packPhotoPages(photos:Record<string,string>):Record<string,strin
  * Note: a legacy recovery payload is one pre-existing monolithic row; parsing it is bounded by
  * that row's stored size (same as v2 today), not by the section caps.
  */
-export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>}>{
- let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined;
+export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{buffer:Buffer;revision:number;snapshotPhotos?:Record<string,string>;snapshotEvents?:Event[];selfContained:boolean}>{
+ let state:GymState,revision:number,snapshotPhotos:Record<string,string>|undefined,snapshotEvents:Event[]|undefined;
  if(recovery){
   const row=useFirestorePersistence()?(await getFirestoreDb().collection('gym_recovery').doc(recovery).get()).data():await db.prepare('SELECT payload FROM gym_recovery WHERE owner_id=? AND id=?').bind(owner,recovery).first<{payload:string}>(owner);
   if(!row||useFirestorePersistence()&&(row as {owner_id?:string}).owner_id!==owner)throw new TransferError('notFound',404);
   const parsed=JSON.parse((row as {payload:string}).payload) as GymState;
   const current=await readEntityCore(owner);revision=current.revision;state=parsed;
+  snapshotEvents=state.events; // the snapshot's OWN history, complete: staged as event pages, never re-trimmed, never live archive rows
  }else{
   const current=await readEntityCore(owner);state=current.state;revision=current.revision;
+  if('legacy' in current&&current.legacy)snapshotEvents=state.events; // legacy blob: the normalized archive is never populated; the blob's own history must be staged, not the empty archive table
  }
  snapshotPhotos={};
- state={...state,members:state.members.map(m=>{if(m.photo===undefined)return m;const rest={...m};snapshotPhotos![m.id]=m.photo as string;delete rest.photo;return rest;}),events:state.events.slice(-RECENT_EVENTS),receipts:[]};
+ state={...state,members:state.members.map(m=>{if(m.photo===undefined)return m;const rest={...m};snapshotPhotos![m.id]=m.photo as string;delete rest.photo;return rest;}),events:snapshotEvents?[]:state.events.slice(-RECENT_EVENTS),receipts:[]};
  if(!Object.keys(snapshotPhotos).length)snapshotPhotos=undefined;
+ if(!snapshotEvents?.length)snapshotEvents=undefined;
  const buffer=Buffer.from(JSON.stringify(state),'utf8');
  if(buffer.length>STATE_BYTE_LIMIT+1048576)throw new TransferError('limit',413); // core admission: the write-side invariant already keeps cores under STATE_BYTE_LIMIT; this is the loud bound, never an unbounded materialization
- return{buffer,revision,snapshotPhotos};
+ return{buffer,revision,snapshotPhotos,snapshotEvents,selfContained:Boolean(recovery)||Boolean(snapshotEvents)};
 }
 
 /** Next byte-capped photo page after cursor (keyset on member_id). Never exceeds PHOTO_PAGE_MAX_BYTES. */
 export async function nextPhotoPage(owner:string,cursor:string|null,pinRevision?:number|null):Promise<{page:Record<string,string>;nextCursor:string|null;done:boolean}>{
  return scoped(owner,'system',async c=>{
   await assertPinned(c,owner,pinRevision);
-  const rows=(await c.query(`WITH s AS (SELECT member_id,content FROM gymos.gym_photos WHERE owner_id=$1 AND ($2::text IS NULL OR member_id>$2) ORDER BY member_id LIMIT 512), w AS (SELECT member_id,content,SUM(octet_length(member_id)+octet_length(content)+9) OVER (ORDER BY member_id) AS running, count(*) OVER () AS scanned FROM s) SELECT member_id,content,scanned FROM w WHERE running<=$3 ORDER BY member_id`,[owner,cursor,PHOTO_PAGE_BYTES])).rows as {member_id:string;content:string;scanned:string}[]; // bounded scan: at most 512 rows read per page query, never the whole remainder
+  const rows=(await c.query(`WITH s AS (SELECT member_id,octet_length(content) AS n FROM gymos.gym_photos WHERE owner_id=$1 AND ($2::text IS NULL OR member_id>$2) ORDER BY member_id LIMIT 64), w AS (SELECT member_id,n,SUM(octet_length(member_id)+n+9) OVER (ORDER BY member_id) AS running, count(*) OVER () AS scanned FROM s) SELECT p.member_id,p.content,w.scanned FROM w JOIN gymos.gym_photos p ON p.owner_id=$1 AND p.member_id=w.member_id WHERE w.running<=$3 ORDER BY p.member_id`,[owner,cursor,PHOTO_PAGE_BYTES])).rows as {member_id:string;content:string;scanned:string}[]; // byte admission in SQL BEFORE any content transfer: candidates carry ids+sizes only, content fetched for admitted rows alone
   const page:Record<string,string>={};for(const r of rows)page[r.member_id]=r.content;
   const scanned=Number(rows[0]?.scanned??0);
-  return{page,nextCursor:rows.length?rows[rows.length-1].member_id:cursor,done:rows.length===scanned&&scanned<512};
+  return{page,nextCursor:rows.length?rows[rows.length-1].member_id:cursor,done:rows.length===scanned&&scanned<64};
  });
 }
 
@@ -233,12 +244,13 @@ export async function nextPhotoPage(owner:string,cursor:string|null,pinRevision?
 export async function nextEventPage(owner:string,cursor:{at:string;id:string}|null,pinRevision?:number|null):Promise<{page:Event[];nextCursor:{at:string;id:string}|null;done:boolean}>{
  return scoped(owner,'system',async c=>{
   await assertPinned(c,owner,pinRevision);
-  const rows=(await c.query(`WITH s AS (SELECT at,event_id,payload FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 513), w AS (SELECT at,event_id,payload,SUM(octet_length(payload::text)+2) OVER (ORDER BY at,event_id) AS running, count(*) OVER () AS scanned FROM s) SELECT at,event_id,payload,scanned FROM w WHERE running<=$4 ORDER BY at,event_id`,[owner,cursor?.at??null,cursor?.id??null,EVENT_PAGE_BYTES])).rows as {at:string;event_id:string;payload:Event;scanned:string}[]; // bounded scan: at most 513 rows read per page query, never the whole remainder
+  const rows=(await c.query(`WITH s AS (SELECT at,event_id,octet_length(payload::text)+2 AS cost FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 513), w AS (SELECT at,event_id,cost,SUM(cost) OVER (ORDER BY at,event_id) AS running, count(*) OVER () AS scanned FROM s) SELECT w.at,w.event_id,w.scanned,a.payload FROM w JOIN gymos.gym_activity_archive a ON a.owner_id=$1 AND a.event_id=w.event_id AND a.at=w.at WHERE w.running<=$4 ORDER BY w.at,w.event_id`,[owner,cursor?.at??null,cursor?.id??null,EVENT_PAGE_BYTES])).rows as {at:string;event_id:string;payload:Event;scanned:string}[]; // byte admission in SQL BEFORE any payload transfer: candidates carry (at,event_id,bytes) only, payloads joined for admitted rows alone
   if(!rows.length){
-   const one=(await c.query('SELECT at,event_id,payload,octet_length(payload::text) AS n FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 1',[owner,cursor?.at??null,cursor?.id??null])).rows[0] as {at:string;event_id:string;payload:Event;n:number}|undefined;
-   if(!one)return{page:[],nextCursor:cursor,done:true};
-   if(one.n>EVENT_PAGE_MAX_BYTES)throw new TransferError('limit',413); // one pre-existing row above the hard page maximum: fail loudly, never emit an over-cap page
-   return{page:[one.payload],nextCursor:{at:one.at,id:one.event_id},done:false};
+   const head=(await c.query('SELECT at,event_id,octet_length(payload::text) AS n FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 1',[owner,cursor?.at??null,cursor?.id??null])).rows[0] as {at:string;event_id:string;n:number}|undefined;
+   if(!head)return{page:[],nextCursor:cursor,done:true};
+   if(head.n>EVENT_PAGE_MAX_BYTES)throw new TransferError('limit',413); // one pre-existing row above the hard page maximum: fail loudly, never emit an over-cap page - byte check precedes payload transfer
+   const one=(await c.query('SELECT payload FROM gymos.gym_activity_archive WHERE owner_id=$1 AND event_id=$2 AND at=$3',[owner,head.event_id,head.at])).rows[0] as {payload:Event};
+   return{page:[one.payload],nextCursor:{at:head.at,id:head.event_id},done:false};
   }
   const last=rows[rows.length-1];const scanned=Number(rows[0].scanned);
   return{page:rows.map(r=>r.payload),nextCursor:{at:last.at,id:last.event_id},done:rows.length===scanned&&scanned<513};
@@ -295,7 +307,7 @@ async function sectionRows(owner:string,actor:string,sessionId:string):Promise<S
  * itself re-reads the same digest-pinned sections inside the restore transaction, one page
  * at a time; any failure rolls the whole restore back.
  */
-export async function commitRestoreV3(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest,current:{state:GymState;revision:number},state:GymState):Promise<boolean>{
+export async function commitRestoreV3(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest,current:{state:GymState;revision:number},adjust?:(state:GymState,current:{state:GymState;revision:number})=>GymState):Promise<boolean>{
  if(!validUuid(sessionId))throw new TransferError('invalid');
  const client=await getPool().connect();
  try{
@@ -303,11 +315,11 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
   await client.query("SELECT set_config('app.gym_owner',$1,true),set_config('app.gym_actor',$2,true)",[owner,actor]);
   await requireSession(client,owner,actor,sessionId,'upload'); // FOR UPDATE: no staging mutation can interleave with this restore
   const rows=(await client.query("SELECT id,kind,ordinal,bytes,digest FROM gymos.gym_backup_sections WHERE owner_id=$1 AND actor_id=$2 AND session_id=$3 AND direction='upload' AND expires_at>now() ORDER BY kind,ordinal FOR UPDATE",[owner,actor,sessionId])).rows as SectionRow[];
-  const pick=(kind:string,ordinal:number)=>rows.find(r=>r.kind===kind&&r.ordinal===ordinal);
+  const pick=(kind:string,ordinal:number,transfer:string)=>rows.find(r=>r.kind===kind&&r.ordinal===ordinal&&r.id===transfer); // exact manifest-to-locked-section binding: kind+ordinal+bytes+digest AND the section's own id
   const expected=1+manifest.photos.pages.length+manifest.events.pages.length;
   if(rows.length!==expected)throw new TransferError('invalidBackup',400); // nothing staged beyond the manifest
-  const photoRows=manifest.photos.pages.map(p=>{const r=pick('photos',p.ordinal);if(!r||r.bytes!==p.bytes||r.digest!==p.digest)throw new TransferError('invalidBackup',400);return r;});
-  const eventRows=manifest.events.pages.map(p=>{const r=pick('events',p.ordinal);if(!r||r.bytes!==p.bytes||r.digest!==p.digest)throw new TransferError('invalidBackup',400);return r;});
+  const photoRows=manifest.photos.pages.map(p=>{const r=pick('photos',p.ordinal,p.transfer);if(!r||r.bytes!==p.bytes||r.digest!==p.digest)throw new TransferError('invalidBackup',400);return r;});
+  const eventRows=manifest.events.pages.map(p=>{const r=pick('events',p.ordinal,p.transfer);if(!r||r.bytes!==p.bytes||r.digest!==p.digest)throw new TransferError('invalidBackup',400);return r;});
   // In-transaction section read: the row was locked FOR UPDATE above, so the digest re-verified
   // at assembly is the manifest-pinned digest - no TOCTOU between validation and apply.
   const readSection=async(r:SectionRow):Promise<Buffer>=>{
@@ -315,6 +327,12 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
    return assembleTransfer(full);
   };
   const decode=(buf:Buffer)=>new TextDecoder('utf-8',{fatal:true}).decode(buf);
+  // Core is derived HERE, from the locked, manifest-pinned section inside this transaction -
+  // never from a pre-commit read another transaction could have replaced.
+  const coreRow=rows.find(r=>r.kind==='core'&&r.ordinal===0);
+  if(!coreRow||coreRow.bytes!==manifest.core.bytes||coreRow.digest!==manifest.core.digest)throw new TransferError('invalidBackup',400);
+  let state=validateBackup(JSON.parse(decode(await readSection(coreRow))));
+  if(adjust)state=adjust(state,current);
   // Pre-validation pass (no writes): parse + entry shapes + member binding + duplicates + counts.
   const memberIds=new Set(state.members.map(m=>m.id)); // validateBackup caps members at 10000, so this set is bounded
   let photoTotal=0;const seenPhotos=new Set<string>();
