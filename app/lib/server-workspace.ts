@@ -14,7 +14,7 @@ import {normalize} from './extensions';
 import {fullAdministration,type Role} from './access';
 import {staffMembership} from './firestore-team';
 import {sliceBackend} from './workspace-reads';
-import {packetQueries} from './workspace-packet';
+import {packetQueries,type PacketOmit} from './workspace-packet';
 import {readSlice,readMemberSlice,type Collection,type SliceQuery} from './workspace-slice';
 export async function context(allowClosedTrial=false){const user=await getChatGPTUser();if(!user)return null;const gym=(await cookies()).get('gymos-space')?.value;if(commercialEnabled()){const club=await commercialContext(user,gym,(await cookies()).get('gymos-support')?.value);if(!club.support&&!club.platformOwnerAccess&&!allowClosedTrial&&trialClosed(club.license))throw new CommercialError('trialExpired',403);return{user,owner:club.storage_key,tenantId:club.id,license:club.license,role:club.role,branches:club.branches,support:club.support,platformOwnerAccess:club.platformOwnerAccess};}if(!gym||gym===user.userId)return{user,owner:user.userId,tenantId:user.userId,license:null as License|null,role:'owner' as Role,branches:null as string[]|null,support:undefined};const membership=useFirestorePersistence()?await staffMembership(gym,user.userId):await db.prepare('SELECT role,branches FROM gym_access WHERE owner_id=? AND user_id=? AND revoked=0').bind(gym,user.userId).first<{role:Role;branches:string}>(gym);if(!membership)throw new Error('forbidden');return{user,owner:gym,tenantId:gym,license:null as License|null,role:membership.role as Role,branches:Array.isArray(membership.branches)?membership.branches:JSON.parse(membership.branches) as string[],support:undefined};}
 export async function administrator(ctx:NonNullable<Awaited<ReturnType<typeof context>>>){const space=await readSpaceMeta(ctx.owner);return fullAdministration(ctx.role,ctx.branches,space.state.branches.map(b=>b.id));}
@@ -41,10 +41,10 @@ export async function readMemberSpace(owner:string,memberId:string,branch:string
  * instead of photo bytes. Same packet as the full read; falls back to it for
  * legacy layouts. Returns the photo versions to pass to packet().
  */
-export async function readSpaceForPacket(owner:string,ctx:Pick<Context,'role'|'branches'|'user'>){
+export async function readSpaceForPacket(owner:string,ctx:Pick<Context,'role'|'branches'|'user'>,omit:PacketOmit=[]){
   if(useFirestorePersistence()){const revision=await readRevision(owner);const hit=firestoreCachedSpace(owner,revision);if(hit)return{current:{state:hit,revision},photoVersions:undefined};}
   const be=sliceBackend();
-  const sliced=await readSlice(be,owner,m=>packetQueries(ctx,(m.settings??{}) as GymState['settings']),normalize);
+  const sliced=await readSlice(be,owner,m=>packetQueries(ctx,(m.settings??{}) as GymState['settings'],omit),normalize);
   if(!sliced)return{current:await readSpace(owner),photoVersions:undefined}; // disabled or legacy: no photo scan
   const photoVersions=await be.photoVersions(owner);
   if(await be.revision(owner)!==sliced.revision)return{current:await readSpace(owner),photoVersions:undefined}; // a commit landed between rows and photo versions

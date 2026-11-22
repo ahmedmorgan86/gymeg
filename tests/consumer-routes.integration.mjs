@@ -89,3 +89,18 @@ test('member-detail route: foreign-branch member, role gate, finance gating, fla
   }finally{delete process.env.GYMOS_MEMBER_SUMMARIES;}
   console.log('member-detail route',JSON.stringify(out));
 });
+test('GET /api/workspace: visits omitted only with env AND header; default response unchanged; role/branch rest identical; rollback via env',async()=>{
+  const s=await seed('P');const {GET}=await import('../app/api/workspace/route.ts');
+  const get=async(h,env)=>{if(env===undefined)delete process.env.GYMOS_PACKET_OMIT_VISITS;else process.env.GYMOS_PACKET_OMIT_VISITS=env;const r=await GET(new Request('https://example.test/api/workspace',{headers:{'X-GymOS-Tenant':'t-P',...h}}));assert.equal(r.status,200);const j=await r.json();j.serverNow=0;return j;};
+  const out={};
+  try{
+    for(const [name,x] of [['owner',{}],['branch manager',{role:'manager',branches:['a']}],['reception',{role:'reception',branches:['a']}]]){
+      ctx('P',x);
+      const base=await get({},undefined),envOnly=await get({},'1'),hdrOnly=await get({'x-gymos-lazy':'1'},undefined),hdrEnv0=await get({'x-gymos-lazy':'1'},'0'),om=await get({'x-gymos-lazy':'1'},'1');
+      assert.deepEqual(envOnly,base,name+': env on, no header = full');assert.deepEqual(hdrOnly,base,name+': header, env off = full (rollback)');assert.deepEqual(hdrEnv0,base,name+': env 0');
+      assert.ok(!('omitted' in base));assert.deepEqual(om.omitted,['visits'],name);assert.deepEqual(om.state.visits,[],name);
+      const {omitted:_o,...rest}=om;assert.deepEqual(rest,{...base,state:{...base.state,visits:[]}},name+': everything else identical');out[name]={fullVisits:base.state.visits.length};
+    }
+  }finally{delete process.env.GYMOS_PACKET_OMIT_VISITS;}
+  console.log('packet GET',JSON.stringify(out));
+});
