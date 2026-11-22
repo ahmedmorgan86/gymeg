@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {coreStateBytes,PHOTO_TOTAL_BYTE_LIMIT} from '../app/lib/photo-budget.ts';
+import {coreStateBytes,envelopeStateBytes,PHOTO_TOTAL_BYTE_LIMIT} from '../app/lib/photo-budget.ts';
 import {STATE_BYTE_LIMIT} from '../app/lib/workspace-slice.ts';
 
 const utf8=s=>new TextEncoder().encode(s).length;
@@ -23,4 +23,12 @@ test('photo budget vs core envelope: 209 max-size photos fit the photo budget, n
  assert.ok(209*96000>STATE_BYTE_LIMIT,'reviewer 209-photo counterexample exceeds the core envelope');
  assert.ok(209*96000<PHOTO_TOTAL_BYTE_LIMIT,'and fits the separate photo budget');
  assert.ok(STATE_BYTE_LIMIT+PHOTO_TOTAL_BYTE_LIMIT<64*1024*1024,'worst backup stays under BACKUP_MAX_BYTES');
+});
+
+test('envelopeStateBytes: photos counted on inline backends, excluded when separated',()=>{
+ const photo='data:image/jpeg;base64,/9j/'+'A'.repeat(96000-27);
+ const s=state([photo]);
+ assert.equal(envelopeStateBytes(s,false),utf8(JSON.stringify(s)),'inline backend keeps legacy full measurement');
+ assert.equal(envelopeStateBytes(s,true),coreStateBytes(s));
+ assert.ok(envelopeStateBytes(s,false)-envelopeStateBytes(s,true)>=96000);
 });

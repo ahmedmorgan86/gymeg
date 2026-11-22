@@ -5,5 +5,7 @@ export const PHOTO_TOTAL_BYTE_LIMIT=40_000_000;
 /** Thrown inside the persist transaction when the owner's stored photos exceed PHOTO_TOTAL_BYTE_LIMIT; the whole write rolls back, so the prior state stays intact. */
 export class PhotoQuotaExceeded extends Error{constructor(){super('photo quota exceeded');}}
 const coreBytesEncoder=new TextEncoder();
-/** Byte size of the state JSON with member photo bodies subtracted: what the entity layout actually persists in the core envelope (photos live in gymos.gym_photos, bounded by PHOTO_TOTAL_BYTE_LIMIT). Slight overestimate: per-photo JSON field overhead stays counted, so callers refuse a little early. */
-export function coreStateBytes(state:GymState){let photos=0;for(const m of state.members){const p=(m as {photo?:unknown}).photo;if(typeof p==='string')photos+=coreBytesEncoder.encode(p).length;}return coreBytesEncoder.encode(JSON.stringify(state)).length-photos;}
+/** Byte size of the state JSON for the core envelope. When photosSeparate is false (backends that store photos inline in the core document, e.g. the Firestore fallback), the full JSON is measured, photos included, exactly as before. When true (Postgres entity layout: photos live in gymos.gym_photos, bounded by PHOTO_TOTAL_BYTE_LIMIT), member photo bodies are subtracted. Slight overestimate in the separated case: per-photo JSON field overhead stays counted, so callers refuse a little early. */
+export function envelopeStateBytes(state:GymState,photosSeparate:boolean){const full=coreBytesEncoder.encode(JSON.stringify(state)).length;if(!photosSeparate)return full;let photos=0;for(const m of state.members){const p=(m as {photo?:unknown}).photo;if(typeof p==='string')photos+=coreBytesEncoder.encode(p).length;}return full-photos;}
+/** Postgres entity-layout core bytes (photos separated). */
+export function coreStateBytes(state:GymState){return envelopeStateBytes(state,true);}

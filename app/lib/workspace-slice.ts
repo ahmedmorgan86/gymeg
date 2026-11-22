@@ -39,7 +39,7 @@ export interface SliceBackend{
   count(owner:string,collection:Collection,branches?:string[]|null):Promise<number>;
   /** True when some member row has more than 1000 freezes (the full path rejects every operation on such a club). Postgres answers from a tiny partial index. */
   hasOversizedFreezes(owner:string):Promise<boolean>;
-  /** One read of the trigger-maintained counters: exact row counts per collection and a safe UPPER bound of JSON.stringify(full state) in bytes (never an exact size).
+  /** One read of the trigger-maintained counters: exact row counts per collection (including 'photos') and a safe UPPER bound of the CORE state JSON in bytes (never an exact size). Photo bodies are excluded from the byte/row sums: they live in gymos.gym_photos and are bounded separately (PHOTO_TOTAL_BYTE_LIMIT in photo-budget.ts).
    * null when the counters are absent or not marked ready for this owner, so callers fall back to the full path. */
   counters(owner:string):Promise<{counts:Record<string,number>;bound:number}|null>;
   /** A member's visits ordered like the profile list: `at` descending (plain code-point order), ties in position order. Returns 'irregular' when some scoped visit has an `at` string that is not the canonical ISO form (code-point order may then differ
@@ -53,7 +53,7 @@ export async function readCounters(c:{query(sql:string,values?:unknown[]):Promis
   const rows=(await c.query('SELECT collection,row_count,payload_bytes FROM gymos.gym_entity_counters WHERE owner_id=$1',[owner])).rows as {collection:string;row_count:string|number;payload_bytes:string|number}[];
   if(!rows.some(r=>r.collection==='_ready'))return null;
   const counts:Record<string,number>={};let n=0,bytes=0;for(const r of rows){if(r.collection==='_ready')continue;const rc=Number(r.row_count),pb=Number(r.payload_bytes);if(!Number.isSafeInteger(rc)||!Number.isSafeInteger(pb)||rc<0||pb<0)return null; // corrupt or half-applied counters: fail closed
-    counts[r.collection]=rc;n+=rc;bytes+=pb;if(!Number.isSafeInteger(n)||!Number.isSafeInteger(bytes))return null;}
+    counts[r.collection]=rc;if(r.collection!=='photos'){n+=rc;bytes+=pb;}if(!Number.isSafeInteger(n)||!Number.isSafeInteger(bytes))return null;}
   return{counts,rows:n,bytes};
 }
 export function checkQuery(q:SliceQuery){
@@ -92,7 +92,7 @@ export function postgresBackend(scope:<T>(owner:string,work:(client:Sql)=>Promis
     async photo(owner,memberId){return scope(owner,async c=>{const r=(await c.query('SELECT content FROM gymos.gym_photos WHERE owner_id=$1 AND member_id=$2',[owner,memberId])).rows[0] as {content:string}|undefined;return r?.content??null;});},
     async photoVersions(owner){return scope(owner,async c=>Object.fromEntries(((await c.query("SELECT member_id,left(encode(sha256(convert_to(content,'UTF8')),'hex'),16) AS v FROM gymos.gym_photos WHERE owner_id=$1",[owner])).rows as {member_id:string;v:string}[]).map(r=>[r.member_id,r.v])));},
     async counters(owner){return scope(owner,async c=>{const k=await readCounters(c,owner);if(!k)return null;const m=(await c.query('SELECT octet_length(payload) AS n FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {n:number}|undefined;if(!m)return null;
-      // metadata text + every row's payload (jsonb text >= compact JSON) + a comma per row + per-collection key and bracket overhead + photos
+      // metadata text + every core row's payload (jsonb text >= compact JSON) + a comma per row + per-collection key and bracket overhead; photos excluded (separate budget)
       return{counts:k.counts,bound:Number(m.n)+k.bytes+k.rows+4096};});},
     async visitsByAt(owner,q){return scope(owner,async c=>{
       const base:unknown[]=[owner,q.member];let br='';if(q.branches){if(!q.branches.length)return [];base.push(q.branches);br=`AND branch=ANY($${base.length}::text[])`;}

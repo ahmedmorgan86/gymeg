@@ -2,7 +2,8 @@ import {fullName,memberPhone} from '../../lib/member-console';
 import {assertRequestTenant} from '../../lib/request-tenant';
 import {CommercialError,licenseState} from '../../lib/licensing';
 import {persistSpace} from '../../lib/entity-store';
-import {coreStateBytes,PhotoQuotaExceeded} from '../../lib/photo-budget';
+import {envelopeStateBytes,PhotoQuotaExceeded} from '../../lib/photo-budget';
+import {useFirestorePersistence} from '../../lib/firestore-db';
 import {STATE_BYTE_LIMIT} from '../../lib/workspace-slice';
 import {tryHotOperation} from '../../lib/hot-route';
 import {sliceBackend} from '../../lib/workspace-reads';
@@ -29,7 +30,7 @@ export async function POST(request:Request){try{
  if(['member.save','member.daypass'].includes(body.operation.type)){body.operation.name=fullName(body.operation.name);body.operation.phone=memberPhone(body.operation.phone);}
  const digest=await hash(JSON.stringify(body.operation)),receipt=current.state.receipts.find(r=>r.id===ctx.user.userId+':'+body.requestId);
  if(receipt){if(receipt.digest!==digest)return reply({error:'replay'},409);return reply(deltaMode?{ok:true,revision:current.revision,replay:true}:packet(current,ctx));}if(body.revision!==current.revision)return reply({error:'conflict'},409);
- let state=applyOperation(current.state,body.operation,new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());if(body.operation.type==='member.save'&&!body.operation.id){const added=state.members.at(-1)!;state=applyOperation(state,{type:'card.issue',branch:body.operation.branch,id:added.id},new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());}state.receipts.push({id:ctx.user.userId+':'+body.requestId,digest});if(state.receipts.length>1000)state.receipts.shift();if(coreStateBytes(state)>STATE_BYTE_LIMIT)return reply({error:'limit'},413);
+ let state=applyOperation(current.state,body.operation,new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());if(body.operation.type==='member.save'&&!body.operation.id){const added=state.members.at(-1)!;state=applyOperation(state,{type:'card.issue',branch:body.operation.branch,id:added.id},new Date().toISOString(),ctx.user.displayName,()=>crypto.randomUUID());}state.receipts.push({id:ctx.user.userId+':'+body.requestId,digest});if(state.receipts.length>1000)state.receipts.shift();if(envelopeStateBytes(state,!useFirestorePersistence())>STATE_BYTE_LIMIT)return reply({error:'limit'},413);
  if(!await persistSpace(ctx.owner,current,state))return reply({error:'conflict'},409);if(body.operation.type==='community.reply'){const target=body.operation.member,message=state.community?.messages.at(-1);if(message&&message.member===target)try{after(async()=>{try{await sendCommunityPush(ctx.owner,message.branch,'member',target,'/member',message.id);}catch{}});}catch{}}
  const nextRev=current.revision+1;
  return reply(deltaMode?{ok:true,revision:nextRev}:packet({state,revision:nextRev},ctx));
