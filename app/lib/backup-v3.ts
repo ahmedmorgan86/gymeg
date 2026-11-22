@@ -64,11 +64,11 @@ async function scoped<T>(owner:string,actor:string,run:(c:PoolClient)=>Promise<T
  catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
 }
 
-type SessionRow={id:string;direction:'upload'|'download';revision:number|null};
+type SessionRow={id:string;direction:'upload'|'download';revision:number|null;snapshot:boolean};
 
 /** Fetch the session row FOR UPDATE (serializes staging admissions within the session) or throw. */
 async function requireSession(c:PoolClient,owner:string,actor:string,sessionId:string,direction?:'upload'|'download'):Promise<SessionRow>{
- const row=(await c.query('SELECT id,direction,revision FROM gymos.gym_backup_sessions WHERE id=$1 AND owner_id=$2 AND actor_id=$3 AND expires_at>now() FOR UPDATE',[sessionId,owner,actor])).rows[0] as SessionRow|undefined;
+ const row=(await c.query('SELECT id,direction,revision,snapshot FROM gymos.gym_backup_sessions WHERE id=$1 AND owner_id=$2 AND actor_id=$3 AND expires_at>now() FOR UPDATE',[sessionId,owner,actor])).rows[0] as SessionRow|undefined;
  if(!row||(direction&&row.direction!==direction))throw new TransferError('notFound',404);
  return row;
 }
@@ -77,34 +77,34 @@ async function requireSession(c:PoolClient,owner:string,actor:string,sessionId:s
 async function admissionLock(c:PoolClient,owner:string){await c.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',[owner+'|backup-sections']);}
 
 /** One active session per owner+actor+direction (UNIQUE): starting a session abandons and wipes the previous one plus anything expired. Download sessions pin the core's revision. */
-export async function createSession(owner:string,actor:string,direction:'upload'|'download',pinRevision?:number){
+export async function createSession(owner:string,actor:string,direction:'upload'|'download',pinRevision?:number,snapshot=false){
  return scoped(owner,actor,async c=>{
   await admissionLock(c,owner);
-  await c.query('DELETE FROM gymos.gym_backup_sections WHERE owner_id=$1 AND expires_at<now()',[owner]);
+  await c.query('SELECT gymos.cleanup_expired_backup_sections()'); // definer: expired rows of EVERY actor are removed (actor-scoped RLS hides them from own DELETEs)
   await c.query('DELETE FROM gymos.gym_backup_sections WHERE owner_id=$1 AND actor_id=$2 AND session_id IN (SELECT id FROM gymos.gym_backup_sessions WHERE owner_id=$1 AND actor_id=$2 AND direction=$3)',[owner,actor,direction]);
-  await c.query('DELETE FROM gymos.gym_backup_sessions WHERE owner_id=$1 AND (actor_id=$2 AND direction=$3 OR expires_at<now())',[owner,actor,direction]);
+  await c.query('DELETE FROM gymos.gym_backup_sessions WHERE owner_id=$1 AND actor_id=$2 AND direction=$3',[owner,actor,direction]);
   const id=randomUUID();
-  await c.query('INSERT INTO gymos.gym_backup_sessions(id,owner_id,actor_id,direction,revision) VALUES($1,$2,$3,$4,$5)',[id,owner,actor,direction,pinRevision??null]);
+  await c.query('INSERT INTO gymos.gym_backup_sessions(id,owner_id,actor_id,direction,revision,snapshot) VALUES($1,$2,$3,$4,$5,$6)',[id,owner,actor,direction,pinRevision??null,snapshot]);
   return id;
  });
 }
 
 /** Download pages are pinned to the core's revision: any intervening write fails the page request instead of silently mixing states. */
-export async function sessionInfo(owner:string,actor:string,sessionId:string,direction:'upload'|'download'):Promise<{revision:number|null}>{
+export async function sessionInfo(owner:string,actor:string,sessionId:string,direction:'upload'|'download'):Promise<{revision:number|null;snapshot:boolean}>{
  if(!validUuid(sessionId))throw new TransferError('invalid');
- return scoped(owner,actor,async c=>{const s=await requireSession(c,owner,actor,sessionId,direction);return{revision:s.revision};});
+ return scoped(owner,actor,async c=>{const s=await requireSession(c,owner,actor,sessionId,direction);return{revision:s.revision,snapshot:s.snapshot};});
 }
 /** Revision pin re-checked INSIDE the page's own transaction: a page can never serve data from a revision other than the one pinned at downloadStart. Uploads pin null and skip. */
 async function assertPinned(c:PoolClient,owner:string,pinRevision:number|null|undefined){
  if(pinRevision===null||pinRevision===undefined)return;
- const current=(await c.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1',[owner])).rows[0] as {revision:number}|undefined;
+ const current=(await c.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1 FOR SHARE',[owner])).rows[0] as {revision:number}|undefined; // FOR SHARE brackets the page read: a writer must wait for this tx, so the pinned revision cannot advance between check and payload
  if(!current||current.revision!==pinRevision)throw new TransferError('conflict',409);
 }
 
 async function checkSessionBounds(c:PoolClient,owner:string,sessionId:string,addBytes:number){
  const row=(await c.query('SELECT count(*)::int AS n,COALESCE(SUM(bytes),0)::bigint AS total FROM gymos.gym_backup_sections WHERE session_id=$1',[sessionId])).rows[0] as {n:number;total:string|number};
  if(row.n>=SESSION_MAX_SECTIONS||Number(row.total)+addBytes>SESSION_MAX_BYTES)throw new TransferError('limit');
- const ownerRow=(await c.query('SELECT COALESCE(SUM(bytes),0)::bigint AS total FROM gymos.gym_backup_sections WHERE owner_id=$1',[owner])).rows[0] as {total:string|number};
+ const ownerRow=(await c.query('SELECT gymos.backup_owner_staged_bytes() AS total')).rows[0] as {total:string|number}; // definer: sums across ALL actors of this owner; actor-scoped FORCE RLS would hide them
  if(Number(ownerRow.total)+addBytes>OWNER_MAX_STAGED_BYTES)throw new TransferError('limit');
 }
 
@@ -117,6 +117,7 @@ export async function stageSection(owner:string,actor:string,sessionId:string,ki
  return scoped(owner,actor,async c=>{
   await admissionLock(c,owner);
   await requireSession(c,owner,actor,sessionId,'download');
+  await c.query('SELECT gymos.cleanup_expired_backup_sections()');
   await checkSessionBounds(c,owner,sessionId,content.length);
   const id=randomUUID();
   await c.query('INSERT INTO gymos.gym_backup_sections(id,session_id,owner_id,actor_id,direction,kind,ordinal,bytes,digest,chunks) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',[id,sessionId,owner,actor,'download',kind,ordinal,content.length,digest,JSON.stringify(toChunks(content))]);
@@ -130,6 +131,7 @@ export async function openUploadSection(owner:string,actor:string,sessionId:stri
  return scoped(owner,actor,async c=>{
   await admissionLock(c,owner);
   await requireSession(c,owner,actor,sessionId,'upload');
+  await c.query('SELECT gymos.cleanup_expired_backup_sections()');
   await checkSessionBounds(c,owner,sessionId,bytes as number);
   const id=randomUUID();
   await c.query('INSERT INTO gymos.gym_backup_sections(id,session_id,owner_id,actor_id,direction,kind,ordinal,bytes,digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',[id,sessionId,owner,actor,'upload',kind,ordinal,bytes,digest]);
@@ -220,9 +222,10 @@ export async function buildCoreBuffer(owner:string,recovery?:string):Promise<{bu
 export async function nextPhotoPage(owner:string,cursor:string|null,pinRevision?:number|null):Promise<{page:Record<string,string>;nextCursor:string|null;done:boolean}>{
  return scoped(owner,'system',async c=>{
   await assertPinned(c,owner,pinRevision);
-  const rows=(await c.query(`WITH s AS (SELECT member_id,content,SUM(octet_length(member_id)+octet_length(content)+9) OVER (ORDER BY member_id) AS running FROM gymos.gym_photos WHERE owner_id=$1 AND ($2::text IS NULL OR member_id>$2)) SELECT member_id,content,(SELECT count(*) FROM s)::bigint AS total FROM s WHERE running<=$3 ORDER BY member_id`,[owner,cursor,PHOTO_PAGE_BYTES])).rows as {member_id:string;content:string;total:string}[];
+  const rows=(await c.query(`WITH s AS (SELECT member_id,content FROM gymos.gym_photos WHERE owner_id=$1 AND ($2::text IS NULL OR member_id>$2) ORDER BY member_id LIMIT 512), w AS (SELECT member_id,content,SUM(octet_length(member_id)+octet_length(content)+9) OVER (ORDER BY member_id) AS running, count(*) OVER () AS scanned FROM s) SELECT member_id,content,scanned FROM w WHERE running<=$3 ORDER BY member_id`,[owner,cursor,PHOTO_PAGE_BYTES])).rows as {member_id:string;content:string;scanned:string}[]; // bounded scan: at most 512 rows read per page query, never the whole remainder
   const page:Record<string,string>={};for(const r of rows)page[r.member_id]=r.content;
-  return{page,nextCursor:rows.length?rows[rows.length-1].member_id:cursor,done:rows.length===Number(rows[0]?.total??0)};
+  const scanned=Number(rows[0]?.scanned??0);
+  return{page,nextCursor:rows.length?rows[rows.length-1].member_id:cursor,done:rows.length===scanned&&scanned<512};
  });
 }
 
@@ -230,15 +233,15 @@ export async function nextPhotoPage(owner:string,cursor:string|null,pinRevision?
 export async function nextEventPage(owner:string,cursor:{at:string;id:string}|null,pinRevision?:number|null):Promise<{page:Event[];nextCursor:{at:string;id:string}|null;done:boolean}>{
  return scoped(owner,'system',async c=>{
   await assertPinned(c,owner,pinRevision);
-  const rows=(await c.query(`WITH s AS (SELECT at,event_id,payload,SUM(octet_length(payload::text)+2) OVER (ORDER BY at,event_id) AS running FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3))) SELECT at,event_id,payload,(SELECT count(*) FROM s)::bigint AS total FROM s WHERE running<=$4 ORDER BY at,event_id`,[owner,cursor?.at??null,cursor?.id??null,EVENT_PAGE_BYTES])).rows as {at:string;event_id:string;payload:Event;total:string}[];
+  const rows=(await c.query(`WITH s AS (SELECT at,event_id,payload FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 513), w AS (SELECT at,event_id,payload,SUM(octet_length(payload::text)+2) OVER (ORDER BY at,event_id) AS running, count(*) OVER () AS scanned FROM s) SELECT at,event_id,payload,scanned FROM w WHERE running<=$4 ORDER BY at,event_id`,[owner,cursor?.at??null,cursor?.id??null,EVENT_PAGE_BYTES])).rows as {at:string;event_id:string;payload:Event;scanned:string}[]; // bounded scan: at most 513 rows read per page query, never the whole remainder
   if(!rows.length){
-   const remain=Number((await c.query('SELECT count(*)::bigint AS n FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3))',[owner,cursor?.at??null,cursor?.id??null])).rows[0]?.n??0);
-   if(!remain)return{page:[],nextCursor:cursor,done:true};
-   const one=(await c.query('SELECT at,event_id,payload FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 1',[owner,cursor?.at??null,cursor?.id??null])).rows[0] as {at:string;event_id:string;payload:Event};
-   return{page:[one.payload],nextCursor:{at:one.at,id:one.event_id},done:remain===1};
+   const one=(await c.query('SELECT at,event_id,payload,octet_length(payload::text) AS n FROM gymos.gym_activity_archive WHERE owner_id=$1 AND ($2::text IS NULL OR (at,event_id)>($2,$3)) ORDER BY at,event_id LIMIT 1',[owner,cursor?.at??null,cursor?.id??null])).rows[0] as {at:string;event_id:string;payload:Event;n:number}|undefined;
+   if(!one)return{page:[],nextCursor:cursor,done:true};
+   if(one.n>EVENT_PAGE_MAX_BYTES)throw new TransferError('limit',413); // one pre-existing row above the hard page maximum: fail loudly, never emit an over-cap page
+   return{page:[one.payload],nextCursor:{at:one.at,id:one.event_id},done:false};
   }
-  const last=rows[rows.length-1];
-  return{page:rows.map(r=>r.payload),nextCursor:{at:last.at,id:last.event_id},done:rows.length===Number(rows[0].total)};
+  const last=rows[rows.length-1];const scanned=Number(rows[0].scanned);
+  return{page:rows.map(r=>r.payload),nextCursor:{at:last.at,id:last.event_id},done:rows.length===scanned&&scanned<513};
  });
 }
 
@@ -272,7 +275,7 @@ export function validateManifest(value:unknown):BackupV3Manifest{
 
 const PHOTO_RE=/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
 const validPhotoEntry=(id:unknown,content:unknown):id is string=>typeof id==='string'&&id.length>=1&&id.length<=250&&typeof content==='string'&&content.length<=MEMBER_PHOTO_MAX&&PHOTO_RE.test(content);
-const validEvent=(e:unknown):e is Event=>!!e&&typeof e==='object'&&JSON.stringify(e).length<=65536&&typeof (e as Event).id==='string'&&(e as Event).id.length>=1&&(e as Event).id.length<=250&&typeof (e as Event).at==='string'&&Number.isFinite(Date.parse((e as Event).at))&&typeof (e as Event).kind==='string'&&(e as Event).kind.length<=100&&typeof (e as Event).subject==='string'&&(e as Event).subject.length<=250&&typeof (e as Event).actor==='string'&&(e as Event).actor.length<=500&&typeof (e as Event).branch==='string'&&(e as Event).branch.length<=250&&((e as Event).detail===undefined||typeof (e as Event).detail==='string'&&(e as Event).detail!.length<=500);
+const validEvent=(e:unknown):e is Event=>!!e&&typeof e==='object'&&Buffer.byteLength(JSON.stringify(e),'utf8')<=65536&&typeof (e as Event).id==='string'&&(e as Event).id.length>=1&&(e as Event).id.length<=250&&typeof (e as Event).at==='string'&&Number.isFinite(Date.parse((e as Event).at))&&typeof (e as Event).kind==='string'&&(e as Event).kind.length<=100&&typeof (e as Event).subject==='string'&&(e as Event).subject.length<=250&&typeof (e as Event).actor==='string'&&(e as Event).actor.length<=500&&typeof (e as Event).branch==='string'&&(e as Event).branch.length<=250&&((e as Event).detail===undefined||typeof (e as Event).detail==='string'&&(e as Event).detail!.length<=500);
 
 export async function readValidatedCore(owner:string,actor:string,sessionId:string,manifest:BackupV3Manifest):Promise<GymState>{
  const row=(await sectionRows(owner,actor,sessionId)).find(r=>r.kind==='core'&&r.ordinal===0);
@@ -331,11 +334,9 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
   // (staged event volume is capped by SESSION_MAX_BYTES, so the table is bounded by staging admission).
   await client.query('CREATE TEMPORARY TABLE gym_backup_restore_event_ids(id text) ON COMMIT DROP');
   let eventTotal=0;
-  const parsedPages:Event[][]=[];
   for(const r of eventRows){
-   const page=JSON.parse(decode(await readSection(r))) as Event[];
+   const page=JSON.parse(decode(await readSection(r))) as Event[]; // one page in memory at a time; discarded after the dup-check insert
    if(!Array.isArray(page)||!page.every(validEvent))throw new TransferError('invalidBackup',400);
-   parsedPages.push(page);
    for(let i=0;i<page.length;i+=500){
     const chunk=page.slice(i,i+500);
     await client.query('INSERT INTO gym_backup_restore_event_ids(id) SELECT x.id FROM jsonb_to_recordset($1::jsonb) AS x(id text)',[JSON.stringify(chunk.map(e=>({id:e.id})))]);
@@ -348,7 +349,7 @@ export async function commitRestoreV3(owner:string,actor:string,sessionId:string
   // Apply: the same single transaction. Generators re-read the locked, digest-pinned pages.
   const staged:StagedRestore={
    photos:(async function*(){for(const r of photoRows)yield JSON.parse(decode(await readSection(r))) as Record<string,string>;})(),
-   archiveEvents:(async function*(){for(const p of parsedPages)yield p;})(),
+   archiveEvents:(async function*(){for(const r of eventRows)yield JSON.parse(decode(await readSection(r))) as Event[];})(),
   };
   const applied=await persistSpaceTx(client,owner,current,state,true,undefined,staged);
   if(!applied){await client.query('ROLLBACK');return false;}

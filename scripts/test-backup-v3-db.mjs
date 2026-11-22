@@ -160,8 +160,51 @@ try{
  assert.ok(JSON.parse(legacyBuilt.buffer.toString('utf8')).members[0].photo===undefined,'legacy core strips photos for paging');
  await withScope(legacyOwner,c=>c.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[legacyOwner]));
  console.log('PASS: legacy blob workspaces export their real state with photos paged');
+ // Reviewer repro 1: three actors x four 64MiB declarations = 805306368 bytes accepted above the 512MiB owner cap (actor-scoped FORCE RLS hid other actors' rows).
+ await discardSession(owner,actor,dl); // drop the leftover download staging so the arithmetic below is exact
+ const alreadyStaged=Number((await withScope(owner,c=>c.query('SELECT gymos.backup_owner_staged_bytes() AS b'))).rows[0].b);
+ const expectedAdmitted=Math.floor((512*1024*1024-alreadyStaged)/(64*1024*1024));
+ const bigActors=['agg-a','agg-b','agg-c'];let aggOpened=0,aggLimited=false;
+ outer: for(const a of bigActors){
+  const s=await createSession(owner,a,'upload');
+  for(let i=0;i<4;i++){
+   try{await openUploadSection(owner,a,s,'events',i,64*1024*1024,'0'.repeat(64));aggOpened++;}
+   catch(e){if(e instanceof TransferError&&e.code==='limit'){aggLimited=true;break outer;}throw e;}
+  }
+ }
+ assert.ok(aggLimited,'owner aggregate cap rejects the declaration that crosses 512MiB');
+ assert.equal(aggOpened,expectedAdmitted,'aggregate admits up to exactly 512MiB across ALL actors then refuses, got '+aggOpened+' expected '+expectedAdmitted);
+ for(const a of bigActors)await discardSession(owner,a,(await createSession(owner,a,'upload'))); // rotate+wipe
+ console.log('PASS: owner-aggregate staged cap sums across actors (reviewer repro: 805306368 no longer accepted)');
+ // Reviewer repro 2: one pre-existing 8100045-byte archive event emitted a page above the 8002048 hard maximum.
+ const bigPayload=jsonb=>'jsonb_build_object('+jsonb+')';
+ await admin.query("INSERT INTO gymos.gym_activity_archive(owner_id,event_id,branch,at,payload) VALUES($1,'ev-huge','main','2026-10-09T23:59:59.000Z',jsonb_build_object('id','ev-huge','at','2026-10-09T23:59:59.000Z','kind','seed','subject',repeat('x',8100000),'actor','seed','branch','main'))",[owner]);
+ let hugeRefused=false;
+ try{await nextEventPage(owner,{at:'2026-10-09T23:59:58.000Z',id:'zz'});}catch(e){hugeRefused=e instanceof TransferError&&e.code==='limit';}
+ assert.ok(hugeRefused,'oversized legacy event refused loudly instead of emitting an over-cap page');
+ await admin.query("DELETE FROM gymos.gym_activity_archive WHERE owner_id=$1 AND event_id='ev-huge'",[owner]);
+ console.log('PASS: oversized archive event fails loudly at the hard page cap (reviewer repro: 8100045 bytes)');
+ // Revision-pin bracket: the page transaction FOR SHARE-locks the workspace row, so a concurrent writer blocks instead of the page mixing revisions.
+ const pinClient=await pool.connect();const writerClient=await pool.connect();
+ try{
+  await pinClient.query('BEGIN');await pinClient.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
+  const pinned=(await pinClient.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1 FOR SHARE',[owner])).rows[0].revision;
+  await writerClient.query('BEGIN');await writerClient.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);await writerClient.query("SET LOCAL statement_timeout='1500ms'");
+  let blocked=false;
+  try{await writerClient.query('UPDATE gymos.gym_states SET revision=revision+1 WHERE user_id=$1',[owner]);}catch(e){blocked=/statement timeout|canceling statement/i.test(e.message);}
+  assert.ok(blocked,'writer blocked by the pinned page transaction (no mixed-revision window)');
+  await writerClient.query('ROLLBACK');
+  await pinClient.query('COMMIT');
+  assert.equal(typeof pinned,'number');
+ }finally{pinClient.release();writerClient.release();}
+ console.log('PASS: revision pin brackets page reads with FOR SHARE (writer blocked, deterministic)');
+ // Snapshot session flag: recovery downloads are marked so downloadNext never serves live rows.
+ const snap=await createSession(owner,actor,'download',revision,true);
+ assert.equal((await sessionInfo(owner,actor,snap,'download')).snapshot,true,'snapshot flag persisted');
+ await discardSession(owner,actor,snap);
+ console.log('PASS: snapshot sessions are marked and reported');
  console.log('PASS: backup v3 round trip complete');
-}finally{
+}catch(e){console.error('TRY-ERR:',e);throw e;}finally{
  const client=await pool.connect();
  try{await client.query('BEGIN');await client.query("SELECT set_config('app.gym_owner',$1,true)",[owner]);
   for(const t of ['gym_entities','gym_photos','gym_recovery','member_code_access'])await client.query('DELETE FROM gymos.'+t+' WHERE owner_id=$1',[owner]);
