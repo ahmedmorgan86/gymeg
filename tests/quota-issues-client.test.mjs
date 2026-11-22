@@ -8,12 +8,25 @@ test('held set is used only for the same state, owner, branch and day and only w
   for(const args of [[B,'o','a','d'],[A,'x','a','d'],[A,'o','b','d'],[A,'o','a','e']])assert.equal(chooseQuotaIssues(true,got,...args),null);
   assert.equal(chooseQuotaIssues(false,got,A,'o','a','d'),null);assert.equal(chooseQuotaIssues(true,null,A,'o','a','d'),null);
 });
-test('Overview contract: legacy when OFF; base without packet visits + set; unknown only in strict with a visit-limited period; day mismatch is unknown',()=>{
+test('Overview contract: every membershipIssue consumer goes through issueOf/composeIssue; day mismatch is unknown',()=>{
   const w=readFileSync(new URL('../app/workspace.tsx',import.meta.url),'utf8'),h=readFileSync(new URL('../app/use-quota-issues.ts',import.meta.url),'utf8');
-  assert.match(w,/if\(!QUOTA_ISSUES_ON\)return membershipIssue\(s,m,today\)/);
-  assert.match(w,/membershipIssue\(\{\.\.\.s,visits:\[\]\},m,today\)/);
-  assert.match(w,/qStrict&&!m\.archived&&membershipPeriods\(m\)\.some\(p=>p\.visits!=null\)\?"unknown"/);
-  assert.match(w,/quotaUnknown\?"—":String\(active\.length\)/);
+  assert.match(w,/composeIssue\(s,m,today,QUOTA_ISSUES_ON,qSet,qStrict\)/);
+  assert.equal((w.match(/membershipIssue\(/g)??[]).length,0,'workspace.tsx never reads packet visits directly');
+  assert.match(w,/quotaUnknown\?"—":String\(active\.length\)/);assert.match(w,/issueFor=\{issueOf\}/);
   assert.match(h,/d\.day===day/);
-  assert.equal((w.match(/membershipIssue\(s,m,today\)/g)??[]).length,1,'only the OFF branch reads packet visits');
+});
+const {composeIssue}=await import('../app/lib/quota-compose.ts');const {emptyState}=await import('../app/lib/domain.ts');const {normalize,membershipIssue}=await import('../app/lib/extensions.ts');
+test('flag/set/strict combinations: never a wrong Active; strict-without-set is unknown only for visit-limited members',()=>{
+  const s=normalize(emptyState());s.settings.timezone='Africa/Cairo';
+  const P=(id,v)=>({id,plan:'pl',start:'2026-01-01',end:'2026-12-31',visits:v});
+  s.members=[{id:'q',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[P('1',2)]},{id:'u',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[P('2',null)]},{id:'f',branch:'a',joined:'2026-01-01',expires:'2026-12-31',membershipPeriods:[P('3',2)],freezes:[{from:'2026-03-01',to:'2026-03-30'}]}];
+  for(let i=0;i<3;i++)s.visits.push({id:'v'+i,member:'q',branch:'a',day:'2026-03-0'+(i+1),at:'2026-03-0'+(i+1)+'T10:00:00.000Z',leftAt:'2026-03-0'+(i+1)+'T11:00:00.000Z'});
+  const day='2026-03-15',L=m=>membershipIssue(s,m,day),[q,u,f]=s.members;assert.equal(L(q),'quota');
+  const full=m=>composeIssue(s,m,day,true,null,false);                                   // ON, loading/error, non-strict, packet has visits -> legacy
+  for(const m of s.members)assert.equal(full(m),L(m),m.id);assert.equal(composeIssue(s,q,day,false,null,true),'quota','OFF ignores everything');
+  const omitted={...s,visits:[]};                                                         // omitted packet + set known
+  const withSet=m=>composeIssue(omitted,m,day,true,new Set(['q']),true);for(const m of s.members)assert.equal(withSet(m),L(m),'set == legacy '+m.id);
+  const empty=m=>composeIssue(omitted,m,day,true,new Set(),false);assert.equal(empty(q),null,'a KNOWN empty set is authoritative');
+  const strict=m=>composeIssue(omitted,m,day,true,null,true);                             // loading/error in strict
+  assert.equal(strict(q),'unknown');assert.equal(strict(u),null,'unlimited member has no visit-dependent issue');assert.equal(strict(f),'frozen','other issues stay exact');
 });

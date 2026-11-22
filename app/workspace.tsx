@@ -34,6 +34,7 @@ import {Music2,Activity,ArrowDownLeft,ArrowUpRight,ArrowRight,ArrowLeft,BarChart
 import {addDays,dayAt,days,type GymState,type Member,type Operation,type Pulse,type GymClass} from "./lib/domain";
 import {useLastVisits,LAST_VISITS_ON} from "./use-last-visits";
 import {useQuotaIssues,QUOTA_ISSUES_ON} from "./use-quota-issues";
+import {composeIssue} from "./lib/quota-compose";
 import ClubDesignEditor from './club-design-editor';
 import {clubDesignStyle,presetThemeStyle} from './lib/club-design';
 import {themes} from './lib/themes';
@@ -84,7 +85,7 @@ export default function Workspace(){
  const {view:attendanceView,failed:attendanceFailed,retry:attendanceRetry}=useAttendance(page==='attendance',s,packet?.owner,branch,today);
  const ALL_DAYS='9999-12-31'; // members table: newest visit day with NO upper clamp (the legacy expression has none); same reader as the WhatsApp reminders
  const {quota:qSet,failed:qFailed,retry:qRetry}=useQuotaIssues(s as GymState,packet?.owner,branch,today),qStrict=LAZY_STRICT&&QUOTA_ISSUES_ON&&!qSet;
- function issueOf(m:Member):string|null{if(!s)return null;if(!QUOTA_ISSUES_ON)return membershipIssue(s,m,today);const base=membershipIssue({...s,visits:[]},m,today);if(base!==null)return base;if(qSet)return qSet.has(m.id)?"quota":null;return qStrict&&!m.archived&&membershipPeriods(m).some(p=>p.visits!=null)?"unknown":null;}
+ function issueOf(m:Member):string|null{return s?composeIssue(s,m,today,QUOTA_ISSUES_ON,qSet,qStrict):null;}
  const {last:memLast,failed:memLastFailed,retry:memLastRetry}=useLastVisits(s as GymState,packet?.owner,branch,ALL_DAYS,page==='members'),memLastStrict=LAZY_STRICT&&LAST_VISITS_ON&&!memLast;
  const {data:paySum}=usePaymentsSummary(true,s,packet?.owner,branch,today,period);
  const {days:trendDays,held:trendHeld,failed:trendFailed,unavailable:trendUnavailable,retry:trendRetry}=useVisitTrend(s,packet?.owner,branch,today,period),trendStrict=LAZY_STRICT&&VISIT_TREND_ON,trendNums=trendDays?deriveTrend(trendDays,today,period):trendStrict&&trendHeld?deriveTrend(trendHeld,today,period):null,trendBlank=trendStrict&&!trendNums;

@@ -97,10 +97,23 @@ test('cost: no photo hashing, bounded dirty work (explicit fallback over the bud
   assert.ok(!seen.some(q=>/sha256|gym_photos/.test(q)),'no photo hashing or photo-table access');
   assert.ok(seen.some(q=>/statement_timeout/.test(q)),'statement timeout is set before the reads');
   console.log('quota-issues cost: members',r.members,'statements',seen.length,'ms',ms);
-  assert.ok(seen.length<=8,'constant statement count, not per member: '+seen.length);
+  assert.ok(seen.length<=14,'constant statement count, not per member: '+seen.length);
   // dirty budget: mark more than the budget dirty -> explicit fallback, nothing partial, no unbounded write-on-read
   await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,1000+g FROM generate_series(0,$1) g ON CONFLICT DO NOTHING",[QUOTA_MAX_DIRTY*3]);
-  const over=await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});
-  console.log('quota-issues over-budget',JSON.stringify(over));
-  assert.equal(over.status,'fallback');
+  // convergence: each request drains at most the budget and says so; repeated reads reach ok with no request exceeding the budget
+  let calls=0,last,peak=0;const dirtyN=async()=>Number((await db.query("SELECT count(*) n FROM gymos.gym_member_summary_dirty WHERE owner_id='QC'")).rows[0].n);
+  const d0=await dirtyN();
+  for(;calls<20;calls++){const before=await dirtyN();last=await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]});peak=Math.max(peak,before-await dirtyN());if(last.status==='ok')break;assert.deepEqual([last.status,last.reason],['fallback','draining']);}
+  console.log('quota-issues drain: dirty',d0,'requests until ok',calls+1,'max recomputed per request',peak);
+  assert.equal(last.status,'ok');assert.ok(peak<=QUOTA_MAX_DIRTY&&calls>=2);
+  // forced failure mid-wave: the transaction rolls back (marks and summaries unchanged) and the connection is usable afterwards
+  await db.query("INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen) SELECT 'QC','z'||g,5000+g FROM generate_series(0,60) g ON CONFLICT DO NOTHING");
+  const before=await dirtyN(),sumBefore=(await db.query("SELECT md5(string_agg(stored::text,'' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id='QC'")).rows[0].h;
+  let n=0;const failing=(o,work)=>db.transaction(async c=>{await c.query("SELECT set_config('app.gym_owner','QC',true)");return work({query:async(q,v)=>{if(/gym_member_summaries/.test(String(q))&&/INSERT|UPDATE/i.test(String(q))&&++n===10)throw new Error('forced');return c.query(q,v);}});});
+  await assert.rejects(readQuotaIssues(failing,{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]}),/forced/);
+  assert.ok(n>=10,'the failure was injected mid-wave');
+  assert.equal(await dirtyN(),before,'marks restored by rollback');
+  assert.equal((await db.query("SELECT md5(string_agg(stored::text,'' ORDER BY member_id)) h FROM gymos.gym_member_summaries WHERE owner_id='QC'")).rows[0].h,sumBefore,'summaries unchanged by the rolled-back wave');
+  assert.equal((await db.query('SELECT 1 AS x')).rows[0].x,1,'connection usable');
+  assert.ok(['ok','fallback'].includes((await readQuotaIssues(scopeFor('QC'),{owner:'QC',branch:'a',branches:null,settings:st.settings,now:NOWS2[0]})).status));
 });

@@ -2,14 +2,14 @@
 // It exists because the packet may omit visits, and membershipIssue()'s quota branch is the only part that reads them (every other branch reads the member row).
 // Scope of the claim (evidence: tests/member-summary-store.integration.mjs tests 16-17 and tests/quota-issues-source.integration.mjs): ISSUE classification only, same-branch visits,
 // never numeric used/visitsRemaining. Anything not derivable exactly from the stored summaries is {status:'fallback'}; the client then shows unknown, never a plausible total.
-import {readMemberCandidates,readOwnerVersion} from './member-summary-store.ts';
+import {readMemberCandidates,readOwnerVersion,refreshDirtySummaries} from './member-summary-store.ts';
 import {deriveSummary} from './member-summary-model.ts';
 import {dayAt} from './domain.ts';
 import type {GymState} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
 /** Read budget of one request: at most this many dirty members are recomputed (write-on-read) before the answer is an explicit fallback; photos are never hashed (the aggregate does not use photoV). */
 export const QUOTA_MAX_DIRTY=100,QUOTA_STATEMENT_MS=4000;
-export type QuotaIssues={status:'ok';version:string;day:string;quota:string[];members:number}|{status:'unchanged';version:string}|{status:'fallback';reason:string}|{status:'forbidden'};
+export type QuotaIssues={status:'ok';version:string;day:string;quota:string[];members:number}|{status:'unchanged';version:string}|{status:'fallback';reason:string;remaining?:number}|{status:'forbidden'};
 export type QuotaRequest={owner:string;branch:string;branches:string[]|null;settings:GymState['settings'];now:string;since?:string|null};
 export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaIssues>{
   if(!q.branch||q.branch.length>200)return{status:'fallback',reason:'invalid-branch'};
@@ -19,6 +19,11 @@ export async function readQuotaIssues(scope:Scope,q:QuotaRequest):Promise<QuotaI
     const v1=await readOwnerVersion(c,q.owner);if(v1===null)return{status:'fallback',reason:'no-version'} as const;
     const day=dayAt(q.now,q.settings.timezone);
     if(q.since&&q.since===v1+'|'+day)return{status:'unchanged',version:v1} as const; // the token covers the day too: a day change must recompute
+    // Convergence: ONE bounded wave per request (<= QUOTA_MAX_DIRTY recomputes, savepointed in recompute; the progress commits with this transaction), so a large dirty backlog drains over successive reads
+    // instead of returning fallback forever, and no request does more than the budget. A wave that leaves marks behind is an explicit {fallback,draining}.
+    const w=await refreshDirtySummaries(c,q.owner,QUOTA_MAX_DIRTY,q.now);
+    if(w.status!=='ok')return{status:'fallback',reason:w.status} as const;
+    if(w.remaining>0)return{status:'fallback',reason:'draining',remaining:w.remaining} as const;
     const r=await readMemberCandidates(c,q.owner,[q.branch],{refresh:true,now:q.now,photo:false,maxDirty:QUOTA_MAX_DIRTY});
     if(r.status!=='ok')return{status:'fallback',reason:r.status} as const;
     const quota:string[]=[];
