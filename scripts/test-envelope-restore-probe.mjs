@@ -57,12 +57,13 @@ mark('downloaded');
 
 mark('staged');
  let peak=0;const t=setInterval(()=>{const m=mem();if(m>peak)peak=m;},5);
- const before=mem(),t0=Date.now();
- const ok=await commitRestoreV3(owner,actor,ul,manifest,await readEntityCore(owner),(s)=>s);
- const commitMs=Date.now()-t0;clearInterval(t);
+ const before=mem(),t0=Date.now();let ok=false,commitErr='';
+ try{ok=await commitRestoreV3(owner,actor,ul,manifest,await readEntityCore(owner),(s)=>s);}catch(e){commitErr=e instanceof Error?e.constructor.name+':'+e.message:String(e);}
+ const commitMs=Date.now()-t0;clearInterval(t); // finally-style: a leaked interval pins the event loop on the error path
  const after=mem();
 mark('committed');
- console.log(JSON.stringify({members:N,photoBytes:N*SIZE,photoPages:photoBufs.length,commitOk:ok,commitMs,constrainedRuntime:'--max-old-space-size='+process.execArgv.join(' '),nodeOptions:process.env.NODE_OPTIONS||'',beforeMB:before,peakMB:peak,afterMB:after,peakDeltaMB:peak-before}));
+ console.log(JSON.stringify({members:N,photoBytes:N*SIZE,photoPages:photoBufs.length,commitOk:ok,commitErr,commitMs,constrainedRuntime:'--max-old-space-size='+process.execArgv.join(' '),nodeOptions:process.env.NODE_OPTIONS||'',beforeMB:before,peakMB:peak,afterMB:after,peakDeltaMB:peak-before}));
+ if(commitErr){const live=await withScope(owner,c=>c.query('SELECT count(*)::int n,count(DISTINCT content) d FROM gymos.gym_photos WHERE owner_id=$1',[owner]));console.log('rollback-check',JSON.stringify(live.rows[0]));}
  for(const tb of ['gym_recovery_photos','gym_entities','gym_photos','gym_recovery','member_code_access'])await admin.query('DELETE FROM gymos.'+tb+' WHERE owner_id=$1',[owner]);
  await admin.query('DELETE FROM gymos.gym_states WHERE user_id=$1',[owner]);
 }catch(e){console.error('FAILED:',e);process.exitCode=1;}
