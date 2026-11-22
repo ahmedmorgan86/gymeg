@@ -1,5 +1,5 @@
 // Optional real-browser check (not in the runner: needs /tmp/harness with esbuild + puppeteer-core, and Chrome).
-// Run: node --experimental-strip-types --import ./tests/workspace-post-loader.mjs tests/member-console.browser.mjs
+// Run: node --experimental-strip-types --import ./tests/workspace-post-loader.mjs tests/member-profile-strict.browser.mjs
 // STRICT variant: renders the REAL MemberConsole with NEXT_PUBLIC_GYMOS_LAZY_STRICT=1 and summaries ON, packet visits EMPTY (as a strict packet omission would deliver). Original header: Renders the REAL MemberConsole twice (flags OFF = legacy, ON = candidates + detail + paged history) against the REAL routes over PGlite and compares what the user sees.
 import {createRequire} from 'node:module';import http from 'node:http';
 const req=createRequire('/tmp/harness/');const esbuild=req('esbuild'),puppeteer=req('puppeteer-core');
@@ -46,12 +46,20 @@ try{
   await page.screenshot({path:`/downloads/mp-strict-loading-${tag}.png`});
   await sleep(4000);v=await visitsLine(page);check(v!==null&&v.includes(String(truth)),`${tag}: after load shows server count ${truth}: ${v}`);
   check(!await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),`${tag}: no horizontal overflow`);
+  { // every tab must be reachable: scrollable container, and keyboard focus brings each tab fully into view
+    const info=await page.evaluate(async()=>{const tabs=[...document.querySelectorAll('button')].filter(b=>/^(Profile|Attendance|Training|Payments|Health & vitals|Measurements|الملف|الحضور|التمارين|المدفوعات|الصحة|القياسات)/.test(b.textContent.trim())&&b.parentElement&&b.parentElement.children.length>=5);
+      if(!tabs.length)return{n:0};const box=tabs[0].parentElement;const cs=getComputedStyle(box);const res={n:tabs.length,scrollW:box.scrollWidth,clientW:box.clientWidth,ox:cs.overflowX,hidden:[],partialAfterFocus:[]};
+      for(const b of tabs){b.focus();await new Promise(r=>setTimeout(r,500));const r=b.getBoundingClientRect(),c=box.getBoundingClientRect();const vis=r.left>=Math.max(c.left,0)-1&&r.right<=Math.min(c.right,window.innerWidth)+1;if(!vis){res.partialAfterFocus.push(b.textContent.trim());b.scrollIntoView({inline:'nearest',block:'nearest'});await new Promise(r=>setTimeout(r,500));const r2=b.getBoundingClientRect(),c2=box.getBoundingClientRect();if(!(r2.left>=Math.max(c2.left,0)-1&&r2.right<=Math.min(c2.right,window.innerWidth)+1))res.hidden.push(b.textContent.trim());}}
+      return res;});
+    console.log(`${tag}: tabs`,JSON.stringify(info));
+    check(info.n>=5&&info.hidden.length===0,`${tag}: all ${info.n} tabs reachable by focus (never fully visible even with scrollIntoView: ${info.hidden?.join(',')||'none'}; only partly visible right after keyboard focus (needs a swipe/scroll or the next focus): ${info.partialAfterFocus?.join(',')||'none'}; overflow-x=${info.ox}, scroll ${info.scrollW}/${info.clientW})`);
+  }
   await page.screenshot({path:`/downloads/mp-strict-ok-${tag}.png`});await page.close();
   delayDetail=0;failDetail=5;page=await browser.newPage();await page.setViewport({width:w,height:h});await page.goto(`http://localhost:${port}/${ar?'ar':'en'}`);await sleep(2500);
   v=await visitsLine(page);check(v!==null&&/—/.test(v)&&!/\d/.test(v.replace(lab,'')),`${tag}: failed detail keeps dash, never 0: ${v}`);
   const att=await page.evaluate(()=>{const b=[...document.querySelectorAll('button,[role=tab]')].find(x=>/Attendance|الحضور|الزيارات/.test(x.textContent));if(b){b.click();return true;}return false;});await sleep(600);
   const st=await page.evaluate(()=>[...document.querySelectorAll('[role=status]')].map(x=>x.textContent).join('|'));
-  console.log(`${tag}: attendance tab clicked=${att}; status text: ${st.slice(0,100)}`);
+  check(att&&/Visit history is unavailable|سجل الزيارات غير متاح/.test(st),`${tag}: strict Attendance tab shows the unavailable notice, not an empty list (clicked=${att}): ${st.slice(0,80)}`);
   await page.screenshot({path:`/downloads/mp-strict-error-${tag}.png`});await page.close();failDetail=0;
  }
 }finally{await browser.close();server.close();}

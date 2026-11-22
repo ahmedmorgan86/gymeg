@@ -1,5 +1,5 @@
 // Optional real-browser check (not in the runner: needs /tmp/harness with esbuild + puppeteer-core, and Chrome).
-// Run: node --experimental-strip-types --import ./tests/workspace-post-loader.mjs tests/member-console.browser.mjs
+// Run: node --experimental-strip-types --import ./tests/workspace-post-loader.mjs tests/member-console-strict.browser.mjs
 // STRICT variant: renders the REAL MemberConsole with NEXT_PUBLIC_GYMOS_LAZY_STRICT=1 and summaries ON, packet visits EMPTY (as a strict packet omission would deliver). Original header: Renders the REAL MemberConsole twice (flags OFF = legacy, ON = candidates + detail + paged history) against the REAL routes over PGlite and compares what the user sees.
 import {createRequire} from 'node:module';import http from 'node:http';
 const req=createRequire('/tmp/harness/');const esbuild=req('esbuild'),puppeteer=req('puppeteer-core');
