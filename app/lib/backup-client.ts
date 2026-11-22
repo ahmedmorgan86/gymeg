@@ -7,13 +7,16 @@ export async function restoreBackup(owner:string,backup:unknown,revision:number)
 // ---- Backup format v3 client (postgres backend): bounded streaming download + sectioned restore ----
 const V3_PHOTO_PAGE=2_000_000,V3_EVENT_PAGE=8_000_000,V3_FALLBACK_CAP=192*1024*1024,V3_RESTORE_CAP=256*1024*1024;
 type V3Section={ordinal:number;bytes:number;digest:string;transfer:string;parts:number;chunkBytes:number};
-type V3Writer={write:(s:string|Uint8Array)=>Promise<void>;finish:()=>Promise<Blob|null>};
+type V3Writer={write:(s:string|Uint8Array)=>Promise<void>;finish:()=>Promise<Blob|null>;abort?:()=>Promise<void>};
 export const v3Streams=()=>typeof window!=='undefined'&&window.isSecureContext&&'showSaveFilePicker' in window;
-type SaveHandle={createWritable:()=>Promise<{write:(d:string|Uint8Array)=>Promise<void>;close:()=>Promise<void>}>};
-async function openStream(name:string):Promise<V3Writer>{ // picker must run inside the click's transient activation: no awaits may precede it
- const handle=await (window as unknown as {showSaveFilePicker:(o:object)=>Promise<SaveHandle>}).showSaveFilePicker({suggestedName:name,types:[{description:'GymEG backup',accept:{'application/json':['.json']}}]});
+type SaveStream={write:(d:string|Uint8Array)=>Promise<void>;close:()=>Promise<void>;abort:()=>Promise<void>};
+type SaveHandle={createWritable:()=>Promise<SaveStream>};
+async function pickHandle(name:string):Promise<SaveHandle>{ // picker must run inside the click's transient activation: no awaits may precede it. Picking creates NO file - the writable (and thus the file) appears only after downloadStart succeeds.
+ return (window as unknown as {showSaveFilePicker:(o:object)=>Promise<SaveHandle>}).showSaveFilePicker({suggestedName:name,types:[{description:'GymEG backup',accept:{'application/json':['.json']}}]});
+}
+async function streamWriter(handle:SaveHandle):Promise<V3Writer>{
  const stream=await handle.createWritable();
- return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;}};
+ return{write:d=>stream.write(d),finish:async()=>{await stream.close();return null;},abort:async()=>{await stream.abort();}}; // abort discards the partial file: no empty or half-written apparent backup
 }
 function collectWriter():V3Writer{ // fallback: accumulate with an ACTUAL byte cap; the estimate only preflights, this enforces
  const parts:Uint8Array[]=[];let total=0;const enc=new TextEncoder();
@@ -28,27 +31,29 @@ async function fetchSection(owner:string,sec0:V3Section,w:V3Writer,transform?:(t
 }
 export async function downloadBackupV3(owner:string,recovery:string|undefined,onProgress:(done:number,total:number)=>void):Promise<Blob|null>{
  // Chooser BEFORE any network await: transient activation expires across the downloadStart round-trip, and a picker AbortError then leaves no server session behind at all.
- let picked:V3Writer|null=null;
- if(v3Streams()){try{picked=await openStream('GymEG-backup-'+new Date().toISOString().slice(0,10)+'.json');}catch(e){throw e instanceof Error&&e.name==='AbortError'?Error('cancelled'):e;}}
- const start=await request(owner,{action:'downloadStart',format:3,recovery});start.tenant=owner;
+ let handle:SaveHandle|null=null;
+ if(v3Streams()){try{handle=await pickHandle('GymEG-backup-'+new Date().toISOString().slice(0,10)+'.json');}catch(e){throw e instanceof Error&&e.name==='AbortError'?Error('cancelled'):e;}}
+ const start=await request(owner,{action:'downloadStart',format:3,recovery});start.tenant=owner; // throws (unsupportedBackend/auth/network) BEFORE any writable exists: nothing created, nothing to clean
  const total=start.core.bytes+start.estimate.photoBytes+start.estimate.eventBytes;
  let done=0;const tick=(n:number)=>{done+=n;onProgress(done,total);};
+ let w:V3Writer|undefined,ok=false;
  try{ // every failure past this point - including the size preflight - discards the session
-  if(!picked&&total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');
-  const w=picked??collectWriter();
-  await w.write('{"format":"gymos-backup","version":3,"tenant":'+JSON.stringify(start.tenant??'')+',"createdAt":'+JSON.stringify(new Date().toISOString())+',"revision":'+start.revision+',"core":');
-  await fetchSection(owner,start.core,w);tick(start.core.bytes);
-  await w.write(',"photos":{');let first=true;
+  if(!handle&&total>V3_FALLBACK_CAP)throw Error('backupTooLargeForBrowser');
+  w=handle?await streamWriter(handle):collectWriter();const wr=w;
+  await wr.write('{"format":"gymos-backup","version":3,"tenant":'+JSON.stringify(start.tenant??'')+',"createdAt":'+JSON.stringify(new Date().toISOString())+',"revision":'+start.revision+',"core":');
+  await fetchSection(owner,start.core,wr);tick(start.core.bytes);
+  await wr.write(',"photos":{');let first=true;
   const strip=(s:string)=>s.slice(1,-1);
-  const putSection=async(sec:V3Section)=>{if(!first)await w.write(',');first=false;await fetchSection(owner,sec,w,strip);tick(sec.bytes);};
+  const putSection=async(sec:V3Section)=>{if(!first)await wr.write(',');first=false;await fetchSection(owner,sec,wr,strip);tick(sec.bytes);};
   for(const sec of start.photoSections??[])await putSection(sec);
   if(start.photosStaged<start.photoCount){let cursor:string|null=null,ordinal=(start.photoSections??[]).length;for(;;){const r=await request(owner,{action:'downloadNext',format:3,session:start.session,kind:'photos',cursor,ordinal});if(r.done&&!r.page)break;await putSection(r.page);cursor=r.nextCursor??null;ordinal++;if(r.done)break;}}
-  await w.write('},"events":[');first=true;
+  await wr.write('},"events":[');first=true;
   for(const sec of start.eventSections??[])await putSection(sec);
   if((start.eventsStaged??0)<start.eventCount){let cursor:null|{at:string;id:string}=null,ordinal=(start.eventSections??[]).length;for(;;){const r=await request(owner,{action:'downloadNext',format:3,session:start.session,kind:'events',cursor,ordinal});if(r.done&&!r.page)break;await putSection(r.page);cursor=r.nextCursor??null;ordinal++;if(r.done)break;}}
-  await w.write(']}');
-  return await w.finish();
- }finally{await request(owner,{action:'uploadAbort',session:start.session}).catch(()=>{});}
+  await wr.write(']}');
+  const blob=await wr.finish();ok=true;
+  return blob;
+ }finally{if(!ok&&w?.abort)await w.abort().catch(()=>{});await request(owner,{action:'uploadAbort',session:start.session}).catch(()=>{});} // an unfinished download never leaves a partial file behind
 }
 export async function restoreBackupV3(owner:string,file:File,revision:number,onProgress:(done:number,total:number)=>void){
  if(file.size>V3_RESTORE_CAP)throw Error('tooLarge'); // admission BEFORE parse: the parsed DOM and every staging buffer derive from this bound
