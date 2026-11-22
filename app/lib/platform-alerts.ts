@@ -93,7 +93,7 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
   } catch {}
 }
 
-export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean;reason?:string};
+export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean;reason?:string;unsupported?:boolean};
 async function readLicenseBlocked(response:Response):Promise<boolean>{if(response.status!==403)return false;try{const body=await response.json() as {error?:unknown};return body.error==='licenseReadOnly';}catch{return false;}}
 export async function requestNotificationPermission(branch?:string,audience?:'support'):Promise<NotificationPermissionResult>{
  const no=(native=false,prompted=false,configured=true):NotificationPermissionResult=>({granted:false,native,prompted,remote:false,configured});
@@ -123,7 +123,7 @@ export async function requestNotificationPermission(branch?:string,audience?:'su
   catch{return no(true);}
  }
  if(audience==='support')return no(false,false,false);
- if(!('Notification'in window)||!('serviceWorker'in navigator)||!('PushManager'in window))return no();
+ if(!('Notification'in window)||!('serviceWorker'in navigator)||!('PushManager'in window))return{...no(),unsupported:true};
  let prompted=false,granted=Notification.permission==='granted';
  if(!granted&&Notification.permission!=='denied'){
   prompted=true;

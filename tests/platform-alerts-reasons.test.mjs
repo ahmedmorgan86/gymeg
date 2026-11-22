@@ -111,3 +111,16 @@ test('success carries no reason',async()=>{
   const r=await requestNotificationPermission('main');
   assert.equal(r.remote,true);assert.equal(r.reason,undefined);
 });
+
+test('browser without Notification/serviceWorker/PushManager is marked unsupported',async()=>{
+  globalThis.window={};
+  Object.defineProperty(globalThis,'navigator',{value:{},configurable:true,writable:true});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.unsupported,true);assert.equal(r.granted,false);assert.equal(r.prompted,false);
+});
+
+test('granted-permission failure paths never claim unsupported',async()=>{
+  setup({subscribe:async()=>{throw new Error('x');}});
+  const r=await requestNotificationPermission('main');
+  assert.equal(r.unsupported,undefined);
+});
