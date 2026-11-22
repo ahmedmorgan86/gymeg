@@ -19,7 +19,7 @@ const R=[
  ['attendance','GYMOS_ATTENDANCE',b=>({branch:b,day:'2026-03-05'}),['visits','members'],false],
  ['today-visits','GYMOS_TODAY_VISITS',b=>({branch:b,day:'2026-03-05'}),['visits','members'],false],
  ['last-visits','GYMOS_LAST_VISITS',b=>({branch:b,today:'2026-03-05'}),['visits','members'],false],
- ['visit-trend','GYMOS_VISIT_TREND',b=>({branch:b,today:'2026-03-05',period:'7'}),['visits','members'],false],
+ ['visit-trend','GYMOS_VISIT_TREND',b=>({branch:b,today:new Date().toISOString().slice(0,10),period:'7'}),['visits','members'],false],
  ['open-visits','GYMOS_OPEN_VISITS',b=>({branch:b}),['visits','members'],false],
  ['payments','GYMOS_PAYMENTS',b=>({branch:b,mode:'summary',today:'2026-03-05',period:'30'}),['payments','members'],false],
  ['payments','GYMOS_PAYMENTS',b=>({branch:b,mode:'export'}),['payments','members'],false],
@@ -54,4 +54,14 @@ test('consumer routes: flag, auth, params, branch scope, role gate (packetQuerie
   // the oracle must actually exercise both outcomes: reception is refused where its packet lacks money/invoice collections, and owners are served everywhere
   for(const n of ['payments','dues','report-payments'])assert.ok(seen['reception:'+n+':403'],'reception refused on '+n);
   for(const [n] of R)assert.ok(seen['owner:'+n+':200'],'owner served on '+n);
+});
+test('visit-trend route: only the UI periods and a day within +-2 of the club clock',async()=>{
+  await seed('V');ctx('V');process.env.GYMOS_VISIT_TREND='1';
+  const call=async q=>(await import('../app/api/workspace/visit-trend/route.ts')).GET(new Request('https://example.test/api/workspace/visit-trend?'+new URLSearchParams(q),{headers:{'X-GymOS-Tenant':'t-V'}}));
+  const own=new Date().toISOString().slice(0,10),shift=n=>new Date(Date.parse(own)+n*864e5).toISOString().slice(0,10);
+  assert.equal((await call({branch:'a',today:own,period:'7'})).status,200);assert.equal((await call({branch:'a',today:own,period:'14'})).status,200);
+  for(const p of ['1','3660','8','0','x',''])assert.equal((await call({branch:'a',today:own,period:p})).status,400,'period '+p);
+  for(const d of [shift(-3),shift(3),'2026-03-05','x'])assert.equal((await call({branch:'a',today:d,period:'7'})).status,400,'day '+d);
+  for(const d of [shift(-1),shift(1)])assert.equal((await call({branch:'a',today:d,period:'7'})).status,200,'day '+d);
+  delete process.env.GYMOS_VISIT_TREND;
 });

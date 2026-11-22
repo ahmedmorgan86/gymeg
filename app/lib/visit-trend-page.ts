@@ -1,15 +1,16 @@
 // Bounded read for the Overview attendance pulse: visits per day of one branch over [from, to].
 // Legacy (workspace.tsx Overview/TrendChart): weekVisits = visits.filter(day>=addDays(today,1-period)&&day<=today).length, prevWeek over [today+1-2*period, today-period], chart value per day = visits.filter(day===d).length
 // (JS code-unit string compare). Here: one grouped index-only count over the canonical-day partial index with C-collated range predicates, transfer O(days) <= 2*PERIOD_MAX, never the visits themselves.
+// Cost: grouped from the plain index but every visit row of the window is visited (heap fetches included; index-only is not guaranteed without a fresh visibility map): O(visits of the branch in <= 28 days), output O(days). Not history bounded and not O(days).
 // The client derives week, previous week and chart values from `days` (a missing day is 0). Any visit of the branch with a non-canonical day or `at` (visit_odd) => 'unavailable' and the caller keeps the packet expression.
 import {boundedRead,indexProbe} from './bounded-read.ts';
 import {readOwnerVersion} from './member-summary-store.ts';
 import {addDays} from './domain.ts';
 import type {Scope} from './member-console-source.ts';
-export const TREND_PERIOD_MAX=3660; // input sanity for the chart period (the UI offers 7 and 14), not a data limit
+export const TREND_PERIODS=[7,14] as const; // exactly the chart periods the UI offers: one request reads at most 2*14 days of the branch's visits, and the shared read cache sees at most 2 keys per owner/branch/day
 export type VisitTrend={status:'ok';version:string;from:string;to:string;days:Record<string,number>}|{status:'stale'}|{status:'unavailable';reason?:string};
 export async function readVisitTrend(scope:Scope,q:{owner:string;branch:string;today:string;period:number}):Promise<VisitTrend>{
-  if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.today)||!Number.isSafeInteger(q.period)||q.period<1||q.period>TREND_PERIOD_MAX)throw new RangeError('invalid');
+  if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.today)||!(TREND_PERIODS as readonly number[]).includes(q.period))throw new RangeError('invalid');
   const from=addDays(q.today,1-2*q.period);
   return scope(q.owner,c=>boundedRead(c,q.owner,'visittrend\u0000'+q.branch+'\u0000'+q.today+'\u0000'+q.period,async()=>{
     const ver=await readOwnerVersion(c,q.owner);if(ver===null)return{status:'unavailable',reason:'no-version'} as const;
