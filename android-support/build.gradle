@@ -34,7 +34,7 @@ android {
             versionName '1.0.9'
             applicationIdSuffix '.freshtest'
             buildConfigField 'String', 'WEB_HOST', '"gymeg.vercel.app"'
-            buildConfigField 'String', 'SUPABASE_HOST', '"frsstuqstutbflkaffcx.supabase.co"'
+            buildConfigField 'String', 'SUPABASE_HOST', '"aynycpumwcopbnkbkqhr.supabase.co"'
             manifestPlaceholders = [webHost: 'gymeg.vercel.app']
         }
     }
