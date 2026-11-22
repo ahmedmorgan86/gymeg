@@ -1,12 +1,13 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {visitCountView} from '../app/use-member-detail.ts';
+import {registerHooks} from 'node:module';
+registerHooks({resolve(s,c,n){try{return n(s,c);}catch(e){if(e.code==='ERR_MODULE_NOT_FOUND'&&s.startsWith('.')&&!/\.[a-z]+$/i.test(s))return n(s+'.ts',c);throw e;}}}); // extension-less app imports resolve like the other hook tests (plain `node --test` has no loader)
+const {visitCountView,detailUnknown,chooseDetail}=await import('../app/use-member-detail.ts');
 test('visit count: strict legacy fallback is unknown (null), never a zero from an omitted list',()=>{
   assert.equal(visitCountView({visitCount:0,source:'legacy'},true),null);
   assert.equal(visitCountView({visitCount:7,source:'detail'},true),7);
   assert.equal(visitCountView({visitCount:0,source:'detail'},true),0);
   assert.equal(visitCountView({visitCount:4,source:'legacy'},false),4);
 });
-import {detailUnknown,chooseDetail} from '../app/use-member-detail.ts';
 test('strict: a legacy detail is unknown; strict alone (summaries off) is unknown too, never false quota/no open visit',()=>{
   assert.equal(detailUnknown({source:'legacy'},true),true);assert.equal(detailUnknown({source:'detail'},true),false);assert.equal(detailUnknown({source:'legacy'},false),false);
 });

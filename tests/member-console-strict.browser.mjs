@@ -20,15 +20,17 @@ await real.query("SELECT gymos.backfill_member_summaries('A')");
 const branch=big.branch,serverNow=Date.parse('2026-03-15T12:00:00.000Z');
 
 const strictBundle=(await esbuild.build({stdin:{contents:`import {createRoot} from 'react-dom/client';import React from 'react';import C from './app/member-console.tsx';const p=window.__P;createRoot(document.getElementById('r')).render(React.createElement(C,{...p,mutate:async()=>true,reload:async()=>{}}));`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.tsx':'tsx','.ts':'ts','.css':'local-css'},define:{'process.env.NODE_ENV':'"development"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_SUMMARIES':'"1"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_HISTORY':'"0"','process.env.NEXT_PUBLIC_GYMOS_LAZY_STRICT':'"1"'},alias:{'next/image':'/tmp/gymeg/tests/browser-img-stub.tsx'},external:[],outdir:'/tmp/hout'})).outputFiles;
-const pick=(fs,ext)=>fs.filter(f=>f.path.endsWith(ext)).map(f=>f.text).join('\n');const js=pick(strictBundle,'.js'),css=pick(strictBundle,'.css');
+const legacyBundle=(await esbuild.build({stdin:{contents:`import {createRoot} from 'react-dom/client';import React from 'react';import C from './app/member-console.tsx';const p=window.__P;createRoot(document.getElementById('r')).render(React.createElement(C,{...p,mutate:async()=>true,reload:async()=>{}}));`,resolveDir:process.cwd(),loader:'tsx'},bundle:true,write:false,format:'iife',jsx:'automatic',loader:{'.tsx':'tsx','.ts':'ts','.css':'local-css'},define:{'process.env.NODE_ENV':'"development"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_SUMMARIES':'"0"','process.env.NEXT_PUBLIC_GYMOS_MEMBER_HISTORY':'"0"','process.env.NEXT_PUBLIC_GYMOS_LAZY_STRICT':'"0"'},alias:{'next/image':'/tmp/gymeg/tests/browser-img-stub.tsx'},external:[],outdir:'/tmp/hout'})).outputFiles;
+const pick=(fs,ext)=>fs.filter(f=>f.path.endsWith(ext)).map(f=>f.text).join('\n');const js=pick(strictBundle,'.js'),css=pick(strictBundle,'.css'),jsL=pick(legacyBundle,'.js'),cssL=pick(legacyBundle,'.css');
 const calls=[];let failDetail=0,delayDetail=0;
-const mkProps=ar=>JSON.stringify({state:{...s,visits:[],events:[],receipts:[]},branch,owner:'t-A',actor:'staff',role,busy:false,serverNow:Date.now(),ar});
+const mkProps=(ar,legacy)=>JSON.stringify({state:{...s,visits:legacy?s.visits:[],events:[],receipts:[]},branch,owner:'t-A',actor:'staff',role,busy:false,serverNow:Date.now(),ar});
 const server=http.createServer(async(rq,rs)=>{
  if(/^\/api\/workspace\/(member-candidates|member-detail|member-history)/.test(rq.url)){calls.push(rq.url);
   if(rq.url.includes('member-detail')){if(delayDetail)await new Promise(r=>setTimeout(r,delayDetail));if(failDetail>0){failDetail--;rs.writeHead(503,{'content-type':'application/json'});return rs.end('{"error":"budget"}');}}
   const h=rq.url.includes('member-candidates')?cand:rq.url.includes('member-detail')?det:hist;const r=await h.GET(new Request('https://example.test'+rq.url,{headers:{'X-GymOS-Tenant':rq.headers['x-gymos-tenant']??''}}));rs.writeHead(r.status,{'content-type':'application/json'});return rs.end(await r.text());}
+ if(rq.url.startsWith('/app-l.js')){rs.writeHead(200,{'content-type':'text/javascript'});return rs.end(jsL);}
  if(rq.url.startsWith('/app.js')){rs.writeHead(200,{'content-type':'text/javascript'});return rs.end(js);}
- const ar=rq.url.includes('ar');rs.writeHead(200,{'content-type':'text/html'});rs.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>${css}</style><script>window.process={env:{}}</script><div id=r></div><script>window.__P=${mkProps(ar).replace(/</g,'\\u003c')}</script><script src="/app.js"></script>`);});
+ const ar=rq.url.includes('ar'),lg=rq.url.includes('legacy');rs.writeHead(200,{'content-type':'text/html'});rs.end(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><style>${lg?cssL:css}</style><script>window.process={env:{}}</script><div id=r></div><script>window.__P=${mkProps(ar,lg).replace(/</g,'\\u003c')}</script><script src="${lg?'/app-l.js':'/app.js'}"></script>`);});
 await new Promise(r=>server.listen(0,r));const port=server.address().port;
 const browser=await puppeteer.launch({executablePath:'/usr/bin/google-chrome',args:['--no-sandbox','--disable-gpu'],headless:'new'});
 let ok=true;const check=(c,msg)=>{console.log(c?'PASS':'FAIL',msg);if(!c)ok=false;};
@@ -46,7 +48,11 @@ try{
   await page.screenshot({path:`/downloads/mc-strict-loading-${tag}.png`});
   await sleep(3500);delayDetail=0;
   t=await detailText(page);t=await detailText(page);check(t&&!/Loading|جارٍ التحميل/.test(t)&&t.includes(big.name),`${tag}: detail renders after load`);
-  await page.close();
+  const strictText=t;await page.close();
+  { // intended full-state semantics: the legacy console (no summaries, FULL packet visits, same clock) must show the identical detail text
+    const lp=await browser.newPage();await lp.setViewport({width:w,height:h});await lp.goto(`http://localhost:${port}/legacy${ar?'ar':''}`);await openBig(lp);await sleep(800);const lt=await detailText(lp);
+    check(lt&&lt===strictText,`${tag}: strict detail text equals the legacy full-state detail text (${lt?.length} chars)`);if(lt!==strictText){console.log('LEGACY:',lt?.slice(0,500));console.log('STRICT:',strictText?.slice(0,500));}
+    const mustHave=await lp.evaluate(()=>document.body.innerText);check(/\d/.test(lt??''),`${tag}: legacy detail has numeric facts`);await lp.close();}
   // error + retry
   const p2=await browser.newPage();await p2.setViewport({width:w,height:h});calls.length=0;failDetail=1;await p2.goto(`http://localhost:${port}/${ar?'ar':'en'}`);await openBig(p2);await sleep(1500);
   t=await detailText(p2);check(/Could not load|تعذر تحميل/.test(t??'')&&/Retry|إعادة المحاولة/.test(t??''),`${tag}: error state with Retry: ${t?.slice(0,90)}`);
