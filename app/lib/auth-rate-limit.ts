@@ -36,6 +36,12 @@ export function rateLimitStoreFor(env: Record<string, string | undefined> = proc
   );
   if (firebase) return 'firestore';
   if (env.DATABASE_URL) return 'postgres';
+  // A production process with no shared store must stop, never fall back to a
+  // per-process Map: limiter counters and mobile-handoff rows would silently
+  // stop being shared across instances.
+  if (env.NODE_ENV === 'production') {
+    throw new Error('Production requires a shared rate-limit store (DATABASE_URL or Firebase persistence)');
+  }
   return 'local';
 }
 

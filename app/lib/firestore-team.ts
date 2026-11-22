@@ -1,6 +1,6 @@
 import 'server-only';
 import { getFirestoreDb } from './firestore-db.ts';
-import type { Role } from './access';
+import { legacyBranchScope, type Role } from './access';
 
 export type StaffRecord = { owner_id: string; user_id: string; name: string; role: Exclude<Role, 'owner'>; branches: string[]; revoked: boolean | 0 | 1 };
 const accessId = (owner: string, user: string) => `${owner}_${user}`;
@@ -10,7 +10,7 @@ export async function staffMembership(owner: string, user: string): Promise<Staf
   const snapshot = await access(owner, user).get();
   const value = snapshot.data() as StaffRecord | undefined;
   return value?.owner_id === owner && value.user_id === user && (value.revoked === false || value.revoked === 0) && ['manager', 'reception'].includes(value.role)
-    ? { ...value, branches: Array.isArray(value.branches) ? value.branches : JSON.parse(String(value.branches || '[]')) }
+    ? { ...value, branches: legacyBranchScope(value.branches, value.role) ?? [] }
     : null;
 }
 

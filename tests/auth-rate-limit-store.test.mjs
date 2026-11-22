@@ -128,3 +128,13 @@ test('consumeAuthRateLimit aggregation preserves outage for route 503 mapping', 
     delete process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT;
   }
 });
+
+test('production never falls back to a per-process store (limiter and mobile handoff share selection)', async () => {
+  const {rateLimitStoreFor} = await import('../app/lib/auth-rate-limit.ts');
+  assert.throws(() => rateLimitStoreFor({NODE_ENV: 'production', GYMOS_AUTH_BACKEND: 'supabase'}), /shared rate-limit store/);
+  assert.throws(() => rateLimitStoreFor({NODE_ENV: 'production'}), /shared rate-limit store/);
+  assert.equal(rateLimitStoreFor({NODE_ENV: 'production', DATABASE_URL: 'postgres://x'}), 'postgres');
+  assert.equal(rateLimitStoreFor({NODE_ENV: 'production', FIREBASE_PROJECT_ID: 'p'}), 'firestore');
+  assert.equal(rateLimitStoreFor({NODE_ENV: 'development'}), 'local');
+  assert.equal(rateLimitStoreFor({NODE_ENV: 'test'}), 'local');
+});

@@ -39,6 +39,7 @@ const testSuites = [
   { name: 'changes feed: events log behind the authoritative revision gives a snapshot (forced events insert failure)', file: 'tests/changes-gap.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Hot write cannot pass the 20,000,000-byte rule (reopened visit with huge timestamp)', file: 'tests/hot-size.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Member summary inputs: every writer marks dirty, refresh is exact vs memberSummary, fail-closed bounds', file: 'tests/member-summary-store.integration.mjs', loader: './tests/commercial-loader.mjs' },
+  { name: 'Restore (persistSpace restore=true) keeps member summaries exact and isolated per owner (PGlite)', file: 'tests/restore-summary-exactness.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'jsonb byte count is never below compact JSON bytes', file: 'tests/jsonb-byte-bound.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
   { name: 'Hot-operation slice persist parity against the full persist path (PGlite)', file: 'tests/hot-persist.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'GET member-history order=at: keyset parity with the profile sort, ties, scope, fail closed (PGlite)', file: 'tests/member-visits-at.integration.mjs', loader: './tests/workspace-post-loader.mjs' },
@@ -114,9 +115,13 @@ function runSuite(suite) {
   console.log(`▶ ${suite.name} (${suite.file})`);
   console.log('----------------------------------------------------------------');
   const suiteStart = Date.now();
+  // Node < 23 exposes test isolation only behind the experimental flag; same semantics.
+  const isolationFlag = Number(process.versions.node.split('.')[0]) >= 23
+    ? '--test-isolation=none'
+    : '--experimental-test-isolation=none';
   const args = suite.loader
-    ? ['--import', suite.loader, '--test', '--test-isolation=none', suite.file]
-    : ['--test', '--test-isolation=none', suite.file];
+    ? ['--import', suite.loader, '--test', isolationFlag, suite.file]
+    : ['--test', isolationFlag, suite.file];
   const res = spawnSync(process.execPath, args, {
     cwd: root,
     stdio: ['inherit', 'pipe', 'pipe'],
