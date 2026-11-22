@@ -45,7 +45,8 @@ const run=async(mode,{fail=0,w=1280,h=900,shot,keep=false,lang='en'}={})=>{const
  await page.goto(`http://localhost:${port}/${mode}`);await openOverview(page,lang);await new Promise(r=>setTimeout(r,2500));
  if(process.env.DEBUG)console.log('BODY',(await page.$eval('body',e=>e.innerText)).slice(0,1500),await page.evaluate(()=>document.querySelectorAll('details').length));
  const g=sel=>page.$eval(sel,e=>e.innerText.replace(/\s+/g,' ').trim()).catch(()=>'<missing>');
- const out={calls:[...calls],stats:await g('.stats-grid'),chart:await g('.chart-card'),svg:await page.$eval('.chart svg',e=>e.innerHTML.length).catch(()=>-1),overflow:await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),page};if(shot)await (await page.$('.stats-grid')).evaluate(e=>e.scrollIntoView()).then(()=>page.screenshot({path:`${OUT}/${shot}.png`}));if(!keep)await page.close();return out;};
+ const out={calls:[...calls],stats:await g('.stats-grid'),chart:await g('.chart-card'),svg:await page.$eval('.chart svg',e=>e.innerHTML.length).catch(()=>-1),paths:await page.$$eval('.chart-card .chart svg path',e=>e.length).catch(()=>0),overflow:await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1),page};if(shot)await (await page.$('.stats-grid')).evaluate(e=>e.scrollIntoView()).then(()=>page.screenshot({path:`${OUT}/${shot}.png`}));if(!keep)await page.close();return out;};
+let bv=null;
 try{
  const off=await run('off',{shot:'overview-off-desktop'}),on=await run('on',{shot:'overview-on-desktop'});
  console.log('OFF',off.chart.slice(0,300));
@@ -53,15 +54,14 @@ try{
  check(on.stats===off.stats&&on.chart===off.chart,'Overview stats + pulse text identical OFF vs ON (synthetic club, distinct daily counts, future-day visit)');if(on.chart!==off.chart){console.log('ON ',on.chart.slice(0,300));}
  check(on.svg===off.svg&&on.svg>0,'chart svg markup size identical');
  console.log('strict-fail start');const st=await run('strict',{fail:1,keep:true,shot:'overview-strict-error-desktop'});
- check(/Retry|إعادة/.test(st.chart),'STRICT failure shows Retry');check(!/\b0 visits/.test(st.chart)&&/—/.test(st.chart)&&!/Today's check-ins 0/.test(st.stats)&&/Today's check-ins —/.test(st.stats),'STRICT failure shows dashes, never a zero count');console.log('STRICT-ERR',st.chart.slice(0,200));
+ check(st.paths===0&&st.svg===-1,'STRICT failure: no chart svg/path drawn');check(/Retry|إعادة/.test(st.chart),'STRICT failure shows Retry');check(!/\b0 visits/.test(st.chart)&&/—/.test(st.chart)&&!/Today's check-ins 0/.test(st.stats)&&/Today's check-ins —/.test(st.stats),'STRICT failure shows dashes, never a zero count');console.log('STRICT-ERR',st.chart.slice(0,200));
  await st.page.evaluate(()=>[...document.querySelectorAll('button')].find(b=>/Retry|إعادة/.test(b.textContent))?.click());await new Promise(r=>setTimeout(r,1500));
  const after=await st.page.$eval('.chart-card',e=>e.innerText.replace(/\s+/g,' ').trim());check(after===off.chart,'STRICT after Retry equals legacy text');
  const ok2=await run('strict',{shot:'overview-strict-ok-desktop'});check(ok2.stats===off.stats&&ok2.chart===off.chart,'STRICT success equals legacy text');
  // non-canonical visit data in the branch: the server answers unavailable (real DB row), strict shows an explicit notice with no Retry and no numbers, non-strict falls back to the packet
- {const bv=s.visits.find(v=>v.branch==='a'&&!v.id.startsWith('x')&&!v.id.startsWith('fut'))??s.visits.find(v=>v.branch==='a');await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','5'::jsonb) WHERE owner_id='A' AND entity_id=$1",[bv.id]);
-  const pkOdd=JSON.parse(JSON.stringify(pk));
+ {bv=s.visits.find(v=>v.branch==='a'&&!v.id.startsWith('x')&&!v.id.startsWith('fut'))??s.visits.find(v=>v.branch==='a');await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}','5'::jsonb) WHERE owner_id='A' AND entity_id=$1",[bv.id]);
   const un=await run('strict',{shot:'overview-strict-unavailable-desktop'});console.log('UNAVAIL',un.chart.slice(0,220));
-  check(/unavailable/.test(un.chart)&&!/Retry/.test(un.chart)&&/—/.test(un.chart)&&!/\b0 visits/.test(un.chart),'STRICT + non-canonical visit: explicit unavailable, no Retry, no numbers');
+  check(un.paths===0&&un.svg===-1,'STRICT unavailable: no chart svg/path drawn');check(/unavailable/.test(un.chart)&&!/Retry/.test(un.chart)&&/—/.test(un.chart)&&!/\b0 visits/.test(un.chart),'STRICT + non-canonical visit: explicit unavailable, no Retry, no numbers');
   const unAr=await run('strict',{w:390,h:844,lang:'ar',shot:'overview-strict-unavailable-mobile-ar'});console.log('UNAVAIL-AR',unAr.chart.slice(0,220));check(/غير متاح/.test(unAr.chart)&&!/إعادة/.test(unAr.chart)&&/—/.test(unAr.chart)&&!unAr.overflow,'390px Arabic unavailable: notice, dash, no retry, no overflow');
   const nonStrict=await run('on',{});check(nonStrict.stats===off.stats&&nonStrict.chart===off.chart,'non-strict ON with a non-canonical visit falls back to the packet (text equals OFF)');
   await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}',to_jsonb($2::text)) WHERE owner_id='A' AND entity_id=$1",[bv.id,bv.day]);}
@@ -73,5 +73,5 @@ try{
  const aoff=await run('off',{w:390,h:844,lang:'ar',shot:'overview-off-mobile-ar'}),aon=await run('on',{w:390,h:844,lang:'ar',shot:'overview-on-mobile-ar'}),aerr=await run('strict',{fail:1,w:390,h:844,lang:'ar',shot:'overview-strict-error-mobile-ar'});
  check(aoff.stats!=='<missing>'&&aoff.stats===aon.stats&&aoff.chart===aon.chart,'390px Arabic Overview text identical OFF vs ON');console.log('AR-ERR',aerr.chart.slice(0,160));check(/إعادة المحاولة/.test(aerr.chart)&&/—/.test(aerr.chart)&&!aoff.overflow&&!aon.overflow&&!aerr.overflow,'390px Arabic STRICT error: retry + dash, no overflow');
  check(!mn.overflow&&!mo.overflow&&!ms.overflow,'390px no horizontal overflow (ON)');
-}finally{await browser.close();server.close();}
+}finally{if(bv)await real.query("UPDATE gymos.gym_entities SET payload=jsonb_set(payload,'{day}',to_jsonb($2::text)) WHERE owner_id='A' AND entity_id=$1",[bv.id,bv.day]);await browser.close();server.close();}
 console.log(ok?'ALL PASS':'FAILURES');process.exit(ok?0:1);
