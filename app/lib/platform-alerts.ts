@@ -93,7 +93,7 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
   } catch {}
 }
 
-export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean};
+export type NotificationPermissionResult={granted:boolean;native:boolean;prompted:boolean;remote:boolean;configured:boolean;licenseBlocked?:boolean;reason?:string};
 async function readLicenseBlocked(response:Response):Promise<boolean>{if(response.status!==403)return false;try{const body=await response.json() as {error?:unknown};return body.error==='licenseReadOnly';}catch{return false;}}
 export async function requestNotificationPermission(branch?:string,audience?:'support'):Promise<NotificationPermissionResult>{
  const no=(native=false,prompted=false,configured=true):NotificationPermissionResult=>({granted:false,native,prompted,remote:false,configured});
@@ -130,21 +130,32 @@ export async function requestNotificationPermission(branch?:string,audience?:'su
   try{granted=await Notification.requestPermission()==='granted';}catch{return no(false,true);}
  }
  if(!granted)return no(false,prompted);
+ // Stage-specific safe failure reasons for support diagnosis. No endpoints,
+ // tokens or server internals are exposed, only which stage failed.
+ const fail=(reason:string):NotificationPermissionResult=>({granted:true,native:false,prompted,remote:false,configured:true,reason});
+ const isMember=location.pathname==='/member'||location.pathname.startsWith('/member/');
+ let registration:ServiceWorkerRegistration;
  try{
-  const isMember=location.pathname==='/member'||location.pathname.startsWith('/member/');
-  const worker=isMember?'/member-sw.js':'/sw.js';
-  const scope=isMember?'/member':'/';
-  const registration=await navigator.serviceWorker.register(worker,{scope});
+  registration=await navigator.serviceWorker.register(isMember?'/member-sw.js':'/sw.js',{scope:isMember?'/member':'/'});
+ }catch{return fail('sw-register');}
+ let config:{configured?:boolean;publicKey?:string|null};
+ try{
   const configResponse=await fetch('/api/push-subscriptions',{cache:'no-store'});
   if(!configResponse.ok)return{granted:true,native:false,prompted,remote:false,configured:false};
-  const config=await configResponse.json() as {configured?:boolean;publicKey?:string|null};
-  if(!config.configured||!config.publicKey)return{granted:true,native:false,prompted,remote:false,configured:false};
+  config=await configResponse.json() as {configured?:boolean;publicKey?:string|null};
+ }catch{return fail('config-fetch');}
+ if(!config.configured||!config.publicKey)return{granted:true,native:false,prompted,remote:false,configured:false};
+ let subscription:PushSubscription;
+ try{
   const key=Uint8Array.from(atob(config.publicKey.replace(/-/g,'+').replace(/_/g,'/')),c=>c.charCodeAt(0));
-  const subscription=await registration.pushManager.getSubscription()??await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
-  const response=await fetch('/api/push-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'subscribe',...(branch?{branch}:{}),subscription:subscription.toJSON()}),signal:AbortSignal.timeout(10000)});
-  if(!response.ok){if(response.status===503)return{granted:true,native:false,prompted,remote:false,configured:false};return{granted:true,native:false,prompted,remote:false,configured:true,...(await readLicenseBlocked(response)?{licenseBlocked:true}:{})};}
-  return{granted:true,native:false,prompted,remote:true,configured:true};
- }catch{return{granted:true,native:false,prompted,remote:false,configured:true};}
+  subscription=await registration.pushManager.getSubscription()??await registration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+ }catch{return fail('push-subscribe');}
+ let response:Response;
+ try{
+  response=await fetch('/api/push-subscriptions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'subscribe',...(branch?{branch}:{}),subscription:subscription.toJSON()}),signal:AbortSignal.timeout(10000)});
+ }catch{return fail('post-network');}
+ if(!response.ok){if(response.status===503)return{granted:true,native:false,prompted,remote:false,configured:false};return{granted:true,native:false,prompted,remote:false,configured:true,reason:'http-'+response.status,...(await readLicenseBlocked(response)?{licenseBlocked:true}:{})};}
+ return{granted:true,native:false,prompted,remote:true,configured:true};
 }
 export async function disablePushNotifications(branch?:string,audience?:'support'):Promise<boolean>{
  if(typeof window==='undefined')return false;
