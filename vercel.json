@@ -1,17 +1,9 @@
 {
-  "framework": "nextjs",
-  "buildCommand": "node scripts/vercel-npm.mjs run build",
-  "installCommand": "node scripts/vercel-npm.mjs ci",
-  "outputDirectory": ".next",
-  "crons": [
-    {
-      "path": "/api/cron/whatsapp",
-      "schedule": "0 20 * * *"
-    }
-  ],
-  "git": {
-    "deploymentEnabled": {
-      "codex/gymawy-commercial-gaps": false
-    }
-  }
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "git": {"deploymentEnabled": {"preview/rehearsal-protected-20261123": false}},
+  "headers": [{"source": "/(.*)", "headers": [{"key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive"}]}],
+  "crons": []
 }

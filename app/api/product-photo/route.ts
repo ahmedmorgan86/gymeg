@@ -1,5 +1,0 @@
-import {photoResponse} from '../../lib/photo-data-url';
-import {PRODUCT_PHOTO_SIDE} from '../../lib/shop';
-import {context,readSpace,reply} from '../../lib/server-workspace';
-export const dynamic='force-dynamic';
-export async function GET(request:Request){try{const ctx=await context();if(!ctx)return reply({error:'auth'},401);if(!['owner','manager'].includes(ctx.role))return reply({error:'forbidden'},403);const url=new URL(request.url),id=url.searchParams.get('id');if(url.searchParams.get('owner')!==ctx.tenantId||!id||id.length>250)return reply({error:'notFound'},404);const {state}=await readSpace(ctx.owner),p=state.products?.find(p=>p.id===id&&(!ctx.branches||ctx.branches.includes(p.branch)));const served=p?.photo?photoResponse(p.photo,90000,PRODUCT_PHOTO_SIDE):null;if(!served)return reply({error:'notFound'},404);return new Response(served.data,{headers:{'Content-Type':served.type,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Cross-Origin-Resource-Policy':'same-origin'}});}catch{return reply({error:'unavailable'},503);}}
