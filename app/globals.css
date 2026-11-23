@@ -287,3 +287,7 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 
 .receipt-sheet{--text:#1b1830;--muted:#6c6b80;--line:#ddd}
 .club-design-fields label{min-width:0}.club-design-fields input:not([type=checkbox]):not([type=file]),.club-design-fields select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}.club-design-fields input[type=file]{max-width:100%;min-width:0}
+
+/* Tablet header: leave room for a bilingual branch name without changing mobile layout. */
+@media(min-width:721px) and (max-width:1000px){.topbar .branch-select{max-width:155px;flex-shrink:0}}
+@media(min-width:721px) and (max-width:800px){.topbar .breadcrumb>span,.topbar .breadcrumb>svg{display:none}}
