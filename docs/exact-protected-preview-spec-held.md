@@ -43,3 +43,10 @@ After approved protected preview creation: verify protection from a clean unauth
 ## Current evidence and limits
 
 Nine pure/proxy regression tests passed, including fence-before-refresh, exact selected principal/owner, cookie pinning and unchanged OFF behavior. Final flagged build passed after the missing-state/noindex additions. Authenticated local end-to-end fence proof remains necessary. Source review is not production acceptance. Current inherited Preview DB target has not been opened or verified in this step. This document is a proposed safety specification, not a completed deployment recipe or user authorization.
+
+
+## Runtime provenance resolved at 22:56 Cairo
+
+A distinct existing vault login named Supabase gymeg runtime role authenticated over verified TLS to original project aynycpumwcopbnkbkqhr as gymos_app. A BEGIN READ ONLY identity query confirmed current_database=postgres, LOGIN true, superuser/BYPASSRLS/CREATEROLE/CREATEDB false. No source rows queried or effects performed; temporary export removed. This provides a viable explicit branch-only DATABASE_URL reuse proposal under new approval. It does not establish the opaque saved Vercel Preview DATABASE_URL has the same value, and must not be described that way. No migration credential substitution, rotation or new grants.
+
+Local session-boundary integration passed actual password-session route, verified-user/selected-actor boundary and actual proxy refusal for workspace/commercial writes, Google/cron GET and global sign-out. Supabase auth provider and limiter were synthetic stubs, so this is NOT full cookie/TLS/provider/database end-to-end acceptance. Remaining local test should run a synthetic provider with real session cookies plus real local commercial context, selected owner and database derived behavior. No live preview permission follows from this test.
