@@ -96,3 +96,4 @@
 /* The footer has its own opaque surface, so its text follows the pass colours even over a cover image. */
 .member-mobile-app .digital-member-pass.has-member-cover footer small,.member-mobile-app .digital-member-pass.has-member-cover footer bdi{color:var(--pass-ink)}
 .member-mobile-app .digital-member-pass.has-member-cover footer>span{color:var(--pass-accent-text)}
+.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-avatar,.member-mobile-app .digital-member-pass.has-member-cover .digital-pass-brand>span{color:#fff;background:#ffffff24;border-color:#ffffff66}
