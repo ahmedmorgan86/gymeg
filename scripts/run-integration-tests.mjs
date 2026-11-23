@@ -33,6 +33,7 @@ const testSuites = [
   { name: 'Licensed music and platform directory UI', file: 'tests/commercial-library-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Unified member form interactions', file: 'tests/member-console-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
   { name: 'Future membership term cancellation UI', file: 'tests/period-cancel-ui.integration.mjs', loader: './tests/member-console-ui-loader.mjs' },
+  { name: 'Future membership term cancellation persistence (PGlite)', file: 'tests/period-cancel-persist.integration.mjs', loader: './tests/commercial-loader.mjs' },
   { name: 'Barcode API with PostgreSQL policies and reservation SQL', file: 'tests/barcode-api.integration.mjs', loader: './tests/barcode-api-loader.mjs' },
   { name: 'Private credit gate, blob layout and backend refusal (PGlite)', file: 'tests/private-credit-gates.integration.mjs' },
   { name: 'Restore epoch and owner version atomicity (PGlite)', file: 'tests/restore-epoch.integration.mjs' },
