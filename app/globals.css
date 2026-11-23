@@ -286,3 +286,4 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 @media (min-width:1000px){.class-calendar{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));overflow-x:visible}} /* desktop: wrap the week into rows instead of a clipped scroll strip; below 1000px keep the scrolling 180px strip */
 
 .receipt-sheet{--text:#1b1830;--muted:#6c6b80;--line:#ddd}
+.club-design-fields label{min-width:0}.club-design-fields input:not([type=checkbox]):not([type=file]),.club-design-fields select{width:100%;min-width:0;max-width:100%;box-sizing:border-box}.club-design-fields input[type=file]{max-width:100%;min-width:0}
