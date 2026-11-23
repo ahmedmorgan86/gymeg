@@ -84,9 +84,15 @@
 
 /* Pass legibility: text and icons on the pass use a lightened accent (the club accent stays on borders, glow and dots); the serial sits on the pass surface, not on the white code box, so it follows the pass text colour. QR and barcode stay black on white. */
 .member-mobile-app .digital-member-pass{--pass-accent-text:color-mix(in srgb,var(--pass-accent) 52%,#fff)}
-.member-mobile-app[data-color-mode=light] .digital-member-pass{--pass-accent-text:color-mix(in srgb,var(--pass-accent) 78%,#000)}
+.member-mobile-app[data-color-mode=light] .digital-member-pass{--pass-accent-text:color-mix(in srgb,var(--pass-accent) 55%,#000)}
 .member-mobile-app .digital-pass-identity small,.member-mobile-app .digital-pass-brand>svg,.member-mobile-app .digital-member-pass footer>span,.member-mobile-app .digital-pass-avatar{color:var(--pass-accent-text)}
 .member-mobile-app .digital-pass-brand>span{color:var(--pass-accent-text)}
 .member-mobile-app .digital-pass-serial{color:var(--pass-ink)!important;font-size:13px;font-weight:800}
 .member-mobile-app .digital-pass-ticket>p{color:var(--pass-ink)!important;opacity:.82}
 .member-mobile-app .digital-member-pass footer small{color:var(--pass-ink);opacity:.8}
+
+/* Custom-design clubs: the dark photo overlay is only for passes with a member cover image. Without one, keep the normal pass surface, otherwise light-mode text lands on a dark overlay. */
+.member-mobile-app.club-custom-design .digital-member-pass:not(.has-member-cover){background-image:radial-gradient(circle at 100% 0,color-mix(in srgb,var(--pass-accent) 22%,transparent),transparent 48%),linear-gradient(145deg,var(--pass-bg),var(--pass-soft))}
+/* The footer has its own opaque surface, so its text follows the pass colours even over a cover image. */
+.member-mobile-app .digital-member-pass.has-member-cover footer small,.member-mobile-app .digital-member-pass.has-member-cover footer bdi{color:var(--pass-ink)}
+.member-mobile-app .digital-member-pass.has-member-cover footer>span{color:var(--pass-accent-text)}
