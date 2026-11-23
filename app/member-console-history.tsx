@@ -2,8 +2,9 @@
 // Member console attendance history, paged. Same rows and order as the legacy `visits.filter(member).reverse()` (position descending), 25 per page.
 import {useCallback,useEffect,useRef,useState} from 'react';
 import styles from './member-console.module.css';
+export function visitStamp(iso:string|undefined,tz:string|undefined,ar:boolean){if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return iso;try{return new Intl.DateTimeFormat(ar?'ar-EG':'en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:tz||undefined}).format(d);}catch{return iso;}}
 type Visit={id:string;at:string;leftAt?:string;exitType?:string;sessions?:{at:string;leftAt:string}[]};
-export default function MemberConsoleHistory({member,owner,t,fallback,pageSize=25}:{member:string;owner:string;t:(a:string,b:string)=>string;/** already-loaded visits, used only when the paged route is unavailable (404/501) */fallback?:Visit[];pageSize?:number}){
+export default function MemberConsoleHistory({member,owner,t,fallback,pageSize=25,tz,ar}:{tz?:string;ar?:boolean;member:string;owner:string;t:(a:string,b:string)=>string;/** already-loaded visits, used only when the paged route is unavailable (404/501) */fallback?:Visit[];pageSize?:number}){
  const [rows,setRows]=useState<Visit[]>([]),[next,setNext]=useState<number|null>(null),[state,setState]=useState<'loading'|'ok'|'error'|'unavailable'>('loading'),started=useRef(0);
  const key=member+'|'+owner+'|'+pageSize,[dataKey,setDataKey]=useState(key); // rows/state below belong to dataKey; a new member/owner/pageSize renders loading until its own commit lands, never the previous member's rows
  const load=useCallback(async(before?:number)=>{const ticket=++started.current;setState('loading');
@@ -21,7 +22,7 @@ export default function MemberConsoleHistory({member,owner,t,fallback,pageSize=2
  useEffect(()=>{const id=setTimeout(()=>void load(),0);return()=>{clearTimeout(id);started.current++;};},[load]);
  const stale=dataKey!==key,effState=stale?'loading':state,effRows=stale?[]:rows;
  const list=effState==='unavailable'&&fallback?fallback.slice().reverse():effRows;
- return <div data-testid="console-visit-history">{list.map(v=><article key={v.id} className={styles.history}><p>{t('الدخول:','Check-in:')} {v.at} · {t('المغادرة:','Check-out:')} {v.leftAt??t('جلسة مفتوحة','Open session')} · {v.exitType==='automatic'?t('خروج إداري تلقائي','Automatic administrative exit'):v.exitType==='device'?t('خروج من الجهاز','Device exit'):t('خروج يدوي / سجل سابق','Manual exit / earlier record')}</p>{v.sessions?.map((a,i)=><p key={i}>{a.at} ← {a.leftAt}</p>)}</article>)}
+ return <div data-testid="console-visit-history">{list.map(v=><article key={v.id} className={styles.history}><p>{t('الدخول:','Check-in:')} <bdi>{visitStamp(v.at,tz,!!ar)}</bdi> · {t('المغادرة:','Check-out:')} {v.leftAt?<bdi>{visitStamp(v.leftAt,tz,!!ar)}</bdi>:t('جلسة مفتوحة','Open session')} · {v.exitType==='automatic'?t('خروج إداري تلقائي','Automatic administrative exit'):v.exitType==='device'?t('خروج من الجهاز','Device exit'):t('خروج يدوي / سجل سابق','Manual exit / earlier record')}</p>{v.sessions?.map((a,i)=><p key={i}><bdi>{visitStamp(a.at,tz,!!ar)}</bdi> ← <bdi>{visitStamp(a.leftAt,tz,!!ar)}</bdi></p>)}</article>)}
   {effState==='unavailable'&&!fallback&&<p role="alert">{t('سجل الحضور غير متاح حاليا.','Attendance history is unavailable right now.')}</p>}
   {effState==='error'&&<p role="alert">{t('تعذر تحميل السجل.','Could not load the history.')} <button type="button" onClick={()=>void load()}>{t('إعادة المحاولة','Retry')}</button></p>}
   {effState==='loading'&&<p aria-busy="true">{t('جار التحميل…','Loading…')}</p>}
