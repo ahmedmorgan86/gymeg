@@ -291,3 +291,4 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 /* Tablet header: leave room for a bilingual branch name without changing mobile layout. */
 @media(min-width:721px) and (max-width:1000px){.topbar .branch-select{max-width:155px;flex-shrink:0}}
 @media(min-width:721px) and (max-width:800px){.topbar .breadcrumb>span,.topbar .breadcrumb>svg{display:none}}
+@media(min-width:721px) and (max-width:1000px){.topbar .global-search input{min-width:0!important}}
