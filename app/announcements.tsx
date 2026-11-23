@@ -1526,10 +1526,10 @@ export default function Announcements({
               <div style={{ margin: '1rem 0' }}>
                 <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{t('الأيام المحددة أسبوعيًا:', 'Weekdays:')}</p>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {DAYS_NAMES.map((name, idx) => (
+                  {DAYS_NAMES.map((arName, idx) => { const name = ar ? arName : DAYS_NAMES_EN[idx]; return (
                     <button
                       type="button"
-                      key={name}
+                      key={arName}
                       className={editing.days.includes(idx) ? 'button primary' : 'button secondary'}
                       onClick={() => {
                         const next = editing.days.includes(idx)
@@ -1540,7 +1540,7 @@ export default function Announcements({
                     >
                       {name}
                     </button>
-                  ))}
+                  ); })}
                 </div>
               </div>
             )}
