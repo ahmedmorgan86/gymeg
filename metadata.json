@@ -1,0 +1,8 @@
+{
+  "name": "GymEG — YOUR GYM. ONE SYSTEM.",
+  "description": "مساحة ناديك لإدارة الأعضاء والحضور والتجديد والتحصيل، مع GymEG Pulse.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

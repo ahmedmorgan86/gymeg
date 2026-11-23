@@ -1,0 +1,68 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {GET as branches,POST} from '../app/api/member-session/route.ts';import {POST as changePin} from '../app/api/member-pin/route.ts';import {GET as profile} from '../app/api/member-portal/route.ts';import {memberCodeHash} from '../app/lib/member-code.ts';import {emptyState} from '../app/lib/domain.ts';
+const phone='+12025550199',pin='004321',origin='https://gym.example';let licenseRow=null;
+function setup(duplicates=false,differentPins=false){licenseRow=null;const counters=new Map(),sessions=[];const accounts=[{owner_id:'club-a',member_id:'member-a',branch:'main',version:1,phone,pin,pin_must_change:true}];if(duplicates)accounts.push({owner_id:'club-b',member_id:'member-b',branch:'main',version:2,phone,pin:differentPins?'123456':pin,pin_must_change:true});globalThis.__qaPhoneSpaces=Object.fromEntries(accounts.map(a=>{const state=emptyState();state.settings.name=a.owner_id;state.members=[{id:a.member_id,phone,branch:'main',demo:false,archived:false}];return[a.owner_id,{state}];}));globalThis.__qaPhoneClient={release(){},async query(sql,values=[]){
+if(sql.startsWith('SELECT a.owner_id')){const session=sessions.find(s=>s[0]===values[0]);const a=session&&accounts.find(a=>a.owner_id===session[1]&&a.member_id===session[2]&&a.version===session[3]);return{rows:a?[{...a}]:[]};}
+if(sql.startsWith('SELECT version,gymos.member_pin_matches')){const a=accounts.find(a=>a.owner_id===values[0]&&a.member_id===values[1]);return{rows:a?[{version:a.version,matches:a.pin===values[2]}]:[]};}
+if(sql.startsWith('UPDATE gymos.member_code_access SET pin_hash')){const a=accounts.find(a=>a.owner_id===values[0]&&a.member_id===values[1]);a.pin=values[2];a.pin_must_change=false;a.version++;return{rows:[]};}
+if(sql.startsWith('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND member_id=$2')){for(let i=sessions.length-1;i>=0;i--)if(sessions[i][1]===values[0]&&sessions[i][2]===values[1])sessions.splice(i,1);return{rows:[]};}
+if(sql.includes('RETURNING attempts')){const n=(counters.get(values[0])??0)+1;counters.set(values[0],n);return{rows:[{attempts:n}]};}if(sql.includes('gymos.member_phone_login('))return{rows:accounts.filter(a=>memberCodeHash(a.phone)===values[0]).map(a=>({...a,matches:values[1]===a.pin}))};if(sql.includes('tenant_licenses'))return{rows:licenseRow?[{...licenseRow}]:[]};if(sql.startsWith('INSERT INTO gymos.member_code_sessions'))sessions.push(values);return{rows:[]};}};return{sessions,counters};}
+const request=body=>new Request(origin+'/api/member-session',{method:'POST',headers:{origin,'content-type':'application/json','x-vercel-forwarded-for':'192.0.2.1'},body:JSON.stringify(body)});
+test('Mobile number alone, wrong PIN, legacy code and cross-origin do not grant a session',async()=>{const qa=setup();assert.equal((await POST(request({phone}))).status,400);assert.equal((await POST(request({phone,pin:'999999'}))).status,401);assert.equal((await POST(request({code:'GM-'+'A'.repeat(32)}))).status,400);const cross=request({phone,pin});cross.headers.set('origin','https://other.example');assert.equal((await POST(cross)).status,403);assert.equal(qa.sessions.length,0);});
+test('Correct phone and PIN issue protected opaque session for only the matched member',async()=>{const qa=setup(),r=await POST(request({phone,pin}));assert.equal(r.status,200);assert.match(r.headers.get('set-cookie'),/HttpOnly; Secure; SameSite=Lax/);assert.deepEqual(qa.sessions[0].slice(1),['club-a','member-a',1]);assert.equal(qa.sessions[0][0].length,64);assert.ok(!JSON.stringify(await r.json()).includes(pin));});
+test('Multiple matching memberships require authenticated selection and reject a forged account',async()=>{const qa=setup(true),r=await POST(request({phone,pin}));assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);assert.equal((await r.json()).chooseAccount.length,2);assert.equal(qa.sessions.length,0);assert.equal((await POST(request({phone,pin,account:'club-z|member-z'}))).status,401);const selected=await POST(request({phone,pin,account:'club-b|member-b'}));assert.equal(selected.status,200);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);});
+test('Persistent phone bucket blocks the sixth attempt and returns retry guidance',async()=>{const qa=setup();for(let i=0;i<5;i++)assert.equal((await POST(request({phone,pin:'999999'}))).status,401);const blocked=await POST(request({phone,pin}));assert.equal(blocked.status,429);assert.equal(blocked.headers.get('retry-after'),'900');assert.equal(qa.sessions.length,0);});
+
+function pinRequest(cookie,body){return new Request(origin+'/api/member-pin',{method:'POST',headers:{origin,'content-type':'application/json',cookie},body:JSON.stringify(body)});}
+function cookieOf(r){return r.headers.get('set-cookie').split(';')[0];}
+test('Temporary-PIN sessions cannot view member data until successful private PIN change',async()=>{setup();const signin=await POST(request({phone,pin})),cookie=cookieOf(signin);assert.equal((await profile(new Request(origin+'/api/member-portal',{headers:{cookie}}))).status,403);const changed=await changePin(pinRequest(cookie,{currentPin:pin,newPin:'847291',confirmPin:'847291'}));assert.equal(changed.status,200);assert.equal((await profile(new Request(origin+'/api/member-portal',{headers:{cookie}}))).status,401);const fresh=cookieOf(changed);const view=await profile(new Request(origin+'/api/member-portal',{headers:{cookie:fresh}}));assert.equal(view.status,200);assert.equal((await view.json()).member.id,'member-a');});
+test('PIN change rejects every shared default, mismatched confirmation and incorrect current PIN',async()=>{setup();const cookie=cookieOf(await POST(request({phone,pin})));for(const shared of ['000000','111111','123456','654321'])assert.equal((await changePin(pinRequest(cookie,{currentPin:pin,newPin:shared,confirmPin:shared}))).status,400);assert.equal((await changePin(pinRequest(cookie,{currentPin:pin,newPin:'847291',confirmPin:'847292'}))).status,400);assert.equal((await changePin(pinRequest(cookie,{currentPin:'999999',newPin:'847291',confirmPin:'847291'}))).status,401);});
+test('A suspended club license blocks PIN changes before a new session is issued',async()=>{const qa=setup();const cookie=cookieOf(await POST(request({phone,pin})));licenseRow={tenant_id:'club-a',plan_id:'plan',mode:'monthly',status:'suspended',starts_at:'2026-01-01T00:00:00.000Z',ends_at:'2027-01-01T00:00:00.000Z',maintenance_until:null,limits:{branches:5,members:500,staff:20},revision:1};const r=await changePin(pinRequest(cookie,{currentPin:pin,newPin:'847291',confirmPin:'847291'}));assert.equal(r.status,403);assert.equal((await r.json()).error,'licenseReadOnly');assert.equal(qa.sessions.length,1);});
+test('PIN-change attempts are rate limited and anonymous requests cannot change a PIN',async()=>{setup();const body={currentPin:'999999',newPin:'847291',confirmPin:'847291'};assert.equal((await changePin(pinRequest('',body))).status,401);const cookie=cookieOf(await POST(request({phone,pin})));for(let i=0;i<5;i++)assert.equal((await changePin(pinRequest(cookie,body))).status,401);assert.equal((await changePin(pinRequest(cookie,{...body,currentPin:pin}))).status,429);});
+
+test('A unique phone membership signs in automatically without a club selector',async()=>{const qa=setup(),r=await POST(request({phone,pin}));assert.equal(r.status,200);assert.equal((await r.json()).ok,true);assert.deepEqual(qa.sessions[0].slice(1),['club-a','member-a',1]);});
+test('Duplicate clubs require a valid PIN before revealing choices and authenticate only the selected club',async()=>{const qa=setup(true),wrong=await POST(request({phone,pin:'999999'}));assert.equal(wrong.status,401);assert.equal((await wrong.json()).chooseAccount,undefined);assert.equal(qa.sessions.length,0);const r=await POST(request({phone,pin}));assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);assert.deepEqual((await r.json()).chooseAccount.map(a=>a.name),['club-a','club-b']);assert.equal(qa.sessions.length,0);assert.equal((await POST(request({phone,pin,account:'club-z|member-z'}))).status,401);const selected=await POST(request({phone,pin,account:'club-b|member-b'}));assert.equal(selected.status,200);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);});
+test('Different PINs across clubs: only the PIN-matched club is revealed and selectable',async()=>{const qa=setup(true,true),r=await POST(request({phone,pin:'123456'}));assert.equal(r.status,200);const body=await r.json();assert.equal(body.chooseAccount,undefined,'unmatched memberships must not be disclosed');assert.equal(JSON.stringify(body).includes('club-a'),false);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);const wrongSelection=await POST(request({phone,pin:'123456',account:'club-a|member-a'}));assert.equal(wrongSelection.status,401);assert.equal((await wrongSelection.json()).chooseAccount,undefined);assert.equal(qa.sessions.length,1);});
+test('Legacy public branch directory returns no club data and performs no database query',async()=>{let queried=false;globalThis.__qaPhoneClient={release(){},async query(){queried=true;throw new Error('must not query');}};const r=await branches();assert.equal(r.status,200);assert.deepEqual(await r.json(),{branches:[]});assert.equal(queried,false);});
+
+function setupMulti(accounts){
+ const counters=new Map(),sessions=[];
+ globalThis.__qaPhoneSpaces=Object.fromEntries([...new Set(accounts.map(a=>a.owner_id))].map(owner=>{const state=emptyState();state.settings.name=owner;state.branches=[...new Set(accounts.filter(a=>a.owner_id===owner).map(a=>a.branch))].map(b=>({id:b,name:b==='north'?'North':'South'}));state.members=accounts.filter(a=>a.owner_id===owner).map(a=>({id:a.member_id,phone,branch:a.branch,demo:false,archived:false}));return[owner,{state}];}));
+ globalThis.__qaPhoneClient={release(){},async query(sql,values=[]){
+ if(sql.startsWith('SELECT a.owner_id')){const session=sessions.find(s=>s[0]===values[0]);const a=session&&accounts.find(a=>a.owner_id===session[1]&&a.member_id===session[2]&&a.version===session[3]);return{rows:a?[{...a}]:[]};}
+ if(sql.includes('gymos.member_phone_login('))return{rows:accounts.filter(a=>memberCodeHash(a.phone)===values[0]).map(a=>({owner_id:a.owner_id,member_id:a.member_id,branch:a.branch,version:a.version,pin_must_change:a.pin_must_change,matches:values[1]===a.pin}))};
+ if(sql.includes('RETURNING attempts')){const n=(counters.get(values[0])??0)+1;counters.set(values[0],n);return{rows:[{attempts:n}]};}
+ if(sql.includes('tenant_licenses'))return{rows:licenseRow?[{...licenseRow}]:[]};
+ if(sql.startsWith('INSERT INTO gymos.member_code_sessions'))sessions.push(values);return{rows:[]};}};
+ return{sessions,counters};
+}
+test('Two matched clubs and one unmatched: selector reveals only the PIN-matched clubs',async()=>{
+ const qa=setupMulti([
+  {owner_id:'club-a',member_id:'member-a',branch:'north',version:1,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-b',member_id:'member-b',branch:'north',version:2,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-c',member_id:'member-c',branch:'north',version:1,phone,pin:'999000',pin_must_change:false}]);
+ const r=await POST(request({phone,pin:'004321'}));assert.equal(r.status,200);
+ const body=await r.json();assert.deepEqual(body.chooseAccount.map(a=>a.name),['club-a','club-b']);
+ assert.equal(JSON.stringify(body).includes('club-c'),false,'unmatched club must not be disclosed');
+ assert.equal(qa.sessions.length,0);
+ assert.equal((await POST(request({phone,pin:'004321',account:'club-c|member-c'}))).status,401);
+ const selected=await POST(request({phone,pin:'004321',account:'club-b|member-b'}));assert.equal(selected.status,200);
+ assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);
+});
+test('Two memberships in the same club select by branch-disambiguated names',async()=>{
+ const qa=setupMulti([
+  {owner_id:'club-a',member_id:'member-a',branch:'north',version:1,phone,pin:'004321',pin_must_change:false},
+  {owner_id:'club-a',member_id:'member-b',branch:'south',version:3,phone,pin:'004321',pin_must_change:false}]);
+ const r=await POST(request({phone,pin:'004321'}));assert.equal(r.status,200);
+ const body=await r.json();assert.deepEqual(body.chooseAccount.map(a=>a.name),['club-a · North','club-a · South']);
+ assert.equal(qa.sessions.length,0);
+ const selected=await POST(request({phone,pin:'004321',account:'club-a|member-b'}));assert.equal(selected.status,200);
+ assert.deepEqual(qa.sessions[0].slice(1),['club-a','member-b',3]);
+});
+
+
+test('defaultOFF session selector restricts reads to exact account member and branch without changing PIN scope',async()=>{
+ const prior=process.env.GYMOS_MEMBER_SESSION_READS;process.env.GYMOS_MEMBER_SESSION_READS='1';globalThis.__qaPhoneSlices=[];
+ try{const qa=setup(true,true),r=await POST(request({phone,pin:'123456'}));assert.equal(r.status,200);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);assert.ok(globalThis.__qaPhoneSlices.length>0);for(const {owner,q} of globalThis.__qaPhoneSlices){assert.deepEqual(q.collections,['members']);assert.equal(q.ids.length,1);assert.deepEqual(q.branches,['main']);assert.equal(q.ids[0],owner==='club-a'?'member-a':'member-b');}
+ const body=await r.json();assert.equal(JSON.stringify(body).includes('club-a'),false);
+ }finally{if(prior===undefined)delete process.env.GYMOS_MEMBER_SESSION_READS;else process.env.GYMOS_MEMBER_SESSION_READS=prior;}
+});

@@ -1,0 +1,41 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.pushtorq.members.freshtest",
+      "sha256_cert_fingerprints": [
+        "D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8",
+        "CE:1B:7C:62:59:09:C5:BE:1B:59:06:CA:33:13:76:07:49:F9:11:23:15:58:81:B4:1A:33:DB:C6:8F:98:54:EA"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.pushtorq.management.freshtest",
+      "sha256_cert_fingerprints": [
+        "D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8",
+        "CE:1B:7C:62:59:09:C5:BE:1B:59:06:CA:33:13:76:07:49:F9:11:23:15:58:81:B4:1A:33:DB:C6:8F:98:54:EA"
+      ]
+    }
+  },
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.gymos.support.freshtest",
+      "sha256_cert_fingerprints": [
+        "D0:06:AC:76:C5:5D:DB:10:F4:32:18:32:A1:42:AE:32:09:F6:43:74:78:1F:BB:5E:07:E2:8E:61:24:E1:52:E8",
+        "CE:1B:7C:62:59:09:C5:BE:1B:59:06:CA:33:13:76:07:49:F9:11:23:15:58:81:B4:1A:33:DB:C6:8F:98:54:EA"
+      ]
+    }
+  }
+]

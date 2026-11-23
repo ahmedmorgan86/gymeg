@@ -1,0 +1,284 @@
+'use client';
+import {WORKSPACE_PATH} from './lib/navigation';
+import ClubHub from './club-hub';
+import SupportNotificationControls from './support-notification-controls';
+import Copyright from './copyright';
+import Image from 'next/image';
+import Link from 'next/link';
+import {useRouter} from 'next/navigation';
+import {useEffect,useState,type FormEvent} from 'react';
+import {usePreference} from './use-preference';
+import {androidAppVariants,supportApkUrl,supportFallbackQrPath,supportInstallPath,managementApkUrl,managementFallbackQrPath,membersApkUrl,membersFallbackQrPath,resolveSupportApkUrl,resolveManagementApkUrl,resolveMembersApkUrl,generateQrDataUrl,type AndroidVariantId} from './lib/support-release';
+import type {Order,CommercialDirectory as Directory} from './lib/commercial-types';
+
+export default function CommercialPanel({platform=false,initialData}:{platform?:boolean;initialData?:Directory}){
+ const [lang,setLang]=usePreference<'ar'|'en'>('gymos.language','ar'),[data,setData]=useState<Directory|null>(initialData??null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false);
+ const [apkHrefs,setApkHrefs]=useState<Record<AndroidVariantId,string>>({support:supportApkUrl,management:managementApkUrl,members:membersApkUrl});
+ const [qrSources,setQrSources]=useState<Record<AndroidVariantId,string>>({support:supportFallbackQrPath,management:managementFallbackQrPath,members:membersFallbackQrPath});
+ const router=useRouter();
+ const [clubSearch,setClubSearch]=useState(''),[orderFilter,setOrderFilter]=useState('pending_review'),[platformTab,setPlatformTab]=useState('clubs'),[activeApp,setActiveApp]=useState<string>('all');
+ const ar=lang==='ar',t=(a:string,e:string)=>ar?a:e;
+
+ useEffect(()=>{
+  if(!platform||typeof window==='undefined')return;
+  let active=true;
+  const nextHrefs:Record<AndroidVariantId,string>={
+   support:resolveSupportApkUrl(window.location.origin),
+   management:resolveManagementApkUrl(window.location.origin),
+   members:resolveMembersApkUrl(window.location.origin)
+  };
+  void Promise.all(androidAppVariants.map(async v=>[v.id,await generateQrDataUrl(nextHrefs[v.id],v.fallbackQrPath)] as const)).then(entries=>{
+   if(active){
+    setApkHrefs(nextHrefs);
+    setQrSources(Object.fromEntries(entries) as Record<AndroidVariantId,string>);
+   }
+  });
+  return()=>{active=false;};
+ },[platform]);
+
+ async function load(){
+  const response=await fetch('/api/commercial'+(platform?'?platform=1':''),{cache:'no-store'});
+  if(!response.ok)throw Error(response.status===403?'forbidden':'unavailable');
+  setData(await response.json());
+ }
+
+ useEffect(()=>{
+  if(initialData)return;
+  let active=true;
+  fetch('/api/commercial'+(platform?'?platform=1':''),{cache:'no-store'}).then(async response=>{
+   if(!response.ok)throw Error();
+   const value=await response.json();
+   if(active)setData(value);
+  }).catch(()=>{
+   if(active){
+    setFailed(true);
+    setMessage(lang==='ar'?'تعذر فتح الصفحة. تحقق من صلاحية الحساب وتفعيل الخدمة.':'Unable to open this page. Check account access and service availability.');
+   }
+  });
+  return()=>{active=false;};
+ },[platform,lang,initialData]);
+
+ async function send(body:Record<string,unknown>,endpoint='/api/commercial'){
+  if(busy)return;
+  setBusy(true);
+  setMessage('');
+  setFailed(false);
+  try{
+   const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+   const result=await response.json();
+   if(!response.ok){
+    const errors:Record<string,string>={
+     trialUsed:t('تم استخدام التجربة المجانية لهذا الحساب أو النادي.','This account or club already used its free trial.'),
+     trialUnavailable:t('التجربة متاحة لنادٍ جديد غير مفعل فقط.','Trials are only available to new, unactivated clubs.'),
+     openRequest:t('يوجد طلب مفتوح لهذا النادي بالفعل.','This club already has an open request.'),
+     conflict:t('البيانات تغيرت. حدّث الصفحة ثم حاول مجددًا.','Data changed. Refresh and try again.'),
+     paymentMismatch:t('المبلغ المحوّل لا يطابق المبلغ المطلوب. راجع التحويل أولًا.','Transferred amount does not match the requested amount. Review the transfer.'),
+     forbidden:t('ليست لديك الصلاحية.','You do not have permission.')
+    };
+    throw Error(errors[result.error]??t('تعذر الحفظ. راجع الحقول ثم حاول مجددًا.','Could not save. Check the fields and retry.'));
+   }
+   if(body.action==='support.stop'){router.push('/platform');router.refresh();return;}
+   if(body.action==='select'||body.action==='setup'||body.action==='trial.start'&&body.open===true||body.action==='claim'||body.action==='support.start'){
+    router.push(WORKSPACE_PATH);
+    router.refresh();
+    return;
+   }
+   setMessage(t('تم الحفظ.','Saved.'));
+   await load();
+  }catch(error){
+   setFailed(true);
+   setMessage(error instanceof Error?error.message:t('تعذر الاتصال.','Connection failed.'));
+  }finally{
+   setBusy(false);
+  }
+ }
+
+ function submit(event:FormEvent<HTMLFormElement>,body:Record<string,unknown>,convert?:(values:Record<string,FormDataEntryValue>)=>Record<string,unknown>){
+  event.preventDefault();
+  const values=Object.fromEntries(new FormData(event.currentTarget));
+  void send({...body,...(convert?convert(values):values)});
+ }
+
+ const money=(value:string|null,currency:string)=>value===null?t('حسب الاتفاق','By quotation'):new Intl.NumberFormat(ar?'ar-EG':'en-GB',{style:'currency',currency}).format(Number(value)/100);
+ const statuses:Record<string,string>={quote_requested:t('طلب عرض سعر','Quote requested'),awaiting_payment:t('بانتظار التحويل','Awaiting transfer'),pending_review:t('التحويل قيد المراجعة','Transfer under review'),approved:t('معتمد','Approved'),rejected:t('مرفوض','Rejected'),cancelled:t('ملغى','Cancelled'),active:t('نشط','Active'),pending:t('بانتظار التفعيل','Pending activation'),suspended:t('موقوف','Suspended')};
+ const field=(name:string,label:string,value='',type='text',required=true)=><label>{label}<input name={name} defaultValue={value} type={type} required={required} maxLength={type==='text'?200:undefined} min={type==='number'?'0':undefined} step={type==='number'?'0.01':undefined}/></label>;
+
+ function orderCard(order:Order,tenant?:string){
+  return <article className="commercial-order" key={order.id}>
+   <div><strong>{order.club_name??order.mode}</strong><span className="commercial-tag">{statuses[order.status]??order.status}</span></div>
+   <p>{money(order.expected_minor,order.currency)} · {order.mode}</p>
+   <small>{order.id}</small>
+   {order.transfer_ref&&<p>{t('مرجع التحويل','Transfer reference')}: {order.transfer_ref} · {order.transfer_day?.slice(0,10)} · {money(order.paid_minor,order.currency)}</p>}
+   {order.review_note&&<p>{order.review_note}</p>}
+   {tenant&&order.status==='awaiting_payment'&&<form onSubmit={event=>submit(event,{action:'transfer',tenant,id:order.id},v=>({...v,amount:Math.round(Number(v.amount)*100)}))}>{field('reference',t('مرجع التحويل','Transfer reference'))}{field('day',t('تاريخ التحويل','Transfer date'),'','date')}{field('amount',t('المبلغ المحوّل','Transferred amount'),'','number')}<button disabled={busy}>{t('إرسال للمراجعة','Submit for review')}</button></form>}
+   {tenant&&['quote_requested','awaiting_payment','pending_review'].includes(order.status)&&<button className="quiet" disabled={busy} onClick={()=>void send({action:'cancel',tenant,id:order.id})}>{t('إلغاء الطلب','Cancel request')}</button>}
+   {platform&&order.status==='quote_requested'&&<form onSubmit={event=>submit(event,{action:'quote',id:order.id},v=>({...v,amount:Math.round(Number(v.amount)*100)}))}>{field('amount',t('قيمة العرض','Quoted amount'),'','number')}{field('note',t('شروط التفعيل والصيانة والدعم المتفق عليها','Agreed activation, maintenance and support terms'))}<button disabled={busy}>{t('إرسال عرض السعر','Send quote')}</button></form>}
+   {platform&&order.status==='pending_review'&&<form onSubmit={event=>{event.preventDefault();const form=new FormData(event.currentTarget),action=(event.nativeEvent as SubmitEvent).submitter?.getAttribute('value');void send({action,id:order.id,note:form.get('note'),confirm:form.get('verified')==='on'?'VERIFIED_TRANSFER':''});}}>{field('note',t('ملاحظات المراجعة','Review notes'))}<label className="commercial-check"><input name="verified" type="checkbox"/>{t('تحققت بنفسي من وصول التحويل بالقيمة المطلوبة','I verified receipt of the requested amount')}</label><button disabled={busy} value="approve">{t('اعتماد وتفعيل','Approve & activate')}</button><button className="quiet" disabled={busy} value="reject">{t('رفض','Reject')}</button></form>}
+  </article>;
+ }
+
+ if(!platform&&data)return <ClubHub data={data} ar={ar} busy={busy} message={message} failed={failed} onAction={send} onLanguage={()=>setLang(ar?'en':'ar')}/>;
+
+ return <main className="commercial-shell" dir={ar?'rtl':'ltr'}>
+  <header>
+   <Link href={platform?"/platform":"/clubs"} onClick={()=>{if(platform){setPlatformTab('clubs');setClubSearch('');}}} style={{display:'inline-flex',alignItems:'center',gap:10}}>
+    <Image src={platform?"/icons/support-192.png?v=20261030-role-icons":"/icons/icon-192.png?v=20261029-gymeg"} width={36} height={36} alt="GymEG" unoptimized style={{borderRadius:8}}/>
+    <span>GymEG</span>
+   </Link>
+   <nav>
+    <Link href="/">{t('الموقع الرئيسي','Main website')}</Link>
+    {platform&&<Link href={supportInstallPath} onClick={(e)=>{if(platform){e.preventDefault();setPlatformTab('apps');}}}>{t('تطبيقات الموبايل','Mobile apps')}</Link>}
+    <Link href="/clubs">{t('أنديتي','My clubs')}</Link>
+    {data?.platform&&<Link href="/platform">{t('إدارة المنصة','Platform admin')}</Link>}
+    <button className="quiet" onClick={()=>setLang(ar?'en':'ar')}>{ar?'English':'العربية'}</button>
+   </nav>
+  </header>
+
+  {platform&&<div className="commercial-support-banner">
+   <div className="commercial-support-status">
+    <span className="commercial-support-indicator" aria-hidden="true"/>
+    <div>
+     <strong>{t('وضع إدارة المنصة والدعم الفني','Platform Owner & Support Mode')}</strong>
+     <span>{t('جلسة الدعم الإداري نشطة ومتاحة للأندية المسجلة','Administrative support mode is active for registered clubs')}</span>
+    </div>
+   </div>
+   <button className="button secondary text-button" disabled={busy} onClick={()=>void send({action:"support.stop"})}>{t("إنهاء جلسة الدعم الحالية","End current support session")}</button>
+  </div>}
+
+  {platform&&<SupportNotificationControls ar={ar}/>}
+
+  <section className="commercial-hero">
+   <span>GymEG BUSINESS</span>
+   <h1>{platform?t('لوحة مالك المنصة','Platform owner dashboard'):t('أنديتك، في مكان واحد.','Your clubs, in one place.')}</h1>
+   <p>{platform?t('أندية مستقلة. تراخيص واضحة. كل تفعيل له سجل.','Independent clubs. Clear licenses. An audit trail for every activation.'):t('اختار النادي، تابع الترخيص، وقدّم طلب التفعيل أو التجديد.','Choose a club, follow its license, and request activation or renewal.')}</p>
+  </section>
+
+  {platform&&<nav className="hub-tabs" aria-label={t('أقسام إدارة المنصة','Platform sections')}>
+   {[
+    ['clubs',t('الأندية والاشتراكات','Clubs & licenses')],
+    ['apps',t('تطبيقات الموبايل','Mobile apps')],
+    ['requests',t('طلبات التفعيل','Activation requests')],
+    ['settings',t('الإعدادات التجارية','Business settings')],
+    ['activity',t('سجل الإدارة','Audit trail')]
+   ].map(([id,label])=><button key={id} aria-current={platformTab===id?'page':undefined} className={platformTab===id?'selected':''} onClick={()=>setPlatformTab(id)}>{label}</button>)}
+  </nav>}
+
+  {message&&<p className={'commercial-message '+(failed?'error':'')} role="status">{message}</p>}
+  {!data&&!failed&&<p role="status">{t('جارٍ التحميل…','Loading…')}</p>}
+
+  {data&&<>
+   <section className="commercial-card" hidden={platform&&platformTab!=='clubs'}>
+    <h2>{platform?t('ابدأ من هنا','Start here'):t('افتح ناديك للعمل','Open your club')}</h2>
+    <p>{platform?t('راجع طلبات التفعيل أولًا، ثم ابحث عن النادي. إعدادات الأسعار والتحويل موجودة في قسم الإعدادات.','Review activation requests first, then find a club. Pricing and transfer settings are in the settings tab.'):t('افتح النادي لإدارة الأعضاء والحضور. إنشاء نادي جديد والانضمام بدعوة خيارات منفصلة أدناه.','Open a club to manage members and attendance. Creating a club and joining by invitation are separate options below.')}</p>
+    {platform&&<div className="commercial-metrics">
+     <button type="button" onClick={()=>setPlatformTab('clubs')}><b>{data.clubs.length}</b><span>{t('الأندية المسجلة','Registered clubs')}</span></button>
+     <button type="button" onClick={()=>{setPlatformTab('requests');setOrderFilter('pending_review');}}><b>{data.orders.filter(o=>o.status==='pending_review').length}</b><span>{t('تحويلات تحتاج مراجعتك','Transfers to review')}</span></button>
+     <button type="button" onClick={()=>{setPlatformTab('requests');setOrderFilter('quote_requested');}}><b>{data.orders.filter(o=>o.status==='quote_requested').length}</b><span>{t('طلبات عرض سعر','Quote requests')}</span></button>
+    </div>}
+    <div className="commercial-directory-bar" id="club-directory">
+     <label className="commercial-search-label">
+      <span>{t('البحث عن نادي بالاسم أو المعرّف','Find a club by name or ID')}</span>
+      <input type="search" value={clubSearch} onChange={e=>setClubSearch(e.target.value)} placeholder={t('اكتب اسم النادي أو الكود للبحث…','Type club name or ID to filter…')}/>
+     </label>
+     <span className="commercial-count-badge" role="status">{data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).length} {t('نادي مطابق','matching clubs')}</span>
+    </div>
+   </section>
+
+   {!platform&&<section className="commercial-card">
+    <h2>{t('ابدأ بالترتيب الصحيح','Start in the right order')}</h2>
+    <ol>
+     <li><b>{t('حساب المالك','Owner account')}</b> — {data.account?.name} <bdi>{data.account?.email}</bdi><p>{t('أنت مسجل بالفعل. أي نادي تنشئه الآن سيكون مملوكًا لهذا الحساب؛ لا تحتاج إنشاء كلمة مرور ثانية للنادي.','You are already signed in. Clubs created now belong to this account; a club does not need a second password.')}</p></li>
+     <li>{t('أنشئ ناديك المستقل من النموذج أدناه.','Create your independent club below.')}</li>
+     <li>{t('ابدأ تجربة ٣٠ يومًا للنادي الجديد المؤهل، ثم افتح النادي.','Start the eligible new club’s 30-day trial, then open the club.')}</li>
+    </ol>
+    <p>{t('بتجهز النظام لمالك مختلف؟ لازم هو ينشئ حسابه ببريده وكلمة مروره أولًا. كود دعوة الموظف لا ينشئ حساب مالك.','Setting up for a different owner? That owner must first register with their own email and password. A staff invitation does not create an owner account.')}</p>
+   </section>}
+
+   {!platform&&<section className="commercial-card">
+    <details>
+     <summary>{t('للموظفين فقط: الانضمام بدعوة فريق (اختياري)','Staff only: join with a team invitation (optional)')}</summary>
+     <form onSubmit={event=>{event.preventDefault();void send({action:'claim',code:new FormData(event.currentTarget).get('code')},'/api/team');}}>
+      {field('code',t('كود الدعوة','Invitation code'))}
+      <button disabled={busy}>{t('قبول الدعوة','Accept invitation')}</button>
+     </form>
+    </details>
+   </section>}
+
+   <div className="commercial-grid" hidden={platform&&platformTab!=='clubs'}>
+    {!platform&&<section className="commercial-card">
+     <h2>{t('إنشاء نادي مستقل','Create an independent club')}</h2>
+     <p>{t('أنشئ ناديك بدون دعوة، ثم ابدأ التجربة المجانية لمدة ٣٠ يومًا مرة واحدة. بياناته منفصلة عن باقي الأندية.','Create your club without an invitation, then start your one-time 30-day free trial. Its data is isolated from other clubs.')}</p>
+     <form onSubmit={event=>submit(event,{action:'create'})}>
+      {field('name',t('اسم النادي','Club name'))}
+      <button disabled={busy}>{t('إنشاء النادي','Create club')}</button>
+     </form>
+    </section>}
+    {data.clubs.filter(club=>[club.name,club.id].some(value=>value.toLocaleLowerCase().includes(clubSearch.trim().toLocaleLowerCase()))).map(club=><section className="commercial-card commercial-club-card" key={club.id}>
+     <div className="commercial-club-header">
+      <h2>{club.name}</h2>
+      <small className="commercial-club-id">{club.id}</small>
+     </div>
+     <div className="commercial-club-status">
+      <span className="commercial-tag">{statuses[club.license?.status??club.status??'']??''}</span>
+      <span className="commercial-mode-pill">{club.license?.mode??club.mode}</span>
+     </div>
+     {club.license?.mode==='trial'&&<p className="commercial-note">{t('تجربة مجانية ٣٠ يومًا — لا تتجدد تلقائيًا','Free 30-day trial — no automatic renewal')}</p>}
+     {club.license?.ends_at&&<p className="commercial-note">{t('نهاية الترخيص','License ends')}: {new Date(club.license.ends_at).toLocaleDateString(lang)}</p>}
+     {platform&&data.ownerComplimentary&&<button className="button primary commercial-btn-block" disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح وإدارة النادي','Open & manage club')}</button>}
+     {platform&&<form className="commercial-support-form" onSubmit={event=>submit(event,{action:'support.start',tenant:club.id})}>{field('reason',t('سبب جلسة الدعم (٨ أحرف على الأقل)','Support reason (at least 8 characters)'))}<button className="button secondary commercial-btn-block" disabled={busy}>{t('فتح النادي للدعم — قراءة فقط','Open club for support — read only')}</button></form>}
+     {!platform&&club.role==='owner'&&!data.trialUsed&&club.license?.status==='pending'&&<button disabled={busy} onClick={()=>void send({action:'trial.start',tenant:club.id})}>{t('ابدأ تجربتك المجانية — ٣٠ يومًا','Start your free 30-day trial')}</button>}
+     {!platform&&<button disabled={busy} onClick={()=>void send({action:'select',tenant:club.id})}>{t('فتح النادي','Open club')}</button>}
+     {!platform&&club.role==='owner'&&<><form onSubmit={event=>submit(event,{action:'order',tenant:club.id})}><p>{t('التطبيق مدفوع. التفعيل والتجديد والصيانة والدعم الفني حسب عرض واتفاق خاص بناديك. لا توجد أسعار أو باقات معلنة.','Paid software. Activation, renewal, maintenance and support follow a club-specific quotation and agreement; there are no public prices or packages.')}</p><label>{t('نظام الترخيص','License model')}<select name="mode"><option value="monthly">{t('شهري','Monthly')}</option><option value="annual">{t('سنوي','Annual')}</option><option value="perpetual">{t('دائم + صيانة سنوية','Perpetual + annual maintenance')}</option>{club.license?.mode==='perpetual'&&<option value="maintenance">{t('تجديد الصيانة السنوية','Renew annual maintenance')}</option>}</select></label><button disabled={busy}>{t('طلب عرض وتفعيل حسب الاتفاق','Request agreed quotation & activation')}</button></form>{club.requests?.map(order=>orderCard(order,club.id))}<details><summary>{t('ملكية النادي','Club ownership')}</summary><p>{t('ادعُ المستخدم أولًا من قسم الفريق. المالك الإضافي يحصل على إدارة النادي بالكامل. لا يمكن إزالة آخر مالك.','Invite the user from Team first. An additional owner gets full club control. The last owner cannot be removed.')}</p><form onSubmit={event=>submit(event,{tenant:club.id},v=>({...v,confirm:v.confirm==='on'?'CHANGE_OWNERSHIP':''}))}><label>{t('المستخدم','User')}<select name="user">{club.members?.map(member=><option key={member.user_id} value={member.user_id}>{member.name} · {member.role}</option>)}</select></label><label>{t('الإجراء','Action')}<select name="action"><option value="owner.add">{t('تعيين مالك إضافي','Add owner')}</option><option value="owner.remove">{t('إلغاء وصول مالك','Remove owner access')}</option></select></label><label className="commercial-check"><input name="confirm" type="checkbox" required/>{t('أؤكد تغيير صلاحيات الملكية','I confirm the ownership change')}</label><button disabled={busy}>{t('تنفيذ تغيير الملكية','Apply ownership change')}</button></form></details></>}
+     {platform&&<form className="commercial-suspend-form" onSubmit={event=>submit(event,{action:club.status==='suspended'?'resume':'suspend',tenant:club.id,revision:club.revision})}>{field('note',t('سبب تغيير حالة الترخيص','Reason for license status change'))}<button className="quiet" disabled={busy}>{club.status==='suspended'?t('رفع الإيقاف','Resume'):t('إيقاف التعديلات','Suspend writes')}</button></form>}
+    </section>)}
+   </div>
+
+   {platform&&<section className="commercial-card commercial-apps-section" hidden={platformTab!=='clubs'&&platformTab!=='apps'}>
+    <div className="commercial-apps-header">
+     <span className="commercial-apps-pill">{t('منظومة تطبيقات الهاتف المحمول','Official Mobile Applications')}</span>
+     <h2>{t('تطبيقات GymEG الرسمية للهواتف الذكية','Official GymEG Mobile Applications')}</h2>
+     <p>{t('ثلاثة تطبيقات مخصصة بصيغة APK جاهزة للتحميل المباشر مع أكواد QR للمسح السريع بكاميرا الهاتف ودليل التثبيت لنسخ iPhone.','Three dedicated APK packages ready for direct download with camera-scannable QR codes and iPhone installation guides.')}</p>
+     <div className="commercial-apps-switcher">
+      <button type="button" className={`commercial-switcher-btn ${activeApp==='all'?'active':''}`} onClick={()=>setActiveApp('all')}>{t('جميع التطبيقات (3)','All Apps (3)')}</button>
+      {androidAppVariants.map(v=><button key={v.id} type="button" className={`commercial-switcher-btn ${activeApp===v.id?'active':''}`} onClick={()=>setActiveApp(v.id)}><Image src={v.iconPath} width={20} height={20} alt="" unoptimized style={{borderRadius:6}}/><span>{t(v.arTitle,v.enTitle)}</span></button>)}
+     </div>
+    </div>
+    <div className="commercial-apps-grid">
+     {androidAppVariants.map(v=><div className={"commercial-app-card "+(activeApp!=='all'&&activeApp!==v.id?'is-inactive-card':'')} key={v.id} data-variant={v.id}>
+      <div className="commercial-app-top">
+       <Image src={v.iconPath} width={58} height={58} alt={t(v.arTitle,v.enTitle)} unoptimized style={{borderRadius:16,boxShadow:'0 4px 14px rgba(0,0,0,0.18)'}}/>
+       <div className="commercial-app-meta">
+        <h3>{t(v.arTitle,v.enTitle)}</h3>
+        <div className="commercial-app-badges">
+         <span className="commercial-app-badge">v{v.version}</span>
+         <span className="commercial-app-os-badge">Android {v.minAndroid}+</span>
+        </div>
+       </div>
+      </div>
+      <div className="commercial-app-qr-box">
+       <a href={apkHrefs[v.id]} download={v.filename} title={t(v.arCta,v.enCta)}>
+        <Image src={qrSources[v.id]} width={96} height={96} alt={t(v.arQrAlt,v.enQrAlt)} unoptimized className="commercial-app-qr-img"/>
+       </a>
+       <div className="commercial-app-qr-info">
+        <strong>{t('مسح بالكاميرا','Scan with Camera')}</strong>
+        <small>{t('وجّه كاميرا الهاتف نحو الكود للتثبيت المباشر','Scan with phone camera to download directly')}</small>
+       </div>
+      </div>
+      <div className="commercial-app-actions">
+       <a className="button primary commercial-app-download" href={apkHrefs[v.id]} download={v.filename}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{marginInlineEnd:6}}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        <span>{t(v.arCta,v.enCta)}</span>
+       </a>
+       <Link className="button secondary commercial-app-guide" href={v.installPath}>
+        {t('تعليمات التثبيت ونسخة iPhone','Setup guide & iPhone version')}
+       </Link>
+      </div>
+     </div>)}
+    </div>
+   </section>}
+
+   {platform?<><section className="commercial-card" hidden={platformTab!=='settings'}><h2>{t('حدود الاتفاق الداخلية','Internal agreement limits')}</h2><form key={'custom'} onSubmit={event=>submit(event,{action:'plan',revision:data.plans.find(p=>p.id==='custom')?.revision??0},v=>({...v,published:true,limits:{branches:Number(v.branches),members:Number(v.members),staff:Number(v.staff)},...Object.fromEntries(['monthly','annual','perpetual','maintenance'].map(key=>[key,null]))}))}>{field('id',t('معرّف الاتفاق الداخلي','Internal agreement ID'),'custom')}{field('name',t('اسم الاتفاق','Agreement name'),data.plans.find(p=>p.id==='custom')?.name??'اتفاق مخصص / Custom agreement')}{field('currency',t('رمز العملة','Currency code'),data.plans.find(p=>p.id==='custom')?.currency??'EGP')}{field('branches',t('حد الفروع','Branch limit'),String(data.plans.find(p=>p.id==='custom')?.limits.branches??5),'number')}{field('members',t('حد الأعضاء','Member limit'),String(data.plans.find(p=>p.id==='custom')?.limits.members??1000),'number')}{field('staff',t('حد المستخدمين','Staff limit'),String(data.plans.find(p=>p.id==='custom')?.limits.staff??20),'number')}<p>{t('هذه حدود تشغيل داخلية فقط. كل تفعيل أو صيانة يحتاج عرضًا خاصًا واعتمادًا، ولا تتغير التراخيص القديمة بتعديل هذه الحدود.','Internal operating limits only. Each activation or maintenance renewal requires an individual quotation and approval. Existing license limits are preserved.')}</p><button disabled={busy}>{t('حفظ حدود الاتفاق','Save agreement limits')}</button></form></section><section className="commercial-card" id="activation-requests" hidden={platformTab!=='requests'}><h2>{t('طلبات التفعيل','Activation requests')}</h2><label>{t('حالة الطلب','Request status')}<select value={orderFilter} onChange={e=>setOrderFilter(e.target.value)}><option value="all">{t('كل الطلبات','All requests')}</option>{['pending_review','quote_requested','awaiting_payment','approved','rejected','cancelled'].map(status=><option key={status} value={status}>{statuses[status]}</option>)}</select></label>{data.orders.filter(order=>orderFilter==='all'||order.status===orderFilter).map(order=>orderCard(order))}{!data.orders.some(order=>orderFilter==='all'||order.status===orderFilter)&&<p role="status">{t('لا توجد طلبات بهذه الحالة.','No requests with this status.')}</p>}</section><section className="commercial-card" hidden={platformTab!=='settings'}><h2>{t('بيانات البيع والتحويل','Business & transfer details')}</h2><form onSubmit={event=>submit(event,{action:'settings',revision:data.settings?.revision??0})}>{field('company',t('الاسم التجاري','Business name'),data.settings?.payload?.company??'')}{field('support',t('وسيلة الدعم','Support contact'),data.settings?.payload?.support??'','text',false)}{['paymentInstructions','terms','privacy'].map(key=><label key={key}>{({paymentInstructions:t('تعليمات التحويل','Transfer instructions'),terms:t('شروط الخدمة','Terms of service'),privacy:t('سياسة الخصوصية','Privacy policy')})[key]}<textarea name={key} rows={5} defaultValue={data.settings?.payload?.[key]??''}/></label>)}<button disabled={busy}>{t('حفظ البيانات','Save details')}</button></form></section><section className="commercial-card" hidden={platformTab!=='activity'}><h2>{t('سجل إدارة المنصة','Platform audit trail')}</h2>{data.events.map(event=><p key={event.id}>{event.action} · {new Date(event.at).toLocaleString(lang)}</p>)}</section></>:<section className="commercial-card"><h2>{t('تعليمات التحويل والدعم','Transfer instructions & support')}</h2><p style={{whiteSpace:'pre-wrap'}}>{data.settings?.payload?.paymentInstructions||t('سيحدد مسؤول المنصة تعليمات التحويل مع عرض السعر.','The platform administrator will provide transfer instructions with the quotation.')}</p><p>{data.settings?.payload?.support}</p>{data.settings?.payload?.terms&&<details><summary>{t('شروط الخدمة','Terms of service')}</summary><p style={{whiteSpace:'pre-wrap'}}>{data.settings?.payload?.terms}</p></details>}{data.settings?.payload?.privacy&&<details><summary>{t('سياسة الخصوصية','Privacy policy')}</summary><p style={{whiteSpace:'pre-wrap'}}>{data.settings?.payload?.privacy}</p></details>}</section>}
+  </>}
+  <footer className="page-footer"><Copyright/></footer>
+ </main>;
+}
