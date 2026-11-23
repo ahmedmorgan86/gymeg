@@ -15,17 +15,17 @@ test('MemberConsoleHistory: switching member never paints the previous member\'s
  globalThis.fetch=async url=>{const m=new URL(String(url),'https://x').searchParams.get('member');fetches.push(m);
   if(m==='A')return{ok:true,json:async()=>({rows:[{id:'A1',at:'2026-11-20T10:00:00.000Z'}],next:null})};
   return new Promise(r=>{resolveB=()=>r({ok:true,json:async()=>({rows:[{id:'B1',at:'2026-11-21T11:00:00.000Z'}],next:null})});});};
- await React.act(async()=>root.render(h(MemberConsoleHistory,{member:'A',owner:'o',t})));
+ await React.act(async()=>root.render(h(MemberConsoleHistory,{member:'A',owner:'o',t,tz:'UTC',ar:false})));
  await flush();
- assert.match(document.body.textContent,/2026-11-20T10:00:00\.000Z/, 'A rows visible after A load');
+ assert.match(document.body.textContent,/20 Nov 2026, 10:00/, 'A rows visible after A load');
  // switch the prop on the SAME mounted component; B fetch stays pending
- await React.act(async()=>root.render(h(MemberConsoleHistory,{member:'B',owner:'o',t})));
+ await React.act(async()=>root.render(h(MemberConsoleHistory,{member:'B',owner:'o',t,tz:'UTC',ar:false})));
  // synchronous property: the old member's rows are gone in the very commit where the prop changed
- assert.doesNotMatch(document.body.textContent,/2026-11-20T10:00:00\.000Z/,'A rows must not paint under member B');
+ assert.doesNotMatch(document.body.textContent,/20 Nov 2026, 10:00/,'A rows must not paint under member B');
  assert.match(document.body.textContent,/جار التحميل/,'loading shows for member B');
  await flush(); // let the new load start (fetch stays pending)
  await React.act(async()=>{resolveB();await new Promise(r=>setTimeout(r,30));});
- assert.match(document.body.textContent,/2026-11-21T11:00:00\.000Z/,'B rows visible after B load');
+ assert.match(document.body.textContent,/21 Nov 2026, 11:00/,'B rows visible after B load');
  assert.deepEqual(fetches,['A','B']);
 });
 
