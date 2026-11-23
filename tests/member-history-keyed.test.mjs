@@ -90,3 +90,19 @@ test('useDues loadMore completion after a fresh page-1 commit restarts instead o
  assert.ok(!ids.includes('i9OLD'),'stale page must not append onto the replaced base');
  assert.ok(page1>=3,'restart from page 1 happened after the detected interleave');
 });
+
+// visitStamp zone policy: explicit club zone wins; missing or invalid zone uses the application default (Africa/Cairo), never the device zone.
+test('visitStamp: club zone, then the application default for a missing or invalid zone',async()=>{
+  const {visitStamp}=await import('../app/member-console-history.tsx');
+  const iso='2026-11-20T22:30:00.000Z';
+  const saved=process.env.TZ;
+  try{
+    assert.equal(visitStamp(iso,'UTC',false),'20 Nov 2026, 22:30');
+    assert.equal(visitStamp(iso,'Asia/Tokyo',false),'21 Nov 2026, 07:30');
+    for(const tz of ['America/Los_Angeles','Asia/Tokyo']){process.env.TZ=tz;
+      assert.equal(visitStamp(iso,undefined,false),'21 Nov 2026, 00:30','missing zone -> Cairo, device '+tz);
+      assert.equal(visitStamp(iso,'',false),'21 Nov 2026, 00:30');
+      assert.equal(visitStamp(iso,'Not/AZone',false),'21 Nov 2026, 00:30','invalid zone -> Cairo');}
+    assert.equal(visitStamp('garbage','UTC',false),'garbage');assert.equal(visitStamp(undefined,'UTC',false),'');
+  }finally{if(saved===undefined)delete process.env.TZ;else process.env.TZ=saved;}
+});

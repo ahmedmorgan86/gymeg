@@ -2,7 +2,9 @@
 // Member console attendance history, paged. Same rows and order as the legacy `visits.filter(member).reverse()` (position descending), 25 per page.
 import {useCallback,useEffect,useRef,useState} from 'react';
 import styles from './member-console.module.css';
-export function visitStamp(iso:string|undefined,tz:string|undefined,ar:boolean){if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return iso;try{return new Intl.DateTimeFormat(ar?'ar-EG':'en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:tz||undefined}).format(d);}catch{return iso;}}
+/** Club-time stamp. A missing or invalid club timezone uses the application's own default, Africa/Cairo (emptyState, announcement schedules), never the viewer's device zone. */
+export const CLUB_TZ_FALLBACK='Africa/Cairo';
+export function visitStamp(iso:string|undefined,tz:string|undefined,ar:boolean){if(!iso)return '';const d=new Date(iso);if(Number.isNaN(d.getTime()))return iso;const fmt=(zone:string)=>new Intl.DateTimeFormat(ar?'ar-EG':'en-GB',{dateStyle:'medium',timeStyle:'short',timeZone:zone}).format(d);try{return fmt(tz||CLUB_TZ_FALLBACK);}catch{try{return fmt(CLUB_TZ_FALLBACK);}catch{return iso;}}}
 type Visit={id:string;at:string;leftAt?:string;exitType?:string;sessions?:{at:string;leftAt:string}[]};
 export default function MemberConsoleHistory({member,owner,t,fallback,pageSize=25,tz,ar}:{tz?:string;ar?:boolean;member:string;owner:string;t:(a:string,b:string)=>string;/** already-loaded visits, used only when the paged route is unavailable (404/501) */fallback?:Visit[];pageSize?:number}){
  const [rows,setRows]=useState<Visit[]>([]),[next,setNext]=useState<number|null>(null),[state,setState]=useState<'loading'|'ok'|'error'|'unavailable'>('loading'),started=useRef(0);
