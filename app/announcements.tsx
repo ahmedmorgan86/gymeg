@@ -166,6 +166,15 @@ async function deleteBlobs(ids: string[]): Promise<void> {
   });
 }
 
+const DAYS_NAMES_EN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const LOG_STATUS_EN: Record<string, string> = {
+  'مجدول': 'Scheduled',
+  'قيد التشغيل': 'Playing',
+  'في قائمة الانتظار': 'Queued',
+  'مكتمل': 'Completed',
+  'متوقف': 'Stopped',
+  'فشل التشغيل': 'Playback failed'
+};
 const storageKey = (scope: string) => `gymeg.announcements.v3.${scope}`;
 const logsKey = (scope: string) => `gymeg.announcements.v3.logs.${scope}`;
 
@@ -319,6 +328,7 @@ export default function Announcements({
 }) {
   const scope = `${owner}|${branch}`;
   const t = (a: string, e: string) => ar ? a : e;
+  const chimeName = (n?: string) => (n === DEFAULT_CHIME_PART.name ? t(n, 'Default chime') : n);
   const { confirm, dialog } = useConfirmDialog();
   const [items, setItems] = useState<Announcement[]>(() => {
     if (typeof window === 'undefined') return [];
@@ -395,14 +405,14 @@ export default function Announcements({
     if (success) {
       setIsAudioUnlocked(true);
       setStatusMessage({
-        text: 'تم السماح بتشغيل الصوت في هذه الجلسة. أبقِ التطبيق مفتوحًا وفي الواجهة؛ المتصفح لا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.',
+        text: t('تم السماح بتشغيل الصوت في هذه الجلسة. أبقِ التطبيق مفتوحًا وفي الواجهة؛ المتصفح لا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.', 'Audio is allowed for this session. Keep the app open and in the foreground; the browser does not guarantee playback after the page is closed or sent to the background.'),
         type: 'success'
       });
     } else {
       audioUnlocker.markPlaybackBlocked();
       setIsAudioUnlocked(false);
       setStatusMessage({
-        text: 'تعذر تفعيل الصوت التلقائي بدون تفاعل مباشر مع الصفحة. يرجى النقر والمحاولة مجددًا.',
+        text: t('تعذر تفعيل الصوت التلقائي بدون تفاعل مباشر مع الصفحة. يرجى النقر والمحاولة مجددًا.', 'Automatic audio could not be enabled without direct interaction with the page. Please click and try again.'),
         type: 'warning'
       });
     }
@@ -471,7 +481,7 @@ export default function Announcements({
       localStorage.setItem(storageKey(scope), JSON.stringify(stripped));
       syncWithNativePlatforms(updated, timezoneRef.current);
     } catch {
-      setStatusMessage({ text: 'تحذير: تعذر مزامنة البيانات في التخزين المحلي.', type: 'error' });
+      setStatusMessage({ text: t('تحذير: تعذر مزامنة البيانات في التخزين المحلي.', 'Warning: could not sync data to local storage.'), type: 'error' });
     }
   }, [scope]);
 
@@ -488,7 +498,7 @@ export default function Announcements({
   const clearLogs = () => {
     setLogs([]);
     localStorage.removeItem(logsKey(scope));
-    setStatusMessage({ text: 'تم تنظيف سجل التشغيل بالكامل.', type: 'info' });
+    setStatusMessage({ text: t('تم تنظيف سجل التشغيل بالكامل.', 'The playback log was cleared.'), type: 'info' });
   };
 
   // Play a single audio part with optional fade and gap using safe autoplay unlocker
@@ -601,12 +611,12 @@ export default function Announcements({
     try {
       // 1. Fetch Blobs from IndexedDB
       const mainBlob = await retrieveBlob(item.main.id);
-      if (!mainBlob) throw new Error('ملف النداء الصوتي الأساسي غير موجود بالتخزين المحلي');
+      if (!mainBlob) throw new Error(t('ملف النداء الصوتي الأساسي غير موجود بالتخزين المحلي', 'Main announcement file is missing from local storage'));
 
       // The chime is identical for Start and End
       const chimeId = item.before?.id || DEFAULT_CHIME_PART.id;
       const chimeBlob = await retrieveBlob(chimeId);
-      if (!chimeBlob) throw new Error('ملف صوت التنبيه (Chime) غير متوفر');
+      if (!chimeBlob) throw new Error(t('ملف صوت التنبيه (Chime) غير متوفر', 'Alert chime file is not available'));
 
       // Check for pre-composed single-file playback if available
       if (item.composedId) {
@@ -614,7 +624,7 @@ export default function Announcements({
         if (composedBlob) {
           setCurrentPlayback({
             activeId: item.id,
-            phaseName: `التسلسل الصوتي الكامل (تنبيه ➔ نداء ➔ تنبيه)`,
+            phaseName: t(`التسلسل الصوتي الكامل (تنبيه ➔ نداء ➔ تنبيه)`, `Full sequence (chime ➔ announcement ➔ chime)`),
             repeatIndex: 1,
             totalRepeats: 1,
             isPaused: false
@@ -642,7 +652,7 @@ export default function Announcements({
       if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
       setCurrentPlayback({
         activeId: item.id,
-        phaseName: `الجزء 1: صوت تنبيه البداية (Alert Chime)`,
+        phaseName: t(`الجزء 1: صوت تنبيه البداية (Alert Chime)`, `Part 1: start alert chime`),
         repeatIndex: 1,
         totalRepeats: 1,
         isPaused: false
@@ -655,7 +665,7 @@ export default function Announcements({
         if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
         setCurrentPlayback({
           activeId: item.id,
-          phaseName: `فاصل بعد صوت البداية (${startGap} ثانية)`,
+          phaseName: t(`فاصل بعد صوت البداية (${startGap} ثانية)`, `Gap after the start chime (${startGap} seconds)`),
           repeatIndex: 1,
           totalRepeats: 1,
           isPaused: false
@@ -669,7 +679,7 @@ export default function Announcements({
         if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
         setCurrentPlayback({
           activeId: item.id,
-          phaseName: `الجزء 2: النداء الأساسي (${r + 1} من ${mainReps})`,
+          phaseName: t(`الجزء 2: النداء الأساسي (${r + 1} من ${mainReps})`, `Part 2: main announcement (${r + 1} of ${mainReps})`),
           repeatIndex: r + 1,
           totalRepeats: mainReps,
           isPaused: false
@@ -681,7 +691,7 @@ export default function Announcements({
           if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
           setCurrentPlayback({
             activeId: item.id,
-            phaseName: `فاصل بين تكرارات النداء (${item.mainGap} ثانية)`,
+            phaseName: t(`فاصل بين تكرارات النداء (${item.mainGap} ثانية)`, `Gap between repeats (${item.mainGap} seconds)`),
             repeatIndex: r + 1,
             totalRepeats: mainReps,
             isPaused: false
@@ -696,7 +706,7 @@ export default function Announcements({
         if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
         setCurrentPlayback({
           activeId: item.id,
-          phaseName: `فاصل قبل صوت النهاية (${endGap} ثانية)`,
+          phaseName: t(`فاصل قبل صوت النهاية (${endGap} ثانية)`, `Gap before the end chime (${endGap} seconds)`),
           repeatIndex: 1,
           totalRepeats: 1,
           isPaused: false
@@ -708,7 +718,7 @@ export default function Announcements({
       if (playbackGeneration.current !== currentGen) throw new Error('cancelled');
       setCurrentPlayback({
         activeId: item.id,
-        phaseName: `الجزء 3: صوت تنبيه النهاية (Alert Chime)`,
+        phaseName: t(`الجزء 3: صوت تنبيه النهاية (Alert Chime)`, `Part 3: end alert chime`),
         repeatIndex: 1,
         totalRepeats: 1,
         isPaused: false
@@ -744,7 +754,7 @@ export default function Announcements({
       } else {
         const isAutoplayBlocked = msg.includes('user gesture') || msg.includes('NotAllowedError');
         const displayError = isAutoplayBlocked
-          ? 'المتصفح منع تشغيل النداء المجدول. اضغط «تفعيل الصوت» مرة أخرى وأبقِ هذه الصفحة مفتوحة وفي الواجهة. لا يضمن المتصفح تشغيل الصوت عند إغلاق الصفحة أو إيقافها بالخلفية.'
+          ? t('المتصفح منع تشغيل النداء المجدول. اضغط «تفعيل الصوت» مرة أخرى وأبقِ هذه الصفحة مفتوحة وفي الواجهة. لا يضمن المتصفح تشغيل الصوت عند إغلاق الصفحة أو إيقافها بالخلفية.', 'The browser blocked the scheduled announcement. Press "Enable audio" again and keep this page open and in the foreground. The browser does not guarantee playback after the page is closed or sent to the background.')
           : msg;
 
         if (isAutoplayBlocked) {
@@ -927,13 +937,13 @@ export default function Announcements({
 
       if (field === 'main') {
         handleUpdateEditing('main', part);
-        setStatusMessage({ text: `تم رفع ملف النداء (${file.name}) بمدة ${dur.toFixed(1)} ثانية بنجاح.`, type: 'success' });
+        setStatusMessage({ text: t(`تم رفع ملف النداء (${file.name}) بمدة ${dur.toFixed(1)} ثانية بنجاح.`, `Announcement file (${file.name}) uploaded successfully, ${dur.toFixed(1)} seconds.`), type: 'success' });
       } else {
         handleSetChime(part);
-        setStatusMessage({ text: `تم اعتماد صوت التنبيه (${file.name}) للبداية والنهاية بنجاح.`, type: 'success' });
+        setStatusMessage({ text: t(`تم اعتماد صوت التنبيه (${file.name}) للبداية والنهاية بنجاح.`, `Alert chime (${file.name}) set for the start and end.`), type: 'success' });
       }
     } catch {
-      setStatusMessage({ text: 'فشل رفع وتخزين الملف الصوتي.', type: 'error' });
+      setStatusMessage({ text: t('فشل رفع وتخزين الملف الصوتي.', 'Failed to upload and store the audio file.'), type: 'error' });
     }
   };
 
@@ -943,14 +953,14 @@ export default function Announcements({
     if (!target) return;
     const match = target.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
     if (!match) {
-      setStatusMessage({ text: 'يرجى إدخال وقت صحيح بصيغة 24 ساعة (مثال: 08:30 أو 15:45)', type: 'error' });
+      setStatusMessage({ text: t('يرجى إدخال وقت صحيح بصيغة 24 ساعة (مثال: 08:30 أو 15:45)', 'Please enter a valid 24-hour time (for example 08:30 or 15:45)'), type: 'error' });
       return;
     }
     const formatted = `${match[1].padStart(2, '0')}:${match[2]}`;
     if (!editing.times.map(normalizeTimeStr).includes(formatted)) {
       handleUpdateEditing('times', [...editing.times, formatted].sort());
       setTimeInput('');
-      setStatusMessage({ text: `تمت إضافة الموعد: ${formatted}`, type: 'info' });
+      setStatusMessage({ text: t(`تمت إضافة الموعد: ${formatted}`, `Time added: ${formatted}`), type: 'info' });
     } else {
       setTimeInput('');
     }
@@ -972,15 +982,15 @@ export default function Announcements({
     }
 
     if (!editing.name.trim()) {
-      setStatusMessage({ text: 'يرجى إدخال اسم النداء أولاً.', type: 'error' });
+      setStatusMessage({ text: t('يرجى إدخال اسم النداء أولاً.', 'Please enter the announcement name first.'), type: 'error' });
       return;
     }
     if (!editing.main || !editing.main.id) {
-      setStatusMessage({ text: 'يرجى رفع ملف النداء الأساسي الإلزامي.', type: 'error' });
+      setStatusMessage({ text: t('يرجى رفع ملف النداء الأساسي الإلزامي.', 'Please upload the required main announcement file.'), type: 'error' });
       return;
     }
     if (finalTimes.length === 0) {
-      setStatusMessage({ text: 'يرجى تحديد موعد تشغيل واحد على الأقل.', type: 'error' });
+      setStatusMessage({ text: t('يرجى تحديد موعد تشغيل واحد على الأقل.', 'Please choose at least one play time.'), type: 'error' });
       return;
     }
 
@@ -988,7 +998,7 @@ export default function Announcements({
     const validation = validateAnnouncementSequence(editing);
     if (validation.exceedsLimit) {
       setStatusMessage({
-        text: `غير مسموح بالحفظ: ${validation.error} الحد الأقصى الإلزامي لكل نداء (صوت التنبيه + النداء + صوت النهاية) هو أقل من 30 ثانية لضمان عمل الإشعارات والجدولة بدقة على جميع الأنظمة.`,
+        text: t(`غير مسموح بالحفظ: ${validation.error} الحد الأقصى الإلزامي لكل نداء (صوت التنبيه + النداء + صوت النهاية) هو أقل من 30 ثانية لضمان عمل الإشعارات والجدولة بدقة على جميع الأنظمة.`, `Cannot save: ${validation.error} The maximum for each announcement (chime + announcement + end chime) is under 30 seconds so notifications and scheduling work reliably on all platforms.`),
         type: 'error'
       });
       return;
@@ -1046,7 +1056,7 @@ export default function Announcements({
     setEditing(null);
     setTimeInput('');
     setStatusMessage({
-      text: `تم حفظ النداء وجدولته بنجاح (المدة الإجمالية: ${validation.totalSeconds} ثانية < 30.0s).`,
+      text: t(`تم حفظ النداء وجدولته بنجاح (المدة الإجمالية: ${validation.totalSeconds} ثانية < 30.0s).`, `Announcement saved and scheduled (total duration: ${validation.totalSeconds} seconds, under 30.0s).`),
       type: 'success'
     });
   };
@@ -1072,7 +1082,7 @@ export default function Announcements({
     if (item.composedId && !usedIds.has(item.composedId)) toDelete.push(item.composedId);
 
     if (toDelete.length) await deleteBlobs(toDelete);
-    setStatusMessage({ text: 'تم حذف النداء وتنظيف الملفات غير المستخدمة.', type: 'info' });
+    setStatusMessage({ text: t('تم حذف النداء وتنظيف الملفات غير المستخدمة.', 'The announcement was deleted and unused files were cleaned up.'), type: 'info' });
   };
 
   const handleRemoveTime = (t: string) => {
@@ -1085,19 +1095,28 @@ export default function Announcements({
   const isOverDurationLimit = (timelineInfo?.totalSeconds ?? 0) >= MAX_ANNOUNCEMENT_DURATION_SECONDS;
 
   return (
-    <section className="announcements-page" hidden={!visible} dir="rtl">
+    <section className="announcements-page" hidden={!visible} dir={ar ? 'rtl' : 'ltr'}>
       {/* Page Header */}
       <div className="section-head">
         <div>
           <span className="eyebrow">SCHEDULED ANNOUNCEMENTS SYSTEM</span>
-          <h1>إدارة النداءات الصوتية المجدولة</h1>
+          <h1>{t('إدارة النداءات الصوتية المجدولة', 'Scheduled voice announcements')}</h1>
           <p>
-            نظام موحد متعدد المنصات (Web و Windows و Android و iOS) لتشغيل النداءات وفق تسلسل إجباري متسق:{' '}
-            <strong>صوت التنبيه (Alert Chime) ➔ النداء الصوتي ➔ صوت التنبيه</strong> بإجمالي مدة أقل من 30 ثانية.
+            {ar ? (
+              <>
+                نظام موحد متعدد المنصات (Web و Windows و Android و iOS) لتشغيل النداءات وفق تسلسل إجباري متسق:{' '}
+                <strong>صوت التنبيه (Alert Chime) ➔ النداء الصوتي ➔ صوت التنبيه</strong> بإجمالي مدة أقل من 30 ثانية.
+              </>
+            ) : (
+              <>
+                One system for Web, Windows, Android and iOS that plays announcements in a fixed order:{' '}
+                <strong>Alert chime ➔ Voice announcement ➔ Alert chime</strong>, under 30 seconds in total.
+              </>
+            )}
           </p>
         </div>
         <button className="button primary" onClick={() => setEditing(blankAnnouncement())}>
-          <Plus data-icon="inline-start" /> إضافة نداء جديد
+          <Plus data-icon="inline-start" /> {t('إضافة نداء جديد', 'Add announcement')}
         </button>
       </div>
 
@@ -1124,12 +1143,12 @@ export default function Announcements({
           )}
           <div>
             <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>
-              {isAudioUnlocked ? 'الصوت مسموح في هذه الجلسة' : 'تفعيل الصوت لهذه الجلسة'}
+              {isAudioUnlocked ? t('الصوت مسموح في هذه الجلسة', 'Audio is allowed in this session') : t('تفعيل الصوت لهذه الجلسة', 'Enable audio for this session')}
             </h4>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#cbd5e1' }}>
               {isAudioUnlocked
-                ? 'تم السماح بالصوت في الجلسة الحالية فقط. اترك الصفحة مفتوحة وفي الواجهة؛ لا يمكن ضمان التشغيل إذا أوقف المتصفح الصفحة بالخلفية.'
-                : 'اضغط الزر لتجربة تفعيل الصوت في هذه الجلسة. المتصفح قد يمنع النداء المجدول، ولا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.'}
+                ? t('تم السماح بالصوت في الجلسة الحالية فقط. اترك الصفحة مفتوحة وفي الواجهة؛ لا يمكن ضمان التشغيل إذا أوقف المتصفح الصفحة بالخلفية.', 'Audio is allowed for the current session only. Leave the page open and in the foreground; playback cannot be guaranteed if the browser pauses the page in the background.')
+                : t('اضغط الزر لتجربة تفعيل الصوت في هذه الجلسة. المتصفح قد يمنع النداء المجدول، ولا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.', 'Press the button to enable audio in this session. The browser may block the scheduled announcement and does not guarantee playback after the page is closed or sent to the background.')}
             </p>
           </div>
         </div>
@@ -1140,7 +1159,7 @@ export default function Announcements({
             onClick={() => void handleUnlockAudio()}
             style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
           >
-            <ShieldCheck size={18} /> تفعيل الصوت التلقائي للنداءات
+            <ShieldCheck size={18} /> {t('تفعيل الصوت التلقائي للنداءات', 'Enable automatic audio for announcements')}
           </button>
         )}
       </div>
@@ -1167,22 +1186,22 @@ export default function Announcements({
           <div className="card-head" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
               <span className="badge" style={{ backgroundColor: '#eab308', color: '#000', fontWeight: 'bold' }}>
-                جاري البث الصوتي
+                {t('جاري البث الصوتي', 'Playing now')}
               </span>
               <h3 style={{ margin: '0.25rem 0 0' }}>{currentPlayback.phaseName}</h3>
             </div>
             <div className="actions" style={{ display: 'flex', gap: '0.5rem' }}>
               {currentPlayback.isPaused ? (
                 <button className="button primary" onClick={handleResume}>
-                  <Play data-icon="inline-start" /> استكمال
+                  <Play data-icon="inline-start" /> {t('استكمال', 'Resume')}
                 </button>
               ) : (
                 <button className="button secondary" onClick={handlePause}>
-                  <Pause data-icon="inline-start" /> إيقاف مؤقت
+                  <Pause data-icon="inline-start" /> {t('إيقاف مؤقت', 'Pause')}
                 </button>
               )}
               <button className="button secondary" onClick={handleStop} style={{ color: '#ef4444' }}>
-                <Square data-icon="inline-start" /> إيقاف نهائي
+                <Square data-icon="inline-start" /> {t('إيقاف نهائي', 'Stop')}
               </button>
             </div>
           </div>
@@ -1194,52 +1213,56 @@ export default function Announcements({
         <section className="card announcement-form" style={{ marginTop: '1.5rem', padding: '1.5rem', border: '1px solid #334155' }}>
           <div className="card-head">
             <div>
-              <h2>{items.some(x => x.id === editing.id) ? 'تعديل النداء الصوتي' : 'إضافة نداء صوتي جديد'}</h2>
+              <h2>{items.some(x => x.id === editing.id) ? t('تعديل النداء الصوتي', 'Edit voice announcement') : t('إضافة نداء صوتي جديد', 'Add a new voice announcement')}</h2>
               <p style={{ color: '#94a3b8' }}>
-                الترتيب الإجباري الموحد: <strong>صوت التنبيه ➔ النداء الأساسي ➔ صوت التنبيه</strong> (إجمالي المدة &lt; 30 ثانية).
+                {ar ? (
+                  <>الترتيب الإجباري الموحد: <strong>صوت التنبيه ➔ النداء الأساسي ➔ صوت التنبيه</strong> (إجمالي المدة &lt; 30 ثانية).</>
+                ) : (
+                  <>Fixed order: <strong>Alert chime ➔ Main announcement ➔ Alert chime</strong> (total duration &lt; 30 seconds).</>
+                )}
               </p>
             </div>
             <button className="text-button" onClick={() => setEditing(null)}>
-              إلغاء
+              {t('إلغاء', 'Cancel')}
             </button>
           </div>
 
           {/* Section 1: Name */}
           <div className="form-group" style={{ margin: '1rem 0' }}>
             <label style={{ display: 'block', fontWeight: 'bold', marginBottom: '0.5rem' }}>
-              اسم النداء <span style={{ color: '#ef4444' }}>*</span>
+              {t('اسم النداء', 'Announcement name')} <span style={{ color: '#ef4444' }}>*</span>
             </label>
             <input
               type="text"
               value={editing.name}
               onChange={e => handleUpdateEditing('name', e.target.value)}
-              placeholder="مثال: تنبيه مواعيد إغلاق الصالة، تذكير الصلاة، بداية الحصة..."
-              style={{ width: '100%', padding: '0.75rem', borderRadius: '6px', border: '1px solid #ccc' }}
+              placeholder={t('مثال: تنبيه مواعيد إغلاق الصالة، تذكير الصلاة، بداية الحصة...', 'Example: gym closing reminder, prayer reminder, class start...')}
+              style={{ width: '100%', boxSizing: 'border-box', padding: '0.75rem', borderRadius: '6px', border: '1px solid #ccc' }}
               required
             />
           </div>
 
           <div
             className="dashboard-grid"
-            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem', marginTop: '1rem' }}
+            style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '1rem', marginTop: '1rem' }}
           >
             {/* Unified Alert Chime Section (Start & End) */}
             <div className="card" style={{ padding: '1.25rem', background: 'var(--card-bg, #1e293b)' }}>
               <div className="card-head">
                 <h3>
-                  <Music size={18} /> نغمة التنبيه (Alert Chime)
+                  <Music size={18} /> {t('نغمة التنبيه (Alert Chime)', 'Alert chime')}
                 </h3>
                 <span className="badge" style={{ background: '#3b82f6', color: '#fff' }}>
-                  البداية والنهاية
+                  {t('البداية والنهاية', 'Start and end')}
                 </span>
               </div>
               <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.5rem 0' }}>
-                نفس نغمة التنبيه يتم تشغيلها في البداية والنهاية تلقائيًا لمنع أي تشويش وضمان التوافق مع أنظمة الإشعارات المدمجة.
+                {t('نفس نغمة التنبيه يتم تشغيلها في البداية والنهاية تلقائيًا لمنع أي تشويش وضمان التوافق مع أنظمة الإشعارات المدمجة.', 'The same chime plays automatically at the start and the end to avoid any confusion and to stay compatible with built-in notification systems.')}
               </p>
 
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.75rem 0' }}>
                 <label className="button secondary" style={{ display: 'inline-block', cursor: 'pointer' }}>
-                  <Upload size={16} /> رفع نغمة مخصصة (WAV/MP3)
+                  <Upload size={16} /> {t('رفع نغمة مخصصة (WAV/MP3)', 'Upload a custom chime (WAV/MP3)')}
                   <input
                     type="file"
                     accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav"
@@ -1252,23 +1275,23 @@ export default function Announcements({
                   className="button secondary"
                   onClick={() => handleSetChime({ ...DEFAULT_CHIME_PART })}
                 >
-                  استعادة النغمة الافتراضية
+                  {t('استعادة النغمة الافتراضية', 'Restore default chime')}
                 </button>
               </div>
 
               {editing.before && (
                 <div style={{ fontSize: '0.875rem', margin: '0.5rem 0', background: 'rgba(255,255,255,0.05)', padding: '0.5rem', borderRadius: '4px' }}>
                   <p>
-                    <strong>اسم النغمة:</strong> {editing.before.name}
+                    <strong>{t('اسم النغمة:', 'Chime name:')}</strong> {chimeName(editing.before.name)}
                   </p>
                   <p>
-                    <strong>المدة:</strong> {editing.before.duration ? `${editing.before.duration.toFixed(1)} ثانية` : 'غير محدد'}
+                    <strong>{t('المدة:', 'Duration:')}</strong> {editing.before.duration ? t(`${editing.before.duration.toFixed(1)} ثانية`, `${editing.before.duration.toFixed(1)} seconds`) : t('غير محدد', 'Not set')}
                   </p>
                 </div>
               )}
 
               <label style={{ display: 'block', margin: '0.75rem 0' }}>
-                مستوى صوت نغمة التنبيه: {editing.beforeVolume}%
+                {t('مستوى صوت نغمة التنبيه:', 'Alert chime volume:')} {editing.beforeVolume}%
                 <input
                   type="range"
                   min={0}
@@ -1285,29 +1308,29 @@ export default function Announcements({
 
               <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0' }}>
                 <label style={{ flex: 1 }}>
-                  فاصل بعد نغمة البداية:
+                  {t('فاصل بعد نغمة البداية:', 'Gap after the start chime:')}
                   <select
                     value={editing.beforeGap}
                     onChange={e => handleUpdateEditing('beforeGap', Number(e.target.value))}
                     style={{ width: '100%', padding: '0.5rem', marginTop: '0.25rem' }}
                   >
-                    <option value={0.5}>0.5 ثانية</option>
-                    <option value={1}>ثانية واحدة</option>
-                    <option value={2}>ثانيتان</option>
-                    <option value={3}>3 ثوانٍ</option>
+                    <option value={0.5}>{t('0.5 ثانية', '0.5 seconds')}</option>
+                    <option value={1}>{t('ثانية واحدة', '1 second')}</option>
+                    <option value={2}>{t('ثانيتان', '2 seconds')}</option>
+                    <option value={3}>{t('3 ثوانٍ', '3 seconds')}</option>
                   </select>
                 </label>
                 <label style={{ flex: 1 }}>
-                  فاصل قبل نغمة النهاية:
+                  {t('فاصل قبل نغمة النهاية:', 'Gap before the end chime:')}
                   <select
                     value={editing.afterGap}
                     onChange={e => handleUpdateEditing('afterGap', Number(e.target.value))}
                     style={{ width: '100%', padding: '0.5rem', marginTop: '0.25rem' }}
                   >
-                    <option value={0.5}>0.5 ثانية</option>
-                    <option value={1}>ثانية واحدة</option>
-                    <option value={2}>ثانيتان</option>
-                    <option value={3}>3 ثوانٍ</option>
+                    <option value={0.5}>{t('0.5 ثانية', '0.5 seconds')}</option>
+                    <option value={1}>{t('ثانية واحدة', '1 second')}</option>
+                    <option value={2}>{t('ثانيتان', '2 seconds')}</option>
+                    <option value={3}>{t('3 ثوانٍ', '3 seconds')}</option>
                   </select>
                 </label>
               </div>
@@ -1317,15 +1340,15 @@ export default function Announcements({
             <div className="card" style={{ padding: '1.25rem', border: '1px solid var(--accent, #eab308)' }}>
               <div className="card-head">
                 <h3>
-                  <Volume2 size={18} /> ملف النداء الصوتي الأساسي <span style={{ color: '#ef4444' }}>*</span>
+                  <Volume2 size={18} /> {t('ملف النداء الصوتي الأساسي', 'Main announcement audio file')} <span style={{ color: '#ef4444' }}>*</span>
                 </h3>
               </div>
               <p style={{ fontSize: '0.85rem', color: '#94a3b8', margin: '0.5rem 0' }}>
-                صوت الرسالة الأساسية الموجهة للمتدربين بالصالة (بصيغة WAV أو MP3).
+                {t('صوت الرسالة الأساسية الموجهة للمتدربين بالصالة (بصيغة WAV أو MP3).', 'The main message for gym members (WAV or MP3).')}
               </p>
 
               <label className="button primary" style={{ display: 'inline-block', margin: '0.5rem 0', cursor: 'pointer' }}>
-                <Upload size={16} /> {editing.main ? 'استبدال ملف النداء' : 'رفع ملف النداء الأساسي'}
+                <Upload size={16} /> {editing.main ? t('استبدال ملف النداء', 'Replace announcement file') : t('رفع ملف النداء الأساسي', 'Upload main announcement file')}
                 <input
                   type="file"
                   accept="audio/mpeg,audio/wav,audio/mp4,audio/aac,.mp3,.wav"
@@ -1345,21 +1368,21 @@ export default function Announcements({
                   }}
                 >
                   <p>
-                    <strong>اسم الملف:</strong> {editing.main.name}
+                    <strong>{t('اسم الملف:', 'File name:')}</strong> {editing.main.name}
                   </p>
                   <p>
-                    <strong>مدة التسجيل:</strong> {editing.main.duration ? `${editing.main.duration.toFixed(1)} ثانية` : 'غير محدد'}
+                    <strong>{t('مدة التسجيل:', 'Recording length:')}</strong> {editing.main.duration ? t(`${editing.main.duration.toFixed(1)} ثانية`, `${editing.main.duration.toFixed(1)} seconds`) : t('غير محدد', 'Not set')}
                   </p>
                   <p>
-                    <strong>الحجم:</strong> {(editing.main.size / (1024 * 1024)).toFixed(2)} MB
+                    <strong>{t('الحجم:', 'Size:')}</strong> {(editing.main.size / (1024 * 1024)).toFixed(2)} MB
                   </p>
                 </div>
               ) : (
-                <p style={{ color: '#f87171', fontSize: '0.85rem' }}>يجب رفع ملف صوتي أساسي لحفظ النداء.</p>
+                <p style={{ color: '#f87171', fontSize: '0.85rem' }}>{t('يجب رفع ملف صوتي أساسي لحفظ النداء.', 'A main audio file is required to save the announcement.')}</p>
               )}
 
               <label style={{ display: 'block', margin: '0.75rem 0' }}>
-                مستوى الصوت الأساسي: {editing.mainVolume}%
+                {t('مستوى الصوت الأساسي:', 'Main volume:')} {editing.mainVolume}%
                 <input
                   type="range"
                   min={0}
@@ -1372,27 +1395,27 @@ export default function Announcements({
 
               <div style={{ display: 'flex', gap: '0.5rem', margin: '0.75rem 0' }}>
                 <label style={{ flex: 1 }}>
-                  تكرار النداء:
+                  {t('تكرار النداء:', 'Repeat announcement:')}
                   <select
                     value={editing.mainRepeats}
                     onChange={e => handleUpdateEditing('mainRepeats', Number(e.target.value))}
                     style={{ width: '100%', padding: '0.5rem', marginTop: '0.25rem' }}
                   >
-                    <option value={1}>مرة واحدة</option>
-                    <option value={2}>مرتان</option>
+                    <option value={1}>{t('مرة واحدة', 'Once')}</option>
+                    <option value={2}>{t('مرتان', 'Twice')}</option>
                   </select>
                 </label>
                 {editing.mainRepeats > 1 && (
                   <label style={{ flex: 1 }}>
-                    الفاصل بين التكرار:
+                    {t('الفاصل بين التكرار:', 'Gap between repeats:')}
                     <select
                       value={editing.mainGap}
                       onChange={e => handleUpdateEditing('mainGap', Number(e.target.value))}
                       style={{ width: '100%', padding: '0.5rem', marginTop: '0.25rem' }}
                     >
-                      <option value={1}>ثانية واحدة</option>
-                      <option value={2}>ثانيتان</option>
-                      <option value={3}>3 ثوانٍ</option>
+                      <option value={1}>{t('ثانية واحدة', '1 second')}</option>
+                      <option value={2}>{t('ثانيتان', '2 seconds')}</option>
+                      <option value={3}>{t('3 ثوانٍ', '3 seconds')}</option>
                     </select>
                   </label>
                 )}
@@ -1419,14 +1442,14 @@ export default function Announcements({
                     <CheckCircle size={20} style={{ color: '#22c55e' }} />
                   )}
                   <strong>
-                    إجمالي مدة التسلسل الثلاثي (تنبيه ➔ نداء ➔ تنبيه):{' '}
+                    {t('إجمالي مدة التسلسل الثلاثي (تنبيه ➔ نداء ➔ تنبيه):', 'Total sequence length (chime ➔ announcement ➔ chime):')}{' '}
                     <span style={{ color: isOverDurationLimit ? '#ef4444' : '#22c55e', fontSize: '1.1rem' }}>
-                      {timelineInfo.totalSeconds.toFixed(1)} ثانية
+                      {timelineInfo.totalSeconds.toFixed(1)} {t('ثانية', 'seconds')}
                     </span>
                   </strong>
                 </div>
                 <span className="badge" style={{ background: isOverDurationLimit ? '#ef4444' : '#22c55e', color: '#fff' }}>
-                  الحد الأقصى: 30.0 ثانية
+                  {t('الحد الأقصى: 30.0 ثانية', 'Maximum: 30.0 seconds')}
                 </span>
               </div>
 
@@ -1444,12 +1467,14 @@ export default function Announcements({
 
               {isOverDurationLimit ? (
                 <p style={{ margin: '0.5rem 0 0', color: '#ef4444', fontSize: '0.85rem', fontWeight: 'bold' }}>
-                  ⚠️ تنبيه إلزامي: مدة النداء تتجاوز 30 ثانية. يرجى تقليص مدة التسجيل الصوتي أو الفواصل الزمنية لتتمكن من حفظ النداء
-                  (الحد مطلوب لضمان عمل الإشعارات الصوتية المجدولة بدقة على Windows و Android و iOS).
+                  {t(
+                    '⚠️ تنبيه إلزامي: مدة النداء تتجاوز 30 ثانية. يرجى تقليص مدة التسجيل الصوتي أو الفواصل الزمنية لتتمكن من حفظ النداء (الحد مطلوب لضمان عمل الإشعارات الصوتية المجدولة بدقة على Windows و Android و iOS).',
+                    '⚠️ Required: the announcement is longer than 30 seconds. Shorten the recording or the gaps so you can save it (the limit keeps scheduled audio notifications reliable on Windows, Android and iOS).'
+                  )}
                 </p>
               ) : (
                 <p style={{ margin: '0.5rem 0 0', color: '#86efac', fontSize: '0.85rem' }}>
-                  ✓ المدة متوافقة تماماً مع معايير الجدولة الموحدة لكل المنصات.
+                  {t('✓ المدة متوافقة تماماً مع معايير الجدولة الموحدة لكل المنصات.', '✓ The duration meets the shared scheduling limits on all platforms.')}
                 </p>
               )}
             </div>
@@ -1458,25 +1483,25 @@ export default function Announcements({
           {/* Section 5: Scheduling Settings */}
           <div className="card" style={{ marginTop: '1rem', padding: '1.25rem' }}>
             <h3>
-              <Calendar size={18} /> جدولة النداء وتحديد أوقات البث
+              <Calendar size={18} /> {t('جدولة النداء وتحديد أوقات البث', 'Schedule and broadcast times')}
             </h3>
             <div className="form-row" style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', margin: '1rem 0' }}>
               <label style={{ flex: 1, minWidth: '200px' }}>
-                نوع الجدولة:
+                {t('نوع الجدولة:', 'Schedule type:')}
                 <select
                   value={editing.schedule}
                   onChange={e => handleUpdateEditing('schedule', e.target.value as Announcement['schedule'])}
                   style={{ width: '100%', padding: '0.5rem', marginTop: '0.25rem' }}
                 >
-                  <option value="daily">يوميًا</option>
-                  <option value="weekly">أيام محددة أسبوعيًا</option>
-                  <option value="once">يوم واحد فقط</option>
-                  <option value="interval">كل عدد معين من الأيام</option>
+                  <option value="daily">{t('يوميًا', 'Daily')}</option>
+                  <option value="weekly">{t('أيام محددة أسبوعيًا', 'Specific weekdays')}</option>
+                  <option value="once">{t('يوم واحد فقط', 'One day only')}</option>
+                  <option value="interval">{t('كل عدد معين من الأيام', 'Every N days')}</option>
                 </select>
               </label>
 
               <label style={{ flex: 1, minWidth: '200px' }}>
-                تاريخ البداية:
+                {t('تاريخ البداية:', 'Start date:')}
                 <input
                   type="date"
                   value={editing.startDate}
@@ -1486,7 +1511,7 @@ export default function Announcements({
               </label>
 
               <label style={{ flex: 1, minWidth: '200px' }}>
-                تاريخ النهاية (اختياري):
+                {t('تاريخ النهاية (اختياري):', 'End date (optional):')}
                 <input
                   type="date"
                   value={editing.endDate ?? ''}
@@ -1499,7 +1524,7 @@ export default function Announcements({
             {/* Weekly Days Selector */}
             {editing.schedule === 'weekly' && (
               <div style={{ margin: '1rem 0' }}>
-                <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>الأيام المحددة أسبوعيًا:</p>
+                <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{t('الأيام المحددة أسبوعيًا:', 'Weekdays:')}</p>
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {DAYS_NAMES.map((name, idx) => (
                     <button
@@ -1524,7 +1549,7 @@ export default function Announcements({
             {editing.schedule === 'once' && (
               <div style={{ margin: '1rem 0' }}>
                 <label>
-                  تاريخ التشغيل:
+                  {t('تاريخ التشغيل:', 'Play date:')}
                   <input
                     type="date"
                     value={editing.date ?? editing.startDate}
@@ -1539,17 +1564,17 @@ export default function Announcements({
             {editing.schedule === 'interval' && (
               <div style={{ margin: '1rem 0' }}>
                 <label>
-                  التشغيل كل عدد من الأيام:
+                  {t('التشغيل كل عدد من الأيام:', 'Play every N days:')}
                   <select
                     value={editing.interval}
                     onChange={e => handleUpdateEditing('interval', Number(e.target.value))}
                     style={{ padding: '0.5rem', marginRight: '0.5rem' }}
                   >
-                    <option value={2}>كل يومين</option>
-                    <option value={3}>كل 3 أيام</option>
-                    <option value={4}>كل 4 أيام</option>
-                    <option value={5}>كل 5 أيام</option>
-                    <option value={7}>كل 7 أيام</option>
+                    <option value={2}>{t('كل يومين', 'Every 2 days')}</option>
+                    <option value={3}>{t('كل 3 أيام', 'Every 3 days')}</option>
+                    <option value={4}>{t('كل 4 أيام', 'Every 4 days')}</option>
+                    <option value={5}>{t('كل 5 أيام', 'Every 5 days')}</option>
+                    <option value={7}>{t('كل 7 أيام', 'Every 7 days')}</option>
                   </select>
                 </label>
               </div>
@@ -1557,7 +1582,7 @@ export default function Announcements({
 
             {/* Times Selector (Multiple Times Supported) */}
             <div style={{ margin: '1rem 0' }}>
-              <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>أوقات التشغيل (ساعات ودقائق):</p>
+              <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{t('أوقات التشغيل (ساعات ودقائق):', 'Play times (hours and minutes):')}</p>
               <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
                 <input
                   type="time"
@@ -1572,7 +1597,7 @@ export default function Announcements({
                   style={{ padding: '0.5rem' }}
                 />
                 <button type="button" className="button secondary" onClick={() => handleAddTime()}>
-                  + إضافة موعد
+                  {t('+ إضافة موعد', '+ Add time')}
                 </button>
                 <button
                   type="button"
@@ -1580,11 +1605,11 @@ export default function Announcements({
                   style={{ fontSize: '0.8rem' }}
                   onClick={() => handleAddTime(getLocalTimeStr())}
                 >
-                  موعد الآن ({getLocalTimeStr()})
+                  {t('موعد الآن', 'Time now')} ({getLocalTimeStr()})
                 </button>
               </div>
               <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', color: '#94a3b8', alignSelf: 'center' }}>مواعيد مقترحة:</span>
+                <span style={{ fontSize: '0.8rem', color: '#94a3b8', alignSelf: 'center' }}>{t('مواعيد مقترحة:', 'Suggested times:')}</span>
                 {['09:00', '12:00', '15:00', '18:00', '21:00'].map(preset => (
                   <button
                     key={preset}
@@ -1627,39 +1652,39 @@ export default function Announcements({
           </div>
 
           {/* Form Actions */}
-          <div className="card-head" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <div className="card-head" style={{ marginTop: '1.5rem', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <button
                 className="button primary"
                 disabled={isOverDurationLimit}
                 onClick={() => void handleSave()}
                 style={{ opacity: isOverDurationLimit ? 0.5 : 1, cursor: isOverDurationLimit ? 'not-allowed' : 'pointer' }}
               >
-                حفظ وجدولة النداء
+                {t('حفظ وجدولة النداء', 'Save and schedule announcement')}
               </button>
               <button className="button secondary" onClick={() => triggerPreview(editing)}>
-                <Play data-icon="inline-start" /> تجربة التسلسل كاملًا
+                <Play data-icon="inline-start" /> {t('تجربة التسلسل كاملًا', 'Test the full sequence')}
               </button>
             </div>
             <button className="text-button" onClick={() => setEditing(null)}>
-              إلغاء
+              {t('إلغاء', 'Cancel')}
             </button>
           </div>
         </section>
       )}
 
       {/* List of Announcements Cards */}
-      <h2 style={{ marginTop: '2rem', marginBottom: '1rem' }}>قائمة النداءات المجدولة ({items.length})</h2>
-      <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '1rem' }}>
+      <h2 style={{ marginTop: '2rem', marginBottom: '1rem' }}>{t('قائمة النداءات المجدولة', 'Scheduled announcements')} ({items.length})</h2>
+      <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '1rem' }}>
         {items.map(item => {
           const scheduleText =
             item.schedule === 'daily'
-              ? 'يوميًا'
+              ? t('يوميًا', 'Daily')
               : item.schedule === 'weekly'
-              ? item.days.map(d => DAYS_NAMES[d]).join('، ')
+              ? item.days.map(d => (ar ? DAYS_NAMES[d] : DAYS_NAMES_EN[d])).join(ar ? '، ' : ', ')
               : item.schedule === 'once'
-              ? `تاريخ محدد: ${item.date ?? item.startDate}`
-              : `كل ${item.interval} أيام`;
+              ? t(`تاريخ محدد: ${item.date ?? item.startDate}`, `Specific date: ${item.date ?? item.startDate}`)
+              : t(`كل ${item.interval} أيام`, `Every ${item.interval} days`);
 
           const itemDuration = item.totalDurationSeconds ?? calculateTimeline(item).totalSeconds;
 
@@ -1669,7 +1694,7 @@ export default function Announcements({
                 <div>
                   <h3 style={{ margin: 0 }}>{item.name}</h3>
                   <span style={{ fontSize: '0.85rem', color: '#94a3b8' }}>
-                    {item.main.name} · {itemDuration.toFixed(1)} ثانية
+                    {item.main.name} · {itemDuration.toFixed(1)} {t('ثانية', 'seconds')}
                   </span>
                 </div>
                 <button
@@ -1680,19 +1705,19 @@ export default function Announcements({
                     saveToStorage(next);
                   }}
                 >
-                  {item.enabled ? 'مفعل' : 'معطل'}
+                  {item.enabled ? t('مفعل', 'Enabled') : t('معطل', 'Disabled')}
                 </button>
               </div>
 
               <div style={{ fontSize: '0.85rem', lineHeight: '1.6', margin: '0.75rem 0' }}>
                 <p>
-                  <strong>التسلسل الصوتي:</strong> تنبيه ({item.before?.name ?? 'افتراضي'}) ➔ نداء ➔ تنبيه
+                  <strong>{t('التسلسل الصوتي:', 'Audio sequence:')}</strong> {t('تنبيه', 'Chime')} ({chimeName(item.before?.name) ?? t('افتراضي', 'Default')}) ➔ {t('نداء', 'Announcement')} ➔ {t('تنبيه', 'Chime')}
                 </p>
                 <p>
-                  <strong>الأيام:</strong> {scheduleText}
+                  <strong>{t('الأيام:', 'Days:')}</strong> {scheduleText}
                 </p>
                 <p>
-                  <strong>المواعيد:</strong> {item.times.join(' ، ')}
+                  <strong>{t('المواعيد:', 'Times:')}</strong> {item.times.join(ar ? ' ، ' : ', ')}
                 </p>
               </div>
 
@@ -1701,14 +1726,14 @@ export default function Announcements({
                 style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem' }}
               >
                 <button className="button secondary" onClick={() => triggerPreview(item)}>
-                  <Play size={14} /> تشغيل تجريبي
+                  <Play size={14} /> {t('تشغيل تجريبي', 'Test play')}
                 </button>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button className="text-button" onClick={() => setEditing(item)}>
-                    تعديل
+                    {t('تعديل', 'Edit')}
                   </button>
                   <button className="text-button" onClick={() => void handleDelete(item)} style={{ color: '#f87171' }}>
-                    <Trash2 size={16} /> حذف
+                    <Trash2 size={16} /> {t('حذف', 'Delete')}
                   </button>
                 </div>
               </div>
@@ -1719,8 +1744,8 @@ export default function Announcements({
         {!items.length && (
           <div className="card empty" style={{ textAlign: 'center', padding: '2rem' }}>
             <Volume2 size={40} style={{ margin: '0 auto 1rem', opacity: 0.5 }} />
-            <h3>لا توجد نداءات مضافة بعد</h3>
-            <p>اضغط على زر <strong>+ إضافة نداء جديد</strong> لرفع ملف صوتي وتحديد أوقات تشغيله.</p>
+            <h3>{t('لا توجد نداءات مضافة بعد', 'No announcements yet')}</h3>
+            <p>{ar ? (<>اضغط على زر <strong>+ إضافة نداء جديد</strong> لرفع ملف صوتي وتحديد أوقات تشغيله.</>) : (<>Press <strong>+ Add announcement</strong> to upload an audio file and set when it plays.</>)}</p>
           </div>
         )}
       </div>
@@ -1729,27 +1754,27 @@ export default function Announcements({
       <section className="card" style={{ marginTop: '2.5rem', padding: '1.25rem' }}>
         <div className="card-head">
           <div>
-            <h2>سجل تشغيل النداءات</h2>
-            <p>سجل تفصيلي لعمليات البث المجدولة والسابقة مع حالتها التشغيلية وتفاصيل الأخطاء إن وجدت.</p>
+            <h2>{t('سجل تشغيل النداءات', 'Announcement play log')}</h2>
+            <p>{t('سجل تفصيلي لعمليات البث المجدولة والسابقة مع حالتها التشغيلية وتفاصيل الأخطاء إن وجدت.', 'Detailed log of scheduled and past broadcasts with their status and any error details.')}</p>
           </div>
           {logs.length > 0 && (
             <button className="text-button" onClick={clearLogs}>
-              تنظيف السجل
+              {t('تنظيف السجل', 'Clear log')}
             </button>
           )}
         </div>
 
         {logs.length > 0 ? (
           <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
-            <table style={{ width: '100%', textAlign: 'right', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+            <table style={{ width: '100%', textAlign: ar ? 'right' : 'left', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                  <th style={{ padding: '0.5rem' }}>اسم النداء</th>
-                  <th style={{ padding: '0.5rem' }}>التاريخ</th>
-                  <th style={{ padding: '0.5rem' }}>الموعد المجدول</th>
-                  <th style={{ padding: '0.5rem' }}>وقت البدء الفعلي</th>
-                  <th style={{ padding: '0.5rem' }}>الحالة</th>
-                  <th style={{ padding: '0.5rem' }}>ملاحظات</th>
+                  <th style={{ padding: '0.5rem' }}>{t('اسم النداء', 'Announcement')}</th>
+                  <th style={{ padding: '0.5rem' }}>{t('التاريخ', 'Date')}</th>
+                  <th style={{ padding: '0.5rem' }}>{t('الموعد المجدول', 'Scheduled time')}</th>
+                  <th style={{ padding: '0.5rem' }}>{t('وقت البدء الفعلي', 'Actual start')}</th>
+                  <th style={{ padding: '0.5rem' }}>{t('الحالة', 'Status')}</th>
+                  <th style={{ padding: '0.5rem' }}>{t('ملاحظات', 'Notes')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -1759,7 +1784,7 @@ export default function Announcements({
                     <td style={{ padding: '0.5rem' }}>{log.date}</td>
                     <td style={{ padding: '0.5rem' }}>{log.scheduledTime}</td>
                     <td style={{ padding: '0.5rem' }}>
-                      {log.actualStartTime ? new Date(log.actualStartTime).toLocaleTimeString('ar-EG') : '-'}
+                      {log.actualStartTime ? new Date(log.actualStartTime).toLocaleTimeString(ar ? 'ar-EG' : 'en-GB') : '-'}
                     </td>
                     <td style={{ padding: '0.5rem' }}>
                       <span
@@ -1767,7 +1792,7 @@ export default function Announcements({
                           log.status === 'مكتمل' ? 'primary' : log.status === 'فشل التشغيل' ? 'alert' : 'secondary'
                         }`}
                       >
-                        {log.status}
+                        {ar ? log.status : (LOG_STATUS_EN[log.status] ?? log.status)}
                       </span>
                     </td>
                     <td style={{ padding: '0.5rem', color: log.error ? '#f87171' : 'inherit' }}>
@@ -1780,7 +1805,7 @@ export default function Announcements({
           </div>
         ) : (
           <p className="form-note" style={{ marginTop: '1rem' }}>
-            لا توجد سجلات تشغيل سابقة حتى الآن.
+            {t('لا توجد سجلات تشغيل سابقة حتى الآن.', 'No play logs yet.')}
           </p>
         )}
       </section>
