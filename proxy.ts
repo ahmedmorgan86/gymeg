@@ -56,4 +56,4 @@ export async function proxy(request:NextRequest){
 
 // The broad matcher is the refresh boundary's: rotation must be possible on
 // any route that can read the session; the header policy self-scopes above.
-export const config={matcher:['/((?!_next/static|_next/image|favicon.ico|icons|manifest.json).*)']};
+export const config={matcher:['/:path*']};

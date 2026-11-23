@@ -1,3 +1,4 @@
+import {previewActorAllowed} from './rehearsal-preview-fence.ts';
 import { createHash, randomBytes } from 'node:crypto';
 import type { cookies } from 'next/headers';
 import { logAuthDiagnostic, sessionCookieOptions } from './auth-backend.ts';
@@ -176,6 +177,8 @@ export function supabaseServerAuth(store: CookieStore) {
           if (result.code === 'email_not_confirmed') return { data: { session: null }, error: EMAIL_NOT_CONFIRMED };
           return { data: { session: null }, error: { code: 'invalid_credentials', message: 'Invalid credentials', status: 401 } };
         }
+        const proposedUser=result.json.user as {id?:unknown}|undefined;
+        if(process.env.GYMOS_REHEARSAL_PREVIEW==='1'&&(!proposedUser||typeof proposedUser.id!=='string'||!previewActorAllowed(proposedUser.id)))return {data:{session:null},error:{message:'Preview account denied',status:403}};
         const session = openSession(store, result.json);
         if (!session) {
           logAuthDiagnostic('sign-in-session', result.status, 'MISSING_TOKENS');
