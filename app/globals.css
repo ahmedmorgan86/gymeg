@@ -284,3 +284,5 @@ fieldset{min-inline-size:0}.table-scroll,.class-calendar,.pass-print-area{min-wi
 
 .quota-notice{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;width:100%;grid-column:1/-1;margin-top:8px}.quota-notice span{flex:1 1 14rem;min-width:0;white-space:normal;overflow-wrap:anywhere}.quota-notice button{flex:0 0 auto}
 @media (min-width:1000px){.class-calendar{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));overflow-x:visible}} /* desktop: wrap the week into rows instead of a clipped scroll strip; below 1000px keep the scrolling 180px strip */
+
+.receipt-sheet{--text:#1b1830;--muted:#6c6b80;--line:#ddd}
