@@ -16,7 +16,7 @@ export default async function Home({searchParams}:HomeProps){
   if(!user)redirect('/sign-in');
   if(commercialEnabled()){
     try{
-      await commercialContext(user,(await cookies()).get('gymos-space')?.value,(await cookies()).get('gymos-support')?.value);
+      await commercialContext(user,(await cookies()).get('gymos-space')?.value,process.env.GYMOS_REHEARSAL_PREVIEW==='1'?undefined:(await cookies()).get('gymos-support')?.value);
     }catch(error){
       if(error instanceof CommercialError&&['chooseClub','supportExpired','trialExpired','forbidden','notFound'].includes(error.code))redirect('/clubs');
       throw error;

@@ -1,3 +1,4 @@
+import {previewFence,PREVIEW_TENANT} from './app/lib/rehearsal-preview-fence';
 import {supportWriteBlocked} from './app/lib/support-policy';
 import {planSupabaseSessionRefresh} from './app/lib/supabase-session-refresh';
 import {NextResponse,type NextRequest} from 'next/server';
@@ -13,6 +14,9 @@ function headerPath(pathname:string){
 }
 
 export async function proxy(request:NextRequest){
+  const fenced=previewFence(request.method,request.nextUrl.pathname);
+  if(fenced==='deny')return NextResponse.json({error:'previewReadOnly'},{status:403,headers:{'Cache-Control':'no-store'}});
+  if(fenced==='allow')request.cookies.set('gymos-space',PREVIEW_TENANT);
   if(supportWriteBlocked(request.method,request.nextUrl.pathname,request.cookies.has('gymos-support')))
     return NextResponse.json({error:'supportReadOnly'},{status:403,headers:{'Cache-Control':'no-store'}});
 
@@ -31,10 +35,11 @@ export async function proxy(request:NextRequest){
   // browser stores it.
   if(plan&&plan.action==='set')request.cookies.set('gymos_session',plan.value);
   const response=NextResponse.next({request});
+  if(fenced==='allow')response.cookies.set('gymos-space',PREVIEW_TENANT,{httpOnly:true,secure:true,sameSite:'lax',path:'/'});
   // Robots policy is independent of refresh: a refreshed request to an app
   // surface still must not be indexed.
   const pathname=request.nextUrl.pathname;
-  if(headerPath(pathname)&&pathname!=='/')response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
+  if(fenced==='allow'||headerPath(pathname)&&pathname!=='/')response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
   if(plan&&plan.action==='set'){
     response.cookies.set('gymos_session',plan.value,plan.options);
     // A session-changing response must never be stored or replayed by any

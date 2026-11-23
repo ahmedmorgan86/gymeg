@@ -109,3 +109,9 @@ test('firebase backend skips the refresh plan entirely', async () => {
   assert.equal(response.headers.get('set-cookie'), null);
   assert.equal(response.headers.get('X-Robots-Tag'), ROBOTS);
 });
+
+
+test('preview fence blocks writes before refresh and pins selected cookie without weakening existing protection',async()=>{
+ const old=process.env.GYMOS_REHEARSAL_PREVIEW,ve=process.env.VERCEL_ENV;process.env.GYMOS_REHEARSAL_PREVIEW='1';process.env.VERCEL_ENV='preview';
+ try{const blocked=await proxy(req('/api/workspace',{method:'POST'}));assert.equal(blocked.status,403);assert.deepEqual(await blocked.json(),{error:'previewReadOnly'});const get=req('/api/workspace');get.cookies.set=(k,v)=>{};const allowed=await proxy(get);assert.match(allowed.headers.get('set-cookie')??'',/gymos-space=8fe27fc0/);assert.equal(allowed.headers.get('X-Robots-Tag'),ROBOTS);const api=await proxy(req('/api/auth/google'));assert.equal(api.status,403);}finally{if(old===undefined)delete process.env.GYMOS_REHEARSAL_PREVIEW;else process.env.GYMOS_REHEARSAL_PREVIEW=old;if(ve===undefined)delete process.env.VERCEL_ENV;else process.env.VERCEL_ENV=ve;}
+});
