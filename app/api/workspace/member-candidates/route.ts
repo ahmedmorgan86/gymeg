@@ -1,3 +1,4 @@
+import {demandOwnerAllowed} from '../../../lib/demand-owner-scope';
 import {sliceBackend} from '../../../lib/workspace-reads';
 import {isEntityLayout} from '../../../lib/member-history';
 import {assertRequestTenant} from '../../../lib/request-tenant';
@@ -10,7 +11,7 @@ export const dynamic='force-dynamic';
 /** Default-off (GYMOS_MEMBER_SUMMARIES=1). Stored member candidates for the console list. 'fallback' (HTTP 200) means: keep the legacy full-state list. */
 export async function GET(request:Request){try{
  if(process.env.GYMOS_MEMBER_SUMMARIES!=='1')return reply({error:'notFound'},404);
- const ctx=await context();if(!ctx)return reply({error:'auth'},401);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));
+ const ctx=await context();if(!ctx)return reply({error:'auth'},401);if(!demandOwnerAllowed(ctx.owner))return reply({error:'notFound'},404);assertRequestTenant(request,ctx.tenantId,Boolean(ctx.license));
  const be=sliceBackend();if(!be.supportsOpen||!await isEntityLayout(be,ctx.owner))return reply({error:'unsupported'},501); // bounded reads need the Postgres entity layout: fail closed before any DB read
  const url=new URL(request.url),branch=url.searchParams.get('branch')??'',since=url.searchParams.get('since');
  if(!branch||branch.length>200||(since!==null&&!/^\d{1,20}$/.test(since)))return reply({error:'invalid'},400);
