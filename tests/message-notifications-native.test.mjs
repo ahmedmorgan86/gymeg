@@ -8,7 +8,9 @@ for(const role of ['members','management'])test(`Android ${role} handles only tr
  const main=readFileSync(new URL(`src/com/pushtorq/${role}/MainActivity.java`,base),'utf8');
  const bridge=readFileSync(new URL(`src/com/pushtorq/${role}/NotificationBridge.java`,base),'utf8');
  assert.match(manifest,/android\.permission\.POST_NOTIFICATIONS/);
- assert.match(manifest,role==='management'?/android:versionCode="11" android:versionName="1\.1\.9"/:/android:versionCode="10" android:versionName="1\.1\.8"/);
+ const release=JSON.parse(readFileSync(new URL(`../public/downloads/gymeg-${role}-android.json`,import.meta.url),'utf8'));
+ assert.equal(/android:versionCode="(\d+)"/.exec(manifest)?.[1],String(release.versionCode));
+ assert.equal(/android:versionName="([^"]+)"/.exec(manifest)?.[1],release.version);
  assert.doesNotMatch(main,/addJavascriptInterface/);
  assert.match(main,/NotificationBridge\.intercept\(MainActivity\.this,u\)/);
  // The origin is single-sourced: BuildConfig.WEB_HOST from the gradle flavors.
