@@ -1,0 +1,9 @@
+# Firestore revision snapshots
+
+Cold reads for split workspaces can reuse snapshots stored below the owner state document. The manifest is written atomically with the chunks. Each chunk is checked against the manifest revision, count, and position. A final state read checks the revision even when there are zero photos. If a writer wins the race, the read fails without caching and a subsequent request can read the new revision.
+
+A missing or invalid snapshot falls back to the existing bounded entity and photo queries. The shared scan ceiling and sentinel from PR #109 still apply. Snapshot photo lookups share the configured ceiling and run in groups of at most 32 requests. Legacy unsplit states still use their original payload. Split states with noncanonical photo document IDs retain the scan path.
+
+A scan can backfill in a separate transaction after verifying the revision. This keeps snapshot bytes out of the existing entity-write transaction. The largest published snapshot is eight chunks of 700,000 bytes, or 5,600,000 bytes of compressed payload before protocol overhead. The uncompressed JSON is bounded at 22,000,000 bytes. Snapshots above either bound are skipped. Fixed chunk locations keep obsolete data bounded to eight documents per owner; readers ignore chunks outside the current manifest. Obsolete chunks can still contain previous workspace data. Verify owner deletion and retention handling for this subcollection before relying on it outside the emulator. The binary field is excluded from indexing.
+
+This implementation retains the scan cap from main and does not import the persistent scan guard or hosted backfill script proposed in PR #99. Mock tests exercise mixed chunks and revision changes without consulting any external database. Firestore emulator validation is required before deploying this schema change.
