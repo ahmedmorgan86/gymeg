@@ -1,5 +1,5 @@
 /** Latest Windows package verified in the public download repository. */
-export const windowsVersion='1.1.17';
+export const windowsVersion='1.1.18';
 /** Candidate must match the Windows project version and a published public release. */
 export const windowsSourceVersion='1.1.18';
 const releaseRepository='ahmedmorgan86/gymeg-downloads';
