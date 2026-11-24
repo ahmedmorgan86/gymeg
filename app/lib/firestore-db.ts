@@ -1,6 +1,7 @@
-import { initializeApp, cert, getApps, type App } from 'firebase-admin/app';
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { createHash } from 'node:crypto';
-import { getFirestore, type Firestore, FieldValue } from 'firebase-admin/firestore';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { emptyState, type GymState } from './domain.ts';
 import { normalize } from './extensions.ts';
 import { assembleState, splitState, entityChanges, type Entity } from './entity-state.ts';
@@ -52,6 +53,79 @@ export class FirestoreReadBudgetError extends Error {
   }
 }
 
+const SNAPSHOT_CHUNK_BYTES = 700_000;
+const SNAPSHOT_MAX_CHUNKS = 8;
+const SNAPSHOT_MAX_OUTPUT = 22_000_000;
+
+function snapshotChunk(db: Firestore, owner: string, index: number) {
+  return db.collection('gym_states').doc(owner).collection('revision_snapshot_v1').doc(String(index));
+}
+
+async function readRevisionSnapshot(
+  db: Firestore, owner: string, revision: number, count: number, scanLimit: number,
+): Promise<GymState | null> {
+  const parts: Buffer[] = [];
+  for (let index = 0; index < count; index++) {
+    const part = (await snapshotChunk(db, owner, index).get()).data();
+    if (!part || part.revision !== revision || part.count !== count || part.index !== index ||
+        !Buffer.isBuffer(part.data) || part.data.length === 0 || part.data.length > SNAPSHOT_CHUNK_BYTES) return null;
+    parts.push(part.data);
+  }
+  let packed: { state: GymState; photoIds: string[] };
+  try {
+    packed = JSON.parse(gunzipSync(Buffer.concat(parts), { maxOutputLength: SNAPSHOT_MAX_OUTPUT }).toString());
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(packed?.state?.members) || !Array.isArray(packed.photoIds) ||
+      packed.photoIds.some(id => typeof id !== 'string' || !id || id.includes('/')) ||
+      new Set(packed.photoIds).size !== packed.photoIds.length) return null;
+  if (packed.photoIds.length > scanLimit) throw new FirestoreReadBudgetError(packed.photoIds.length, scanLimit);
+  const photos = new Map<string, string>();
+  // Bound concurrent requests independently of the total photo budget.
+  for (let offset = 0; offset < packed.photoIds.length; offset += 32) {
+    const ids = packed.photoIds.slice(offset, offset + 32);
+    const docs = await Promise.all(ids.map(id => db.collection('gym_photos').doc(`${owner}_${id}`).get()));
+    docs.forEach((doc, index) => {
+      const photo = doc.data();
+      if (photo?.owner_id === owner && photo.member_id === ids[index] && typeof photo.content === 'string') {
+        photos.set(ids[index], photo.content);
+      }
+    });
+  }
+  if (photos.size !== packed.photoIds.length) throw new Error('firestore snapshot photo missing or changed');
+  return {
+    ...packed.state,
+    members: packed.state.members.map(member => ({ ...member, photo: photos.get(member.id) ?? member.photo })),
+  };
+}
+
+async function backfillRevisionSnapshot(db: Firestore, owner: string, revision: number, state: GymState, photos: Record<string, string>) {
+  try {
+    const photoIds = state.members.filter(member => Object.hasOwn(photos, member.id) && photos[member.id] === member.photo && member.photo).map(member => member.id);
+    const external = new Set(photoIds);
+    const stripped = { ...state, members: state.members.map(member => external.has(member.id) ? { ...member, photo: '' } : member) };
+    const raw = Buffer.from(JSON.stringify({ state: stripped, photoIds }));
+    if (raw.length > SNAPSHOT_MAX_OUTPUT) return;
+    const bytes = gzipSync(raw);
+    const count = Math.ceil(bytes.length / SNAPSHOT_CHUNK_BYTES);
+    if (count > SNAPSHOT_MAX_CHUNKS) return;
+
+    // A separate transaction bounds snapshot writes independently of the entity persist.
+    const stateRef = db.collection('gym_states').doc(owner);
+    await db.runTransaction(async tx => {
+      const current = (await tx.get(stateRef)).data();
+      if (current?.revision !== revision) return;
+      for (let index = 0; index < count; index++) {
+        const data = bytes.subarray(index * SNAPSHOT_CHUNK_BYTES, (index + 1) * SNAPSHOT_CHUNK_BYTES);
+        tx.set(snapshotChunk(db, owner, index), { revision, count, index, data });
+      }
+      tx.update(stateRef, { readSnapshot: { revision, count } });
+    });
+  } catch (error) {
+    console.warn('firestore_snapshot_backfill_failed', error instanceof Error ? error.name : 'unknown');
+  }
+}
 function cacheSpace(owner: string, revision: number, state: GymState) {
   spaceCache.delete(owner);
   spaceCache.set(owner, { revision, state: structuredClone(state) });
@@ -174,17 +248,34 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
     return { state: initial, revision: 0 };
   }
 
-  const data = snap.data() as { payload: string; revision: number };
+  const data = snap.data() as { payload: string; revision: number; readSnapshot?: { revision: number; count: number } };
   const parsedMeta = JSON.parse(data.payload);
 
   if (parsedMeta._entityStorage === 1) {
     const cached = cachedSpace(owner, data.revision);
     if (cached) return { state: cached, revision: data.revision };
 
+    const scanLimit = firestoreReadScanLimit();
+    const assertSameRevision = async () => {
+      if ((await stateDocRef.get()).data()?.revision !== data.revision) {
+        throw new Error('firestore state changed during cold read');
+      }
+    };
+    const manifest = data.readSnapshot;
+    if (manifest?.revision === data.revision && Number.isInteger(manifest.count) &&
+        manifest.count >= 1 && manifest.count <= SNAPSHOT_MAX_CHUNKS) {
+      const snapshot = await readRevisionSnapshot(db, owner, data.revision, manifest.count, scanLimit);
+      // Always recheck, including snapshots without photos and invalid chunks.
+      await assertSameRevision();
+      if (snapshot) {
+        const state = normalize(snapshot);
+        cacheSpace(owner, data.revision, state);
+        return { state, revision: data.revision };
+      }
+    }
     // Bound both queries before Firestore returns document payloads. The shared
     // budget covers entities and photos; a single sentinel document detects
     // over-budget spaces, which fail closed rather than fetching the rest.
-    const scanLimit = firestoreReadScanLimit();
     const entitiesSnap = await db.collection('gym_entities')
       .where('owner_id', '==', owner)
       .orderBy('collection')
@@ -216,7 +307,11 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
       })
     );
 
+    await assertSameRevision();
     const state = normalize(assembleState(parsedMeta, entities, photos));
+    if (photosSnap.docs.every(doc => doc.id === `${owner}_${doc.data().member_id}`)) {
+      await backfillRevisionSnapshot(db, owner, data.revision, state, photos);
+    }
     cacheSpace(owner, data.revision, state);
     return { state, revision: data.revision };
   }
