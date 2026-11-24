@@ -1,5 +1,6 @@
 const apps = [{ name: 'gymeg-workspace' }];
 const store = new Map();
+export const __hooks = { afterDocRead: null };
 export const __counters = { docReads: 0, queryReads: 0, returnedDocs: 0, queries: [] };
 
 function collectionStore(name) {
@@ -11,6 +12,7 @@ export const __store = { get: collectionStore };
 
 export function __reset() {
   store.clear();
+  __hooks.afterDocRead = null;
   __counters.docReads = 0;
   __counters.queryReads = 0;
   __counters.returnedDocs = 0;
@@ -25,8 +27,12 @@ function documentApi(name, id) {
   return {
     get: async () => {
       __counters.docReads++;
-      return snapshot(id, collectionStore(name).get(id));
+      const result = snapshot(id, collectionStore(name).get(id));
+      __hooks.afterDocRead?.(name, id);
+      return result;
     },
+    collection: child => ({ doc: key => documentApi([name, id, child].join('/'), key) }),
+    update: async data => collectionStore(name).set(id, { ...collectionStore(name).get(id), ...data }),
     set: async data => {
       collectionStore(name).set(id, data);
     },
@@ -63,6 +69,15 @@ function queryApi(name, filters = [], orders = [], maxDocs) {
 export function getFirestore() {
   return {
     collection: name => ({ doc: id => documentApi(name, id), ...queryApi(name) }),
+    runTransaction: async callback => {
+      const writes = [];
+      await callback({
+        get: ref => ref.get(),
+        set: (ref, data) => writes.push(() => ref.set(data)),
+        update: (ref, data) => writes.push(() => ref.update(data)),
+      });
+      for (const write of writes) await write();
+    },
   };
 }
 
