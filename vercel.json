@@ -11,6 +11,7 @@
   ],
   "git": {
     "deploymentEnabled": {
+      "fix/issue110-firestore-snapshot": false,
       "codex/gymawy-commercial-gaps": false
     }
   }
