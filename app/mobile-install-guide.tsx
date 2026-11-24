@@ -13,7 +13,7 @@ export default async function MobileInstallGuide({kind,en=false}:{kind:'members'
  const filename=release.url.split('/').pop()??(member?'GymEG-Members-Android.apk':'GymEG-Manager-Android.apk');
  const h=await headers(),host=h.get('x-forwarded-host')??h.get('host'),proto=h.get('x-forwarded-proto')?.split(',')[0]?.trim()||(host?.startsWith('localhost')||host?.startsWith('127.0.0.1')?'http':'https');
  const origin=resolveDeploymentOrigin(host?`${proto}://${host}`:null);
- const qrSrc=await generateQrDataUrl(new URL(release.url,origin).toString(),fallbackQr);
+ const qrSrc=await generateQrDataUrl(new URL(entry,origin).toString(),fallbackQr);
  return <main className="mobile-install-guide" dir={en?'ltr':'rtl'}>
   <header><Link href="/">GymEG</Link><Link href={(member?'/member-install':'/management-install')+(en?'':'?lang=en')}>{en?'العربية':'English'}</Link></header>
   <section className="install-intro"><Image src={member?"/icons/members-192.png?v=20261030-role-icons":"/icons/icon-192.png?v=20261029-gymeg"} width={88} height={88} alt={name} unoptimized style={{borderRadius:20,display:'block',margin:'0 auto 16px',boxShadow:'0 6px 18px rgba(0,0,0,0.18)'}}/><small>YOUR GYM. ONE SYSTEM.</small><h1>{name}</h1><p>{t('التطبيق الجديد، بنفس حسابك وبياناتك الحالية.','Your new app, with your existing account and records.')}</p><Link className="button secondary" href={home}>{t('فتح نسخة الويب','Open web app')}</Link></section>

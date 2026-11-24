@@ -1,7 +1,7 @@
 /** Latest Windows package verified in the public download repository. */
-export const windowsVersion='1.1.16';
+export const windowsVersion='1.1.17';
 /** Candidate must match the Windows project version and a published public release. */
-export const windowsSourceVersion='1.1.16';
+export const windowsSourceVersion='1.1.17';
 const releaseRepository='ahmedmorgan86/gymeg-downloads';
 export const windowsCurrent=`https://github.com/${releaseRepository}/releases/download/windows-${windowsSourceVersion}/GymEG-Windows-x64-${windowsSourceVersion}.exe`;
 export const windowsPrevious=`https://github.com/${releaseRepository}/releases/download/windows-${windowsVersion}/GymEG-Windows-x64-${windowsVersion}.exe`;
