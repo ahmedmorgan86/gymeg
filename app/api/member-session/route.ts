@@ -1,6 +1,6 @@
 import {randomBytes} from 'node:crypto';
 import {getPool,withScope} from '../../lib/database';
-import {readSpaceCore,readSpaceSlice,reply,sameOrigin,requestClientIp} from '../../lib/server-workspace';
+import {readSpaceSlice,reply,sameOrigin,requestClientIp} from '../../lib/server-workspace';
 import {memberCodeHash,memberCookie,memberSessionToken} from '../../lib/member-code';
 import {normalizeMemberPhone,normalizeMemberPin} from '../../lib/member-phone';
 import {licenseState,type License} from '../../lib/licensing';
@@ -22,20 +22,20 @@ export async function POST(request:Request){
     const rows=(await c.query('SELECT owner_id,member_id,branch,version,pin_must_change,matches FROM gymos.member_phone_login($1,$2)',[phoneHash,pin])).rows;
     if(!rows.length)await c.query('SELECT gymos.member_pin_matches($1,NULL)',[pin]);accounts=rows.length>20?[]:rows;await c.query('COMMIT');
    }catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}
+   const selected=typeof body.account==='string'?body.account.trim():'';
    if(!accounts.length)return reply({error:'invalidCredentials'},401);
    const valid:(typeof accounts[number]&{key:string;clubName:string;branchName:string})[]=[];
-   for(const account of accounts){const {state}=await (process.env.GYMOS_MEMBER_SESSION_READS==='1'?readSpaceSlice(account.owner_id,{collections:['members'],ids:[account.member_id],branches:[account.branch]}):readSpaceCore(account.owner_id));if(!state.members.some(m=>m.id===account.member_id&&m.branch===account.branch&&!m.demo&&!m.archived&&normalizeMemberPhone(m.phone)===phone))continue;
+   // Read member data only for PIN-matched memberships and for the selected account, when provided.
+   for(const account of accounts){
+    const key=account.owner_id+'|'+account.member_id;
+    if(!account.matches||(selected&&key!==selected))continue;
+    const {state}=await readSpaceSlice(account.owner_id,{collections:['members'],ids:[account.member_id],branches:[account.branch]});if(!state.members.some(m=>m.id===account.member_id&&m.branch===account.branch&&!m.demo&&!m.archived&&normalizeMemberPhone(m.phone)===phone))continue;
     const license=await withScope(account.owner_id,async c=>(await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1',[account.owner_id])).rows[0] as License|undefined);if(license&&!licenseState(normalizeLicense(license)).writable)continue;
-    valid.push({...account,key:account.owner_id+'|'+account.member_id,clubName:state.settings.name,branchName:state.branches.find(b=>b.id===account.branch)?.name??account.branch});
+    valid.push({...account,key,clubName:state.settings.name,branchName:state.branches.find(b=>b.id===account.branch)?.name??account.branch});
    }
-   // Only PIN-matched memberships may be revealed or selected: exposing other
-   // clubs' membership for the same phone would leak cross-club membership to
-   // anyone holding one club's PIN.
-   const matched=valid.filter(a=>a.matches);
-   if(!matched.length)return reply({error:'invalidCredentials'},401);
-   const selected=typeof body.account==='string'?body.account.trim():'';
-   if(!selected&&matched.length>1){const sameClub=new Map<string,number>();for(const a of matched)sameClub.set(a.owner_id,(sameClub.get(a.owner_id)??0)+1);return reply({chooseAccount:matched.map(a=>({id:a.key,name:sameClub.get(a.owner_id)!>1?a.clubName+' · '+a.branchName:a.clubName}))});}
-   const account=selected?matched.find(a=>a.key===selected):matched[0];if(!account)return reply({error:'invalidCredentials'},401);
+   if(!valid.length)return reply({error:'invalidCredentials'},401);
+   if(!selected&&valid.length>1){const sameClub=new Map<string,number>();for(const a of valid)sameClub.set(a.owner_id,(sameClub.get(a.owner_id)??0)+1);return reply({chooseAccount:valid.map(a=>({id:a.key,name:sameClub.get(a.owner_id)!>1?a.clubName+' · '+a.branchName:a.clubName}))});}
+   const account=valid[0]!;
    const token=randomBytes(32).toString('hex');await withScope(account.owner_id,async c=>{await c.query('DELETE FROM gymos.member_code_sessions WHERE owner_id=$1 AND expires_at<now()',[account.owner_id]);await c.query("INSERT INTO gymos.member_code_sessions(session_hash,owner_id,member_id,version,expires_at) VALUES($1,$2,$3,$4,now()+interval '7 days')",[memberCodeHash(token),account.owner_id,account.member_id,account.version]);});return sessionReply(token,7*86400);
   }catch{return reply({error:'unavailable'},503);}
 }
