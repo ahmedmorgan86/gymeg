@@ -113,5 +113,20 @@
     "file": "public/downloads/GymEG-Support-Android-1.0.7.apk",
     "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
     "apkSha256": "e4f2f5d9c46d8f1f60c49acc6eef674523825fcfdccb3d30113167a5b110f9e1"
+  },
+  "gymeg-manager-1.1.10": {
+    "file": "public/downloads/GymEG-Manager-Android-1.1.10.apk",
+    "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
+    "apkSha256": "f2a051473d85a130aaab5b25f7450fdb48556159a2864a40d521c2c23c9d1aeb"
+  },
+  "gymeg-members-1.1.9": {
+    "file": "public/downloads/GymEG-Members-Android-1.1.9.apk",
+    "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
+    "apkSha256": "a7bd4be4a7c22ed11cfd679b951e1f522b1d12b8df9b5634f2342520d207628e"
+  },
+  "gymeg-support-1.0.10": {
+    "file": "public/downloads/GymEG-Support-Android-1.0.10.apk",
+    "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
+    "apkSha256": "c46336131ac9ce0c9d88918c3148c2a0e5ca508cf31e7dc3e3d8c73ad453f2dd"
   }
 }
