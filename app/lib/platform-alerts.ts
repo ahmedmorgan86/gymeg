@@ -52,7 +52,7 @@ export function dispatchPlatformNotification(title: string, body: string, icon =
   playNotificationChime();
 
   // 2. Web Notification API (modern browsers and installed PWAs)
-  const androidApp=/GymEG(?:Members|Manager)Android/i.test(navigator.userAgent);
+  const androidApp=/GymEG(?:Members|Manager|Support)Android/i.test(navigator.userAgent);
   if(!androidApp)try {
     if ('Notification' in window && Notification.permission === 'granted') {
       const options={body,icon,tag:tag?'club-message-'+tag.slice(0,24):undefined,renotify:false,data:{url}};
@@ -105,8 +105,8 @@ export async function requestNotificationPermission(branch?:string,audience?:'su
    if(!result.granted)return{granted:false,native:true,prompted:result.requested===true,remote:false,configured:true};
    const configResponse=await fetch('/api/fcm-subscriptions',{cache:'no-store'});
    if(!configResponse.ok)return{granted:true,native:true,prompted:result.requested===true,remote:false,configured:false};
-   const config=await configResponse.json() as {configured?:boolean};
-   if(!config.configured)return{granted:true,native:true,prompted:result.requested===true,remote:false,configured:false};
+   const config=await configResponse.json() as {configured?:boolean;sendingConfigured?:boolean};
+   if(!config.configured||(!audience&&config.sendingConfigured===false))return{granted:true,native:true,prompted:result.requested===true,remote:false,configured:false};
    for(let attempt=0;attempt<4;attempt++){
     const tokenResponse=await fetch('/__native_fcm_token__',{cache:'no-store'});
     if(tokenResponse.ok){

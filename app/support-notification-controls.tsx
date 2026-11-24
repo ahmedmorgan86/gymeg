@@ -9,7 +9,7 @@ export default function SupportNotificationControls({ar}:{ar:boolean}){
   if(busy)return;setBusy(true);
   try{
    const result=await requestNotificationPermission(undefined,'support');
-   setNotice(result.remote?t('تم تسجيل هذا الجهاز لتنبيهات الدعم. لم يتم إرسال تنبيه تجريبي.','This device is registered for support alerts. No test alert was sent.'):
+   setNotice(result.remote?t('تم تسجيل الجهاز. تنبيهات أحداث الدعم من الخادم غير مفعّلة حاليًا.','This device is registered. No test alert was sent. Automatic support alerts are currently unavailable.'):
     result.prompted?t('اختر السماح بإشعارات Android ثم اضغط تفعيل تنبيهات الدعم مرة أخرى.','Allow Android notifications, then tap Enable support alerts again.'):
     !result.granted?t('اسمح بإشعارات GymEG Support من إعدادات الجهاز ثم أعد التفعيل.','Allow GymEG Support notifications in device settings, then enable again.'):
     !result.configured?t('إعداد تنبيهات الدعم بالخادم غير مكتمل. لم يتم تسجيل الجهاز.','Server support alerts are not configured. This device was not registered.'):

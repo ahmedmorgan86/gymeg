@@ -124,3 +124,18 @@ test('granted-permission failure paths never claim unsupported',async()=>{
   const r=await requestNotificationPermission('main');
   assert.equal(r.unsupported,undefined);
 });
+
+test('Android does not claim enrollment when server sending is disabled',async()=>{
+ setup({});
+ Object.defineProperty(navigator,'userAgent',{value:'GymEGManagerAndroid',configurable:true});
+ const calls=[];
+ globalThis.fetch=async url=>{
+  calls.push(url);
+  return url==='/__native_notifications_permission__'?okJson({granted:true}):okJson({configured:true,sendingConfigured:false});
+ };
+ const result=await requestNotificationPermission('main');
+ assert.equal(result.granted,true);
+ assert.equal(result.remote,false);
+ assert.equal(result.configured,false);
+ assert.deepEqual(calls,['/__native_notifications_permission__','/api/fcm-subscriptions']);
+});
