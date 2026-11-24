@@ -5,9 +5,10 @@ import {presentVisits} from './member-view.ts';
 /** Visits store previous completed sessions plus the current/last session. */
 export function visitTiming(visit:Visit,now:string,maxMinutes=120){
  const MAX_OPEN_MS=maxMinutes*60000;const currentStart=visit.activeAt??visit.at,stamp=Date.parse(now);
- const previous=(visit.sessions??[]).reduce((sum,s)=>sum+Math.max(0,Date.parse(s.leftAt)-Date.parse(s.at)),0);
+ const elapsed=(start:number,end:number)=>Number.isFinite(start)&&Number.isFinite(end)?Math.max(0,end-start):0;
+ const previous=(visit.sessions??[]).reduce((sum,s)=>sum+elapsed(Date.parse(s.at),Date.parse(s.leftAt)),0);
  const end=visit.leftAt?Date.parse(visit.leftAt):Math.min(stamp,Date.parse(currentStart)+MAX_OPEN_MS);
- return{arrival:visit.at,currentArrival:currentStart,departure:visit.leftAt??null,expired:!visit.leftAt&&stamp-Date.parse(currentStart)>=MAX_OPEN_MS,durationMs:previous+Math.max(0,end-Date.parse(currentStart))};
+ return{arrival:visit.at,currentArrival:currentStart,departure:visit.leftAt??null,expired:!visit.leftAt&&stamp-Date.parse(currentStart)>=MAX_OPEN_MS,durationMs:previous+elapsed(Date.parse(currentStart),end)};
 }
 export function currentAttendance(state:GymState,branch:string,now:string){
  const members=new Map(state.members.filter(m=>m.branch===branch&&!m.archived&&!m.demo).map(m=>[m.id,m]));
