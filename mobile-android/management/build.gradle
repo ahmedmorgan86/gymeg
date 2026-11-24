@@ -5,7 +5,7 @@ plugins {
 android {
     namespace 'com.pushtorq.management'
     compileSdk 36
-    defaultConfig { applicationId 'com.pushtorq.management'; minSdk 26; targetSdk 36; versionCode 11; versionName '1.1.9' }
+    defaultConfig { applicationId 'com.pushtorq.management'; minSdk 26; targetSdk 36; versionCode 15; versionName '1.1.10' }
     buildFeatures { buildConfig true }
     // Reproducible target flavors: production is the committed default;
     // freshtest points the same reviewed source at the fresh Supabase build
