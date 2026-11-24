@@ -11,7 +11,8 @@
   ],
   "git": {
     "deploymentEnabled": {
-      "codex/gymawy-commercial-gaps": false
+      "codex/gymawy-commercial-gaps": false,
+      "fix/issue110-local-test-portability": false
     }
   }
 }
