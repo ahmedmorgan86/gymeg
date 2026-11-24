@@ -65,6 +65,7 @@ GRANT EXECUTE ON FUNCTION gymos.cleanup_expired_backup_sections() TO gymos_app;
 -- Install disabled. Enable only after the matching application release is deployed.
 DO $$
 BEGIN
+ IF to_regnamespace('cron') IS NULL THEN RETURN; END IF;
  PERFORM gymos.cron_install_disabled('gymos-backup-section-cleanup','*/15 * * * *','SELECT gymos.cleanup_expired_backup_sections()');
 END $$;
 CREATE INDEX gym_backup_sections_scope ON gymos.gym_backup_sections(owner_id,actor_id,direction,expires_at);
