@@ -19,6 +19,30 @@ let firestoreInstance: Firestore | null = null;
 type CachedSpace = { revision: number; state: GymState };
 const spaceCache = new Map<string, CachedSpace>();
 const SPACE_CACHE_LIMIT = 12;
+const DEFAULT_FIRESTORE_SCAN_DOCS = 12_000;
+const MAX_FIRESTORE_SCAN_DOCS = 50_000;
+
+/**
+ * Upper bound for documents returned by one cold entity/photo read. The
+ * environment override is useful for deployments with measured larger spaces,
+ * but stays hard-capped so a typo cannot restore an unbounded fetch.
+ */
+function firestoreReadScanLimit(): number {
+  const configured = process.env.GYMEG_MAX_SCAN_DOCS;
+  if (configured === undefined || configured.trim() === '') return DEFAULT_FIRESTORE_SCAN_DOCS;
+  const parsed = Number(configured);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > MAX_FIRESTORE_SCAN_DOCS) {
+    throw new Error(`GYMEG_MAX_SCAN_DOCS must be an integer from 1 to ${MAX_FIRESTORE_SCAN_DOCS}`);
+  }
+  return parsed;
+}
+
+export class FirestoreReadBudgetError extends Error {
+  constructor(readonly scanned: number, readonly limit: number) {
+    super(`firestoreReadSpace exceeded its document scan limit (${scanned} > ${limit})`);
+    this.name = 'FirestoreReadBudgetError';
+  }
+}
 
 function cacheSpace(owner: string, revision: number, state: GymState) {
   spaceCache.delete(owner);
@@ -149,18 +173,34 @@ export async function firestoreReadSpace(owner: string): Promise<{ state: GymSta
     const cached = cachedSpace(owner, data.revision);
     if (cached) return { state: cached, revision: data.revision };
 
-    // Read entities
+    // Bound both queries before Firestore returns document payloads. The shared
+    // budget covers entities and photos; a single sentinel document detects
+    // over-budget spaces, which fail closed rather than fetching the rest.
+    const scanLimit = firestoreReadScanLimit();
     const entitiesSnap = await db.collection('gym_entities')
       .where('owner_id', '==', owner)
       .orderBy('collection')
       .orderBy('position')
+      .limit(scanLimit + 1)
       .get();
+    if (entitiesSnap.docs.length > scanLimit) {
+      console.warn('firestore_read_budget_exceeded', { collection: 'gym_entities', limit: scanLimit, scanned: entitiesSnap.docs.length });
+      throw new FirestoreReadBudgetError(entitiesSnap.docs.length, scanLimit);
+    }
     const entities = entitiesSnap.docs.map(d => d.data() as Entity);
 
-    // Read photos
+    // The remaining budget may be zero. Read at most one sentinel in that case
+    // so a photo-heavy space is rejected without fetching an unbounded result.
+    const photosLimit = Math.max(1, scanLimit - entitiesSnap.docs.length + 1);
     const photosSnap = await db.collection('gym_photos')
       .where('owner_id', '==', owner)
+      .limit(photosLimit)
       .get();
+    const totalScanned = entitiesSnap.docs.length + photosSnap.docs.length;
+    if (totalScanned > scanLimit) {
+      console.warn('firestore_read_budget_exceeded', { collection: 'gym_photos', limit: scanLimit, scanned: totalScanned });
+      throw new FirestoreReadBudgetError(totalScanned, scanLimit);
+    }
     const photos = Object.fromEntries(
       photosSnap.docs.map(d => {
         const pd = d.data();
