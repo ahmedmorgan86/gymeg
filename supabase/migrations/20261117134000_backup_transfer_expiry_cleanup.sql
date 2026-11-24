@@ -15,5 +15,6 @@ GRANT EXECUTE ON FUNCTION gymos.cleanup_expired_backup_transfers() TO gymos_app;
 -- Install disabled. Enable only after the matching application release is deployed.
 DO $$
 BEGIN
+ IF to_regnamespace('cron') IS NULL THEN RETURN; END IF;
  PERFORM gymos.cron_install_disabled('gymos-backup-transfer-cleanup','*/15 * * * *','SELECT gymos.cleanup_expired_backup_transfers()');
 END $$;
