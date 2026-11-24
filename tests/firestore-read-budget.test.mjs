@@ -1,6 +1,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerHooks } from 'node:module';
+import { gzipSync } from 'node:zlib';
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -14,7 +15,7 @@ registerHooks({
 process.env.GYMEG_FIREBASE_PROJECT_ID = 'scan-budget-test';
 process.env.GYMEG_MAX_SCAN_DOCS = '100';
 
-const { __counters, __reset, __store } = await import('./firestore-read-budget.mock.mjs');
+const { __counters, __hooks, __reset, __store } = await import('./firestore-read-budget.mock.mjs');
 const { FirestoreReadBudgetError, firestoreReadSpace } = await import('../app/lib/firestore-db.ts');
 const OWNER_PREFIX = 'scan-budget-owner';
 let ownerCounter = 0;
@@ -79,4 +80,68 @@ test('invalid or oversized environment limits fail before issuing collection sca
   process.env.GYMEG_MAX_SCAN_DOCS = '50001';
   await assert.rejects(() => firestoreReadSpace(owner), /GYMEG_MAX_SCAN_DOCS must be an integer/);
   assert.equal(__counters.queryReads, 0);
+});
+
+for (const replaceChunk of [false, true]) {
+  test(`rejects a concurrent persist between snapshot parts (replace chunk: ${replaceChunk})`, async () => {
+    const owner = nextOwner();
+    seed(owner);
+    const states = __store.get('gym_states');
+    const chunks = __store.get('gym_states/' + owner + '/revision_snapshot_v1');
+    const publish = (revision, name) => {
+      const bytes = gzipSync(JSON.stringify({ state: { members: [], settings: { name } }, photoIds: [] }));
+      const midpoint = Math.floor(bytes.length / 2);
+      [bytes.subarray(0, midpoint), bytes.subarray(midpoint)].forEach((data, index) => {
+        chunks.set(String(index), { revision, count: 2, index, data });
+      });
+      states.set(owner, { ...states.get(owner), revision, readSnapshot: { revision, count: 2 } });
+    };
+    publish(1, 'Before');
+    __hooks.afterDocRead = (name, id) => {
+      if (name.endsWith('/revision_snapshot_v1') && id === '0') {
+        __hooks.afterDocRead = null;
+        if (replaceChunk) publish(2, 'After');
+        else states.set(owner, { ...states.get(owner), revision: 2 });
+      }
+    };
+    await assert.rejects(firestoreReadSpace(owner), /state changed during cold read/);
+    assert.equal(__counters.queryReads, 0);
+    publish(2, 'After');
+    assert.equal((await firestoreReadSpace(owner)).state.settings.name, 'After');
+  });
+}
+
+test('rejects a malformed later chunk at the same revision and backfills from the bounded scan', async () => {
+  const owner = nextOwner();
+  seed(owner);
+  const states = __store.get('gym_states');
+  states.set(owner, {
+    payload: JSON.stringify({ _entityStorage: 1, settings: { name: 'Authoritative' } }),
+    revision: 1,
+    readSnapshot: { revision: 1, count: 2 },
+  });
+  const chunks = __store.get('gym_states/' + owner + '/revision_snapshot_v1');
+  const data = gzipSync(JSON.stringify({ state: { members: [], settings: { name: 'Wrong' } }, photoIds: [] }));
+  chunks.set('0', { revision: 1, count: 2, index: 0, data: data.subarray(0, 10) });
+  chunks.set('1', { revision: 1, count: 3, index: 1, data: data.subarray(10) });
+  const result = await firestoreReadSpace(owner);
+  assert.equal(result.state.settings.name, 'Authoritative');
+  assert.deepEqual(__counters.queries.map(query => query.limit), [101, 101]);
+  assert.deepEqual(states.get(owner).readSnapshot, { revision: 1, count: 1 });
+});
+
+test('rehydrates an external legacy JPEG from the matching photo document', async () => {
+  const owner = nextOwner();
+  seed(owner);
+  const states = __store.get('gym_states');
+  states.set(owner, { ...states.get(owner), readSnapshot: { revision: 1, count: 1 } });
+  const photo = 'data:image/jpeg;base64,/9j/';
+  const member = { id: 'member-1', name: 'Member', photo: '' };
+  const data = gzipSync(JSON.stringify({ state: { members: [member] }, photoIds: [member.id] }));
+  __store.get('gym_states/' + owner + '/revision_snapshot_v1').set('0', { revision: 1, count: 1, index: 0, data });
+  __store.get('gym_photos').set(owner + '_' + member.id, { owner_id: owner, member_id: member.id, content: photo });
+  const result = await firestoreReadSpace(owner);
+  assert.equal(result.state.members[0].photo, photo);
+  assert.equal(__counters.queryReads, 0);
+  assert.equal(__counters.docReads, 4);
 });
