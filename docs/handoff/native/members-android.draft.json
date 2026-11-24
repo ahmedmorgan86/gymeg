@@ -1,0 +1,31 @@
+{
+  "_status": "DRAFT UNPUBLISHED. Review only, not public download metadata.",
+  "_candidate_apk": "GymEG-Members-1.1.8.3.apk",
+  "_candidate_sha256": "0aef1a3009e168cd1534eb2f3398f8d7a15805ee09f76717eee892964b040ddc",
+  "_candidate_bytes": 3194700,
+  "_source_line": "fa27d0e (== c8734df android trees, verified empty diff)",
+  "package": "com.pushtorq.members.freshtest",
+  "independentApplication": true,
+  "sourceHashes": {
+    "AndroidManifest.xml": "17ff9160eda4fd84f96c6bfad76b9d3dce3716356776926437fd0c24074cb0c2",
+    "res/drawable/ic_launcher_foreground.xml": "8ca9019aa3037a0fd243b787f8859787db9d4da72a9b9f20a4ab4630b0b5c81f",
+    "res/drawable/ic_monochrome.xml": "6b5ed27091cd4a5d2f1239efaaa9c1e1abd83a6828eed47dba0083721ae6e627",
+    "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
+    "res/mipmap-anydpi-v26/ic_launcher.xml": "5ac371232502d279c08a2e148cf01ddeb98032e024f2aa07d784dee32bd30868",
+    "res/mipmap-anydpi-v33/ic_launcher.xml": "91bc291fb13804a3a3621023f68e815d591da7d320035db393abad7c6119d9d0",
+    "res/mipmap-hdpi/ic_launcher.png": "8e4b54b534583fb8b922f90b20064fb00278d59af9661926ca634ca1ffa32566",
+    "res/mipmap-mdpi/ic_launcher.png": "65b080a473726e8944ff71fd42e4e3ceae161e44b04c071de29b75f16c7a0dd6",
+    "res/mipmap-xhdpi/ic_launcher.png": "9d4b0352da0bfe0d459d72647ec7ff978c3e2a3dd31d725a7adfeb8cbba95f6a",
+    "res/mipmap-xxhdpi/ic_launcher.png": "647f161550bac251beebe38df7a20a81af4ecc0e385aa53cca8579d28d147256",
+    "res/mipmap-xxxhdpi/ic_launcher.png": "09ee803e33c8e2e9f0c584219d54ab0bb205644fc59051281b7ce12c5bd6d044",
+    "res/values-ar/strings.xml": "144e78a93ea53be5059346cf5a7b9668b5cf122198af272b5d3375d4c0d93296",
+    "res/values/colors.xml": "e64dc97857fa6ec6762ef7e9fe5eb2da9e754d356f77b8753ec482c61cb598d8",
+    "res/values/strings.xml": "c8741ac2ae18dab9a0f673ee54993c0f07d2393a59402fb06bade72403a81cf7",
+    "res/values/styles.xml": "2e3ee9323828d302dcabb65bf8847ada74693d4779f4c17d726914e7a9ac0ffc",
+    "res/xml/data_extraction_rules.xml": "07bc6fa86ea8257ec7deeaa0d5eb1ebe091e20d03aea0d7d849134dbcae52c61",
+    "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
+    "src/com/pushtorq/members/FcmMessageService.java": "96b908be8bd3714288a13ec8ec8441f6fba6b9d23856072540b74ae68b67ed8b",
+    "src/com/pushtorq/members/MainActivity.java": "f39552bff5638abaeace0a6bb6ba962301857d3ae52a8b8e8d64315544aa1259",
+    "src/com/pushtorq/members/NotificationBridge.java": "a9c53be861bfabbb8c942d476475174a206f4ede2e52a317fcb4686cc637a608"
+  }
+}

@@ -1,4 +1,54 @@
-import {createServerClient} from '@supabase/ssr';
+import {supportWriteBlocked} from './app/lib/support-policy';
+import {planSupabaseSessionRefresh} from './app/lib/supabase-session-refresh';
 import {NextResponse,type NextRequest} from 'next/server';
-export async function proxy(request:NextRequest){let response=NextResponse.next({request});response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');if(request.nextUrl.pathname==="/api/session"||request.nextUrl.pathname==="/api/password")return response;if(!process.env.NEXT_PUBLIC_SUPABASE_URL||!process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY)return response;const supabase=createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,{cookies:{getAll:()=>request.cookies.getAll(),setAll:(values,headers)=>{values.forEach(({name,value})=>request.cookies.set(name,value));response=NextResponse.next({request});values.forEach(({name,value,options})=>response.cookies.set(name,value,options));Object.entries(headers??{}).forEach(([name,value])=>response.headers.set(name,value));}}});await supabase.auth.getClaims();response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');response.headers.set('Cache-Control','private, no-store');return response;}
-export const config={matcher:['/member','/','/clubs','/platform','/sign-in','/sign-out','/auth/:path*','/api/:path*']};
+
+// Next 16 allows a single proxy entry point (Node runtime): proxy.ts. It merges the legacy
+// header policy (support write-block plus robots/cache headers on the app
+// surfaces) with the Supabase session-refresh boundary, which must run on
+// every matched route because any page render can touch the session.
+const headerPaths=new Set(['/member','/','/clubs','/platform','/support-install','/support-login','/sign-in','/sign-out']);
+const headerPrefixes=['/auth/','/api/'];
+function headerPath(pathname:string){
+  return headerPaths.has(pathname)||headerPrefixes.some((p)=>pathname.startsWith(p));
+}
+
+export async function proxy(request:NextRequest){
+  if(supportWriteBlocked(request.method,request.nextUrl.pathname,request.cookies.has('gymos-support')))
+    return NextResponse.json({error:'supportReadOnly'},{status:403,headers:{'Cache-Control':'no-store'}});
+
+  // Writable refresh boundary for the Supabase auth backend. Server
+  // Components get a read-only cookie store, so refresh rotation must
+  // happen here before a page render touches the session. The Firebase
+  // backend needs nothing: its session cookie is verified, never rotated.
+  let plan:Awaited<ReturnType<typeof planSupabaseSessionRefresh>>|null=null;
+  if(process.env.GYMOS_AUTH_BACKEND==='supabase'){
+    const url=process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if(url&&key)plan=await planSupabaseSessionRefresh({url,key,cookie:request.cookies.get('gymos_session')?.value});
+  }
+  // Write the rotated pair to the request as well so the downstream render
+  // (RSC cookies()) reads the fresh token, and to the response so the
+  // browser stores it.
+  if(plan&&plan.action==='set')request.cookies.set('gymos_session',plan.value);
+  const response=NextResponse.next({request});
+  // Robots policy is independent of refresh: a refreshed request to an app
+  // surface still must not be indexed.
+  const pathname=request.nextUrl.pathname;
+  if(headerPath(pathname)&&pathname!=='/')response.headers.set('X-Robots-Tag','noindex, nofollow, noarchive');
+  if(plan&&plan.action==='set'){
+    response.cookies.set('gymos_session',plan.value,plan.options);
+    // A session-changing response must never be stored or replayed by any
+    // cache between us and the browser; this stronger policy replaces the
+    // default one below.
+    response.headers.set('Cache-Control','private, no-store, must-revalidate');
+    response.headers.set('Pragma','no-cache');
+    response.headers.set('Expires','0');
+  }else if(headerPath(pathname)){
+    response.headers.set('Cache-Control','private, no-store');
+  }
+  return response;
+}
+
+// The broad matcher is the refresh boundary's: rotation must be possible on
+// any route that can read the session; the header policy self-scopes above.
+export const config={matcher:['/((?!_next/static|_next/image|favicon.ico|icons|manifest.json).*)']};

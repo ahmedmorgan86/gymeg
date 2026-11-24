@@ -1,0 +1,15 @@
+{
+  "reviewId": "demand-held-20261123-v3",
+  "sha256": {
+    "manifest.json": "8fd780fdf1767e7fd641b30968e7b191b960c8a35f61bbe4a59f7696230043b2",
+    "01-schema-held.sql": "b04580da636a5c1de4507080feca92a46a3a7685a9dab8579aafc62687741509",
+    "02-indexes-held.sql": "2ce31a854ae27b7a9d18d0c80d20836039b02369316776069a2821f534ca1153",
+    "03-rollback-held.sql": "866dff416ac46de150e42713b3fbbc9fce71e5b4017821bc05bd6c31afa2949d",
+    "expected-baseline-catalog.json": "1abbde2f2180cca853ed1dcd32218965099e4e45cee9e9a2b5bc4f8897028949",
+    "baseline-snapshot.mjs": "3c34860206b31e23416a3c5ad9f17f1ae23e7c8c17518b456d71d831f92eaf2e",
+    "candidate-snapshot.mjs": "bb961b281caad74b0996688c6fc551a98432bdbca0da9004e6224f974e023a94",
+    "expected-candidate-catalog.json": "46ffcbb977293f4823ec19066960f2a5a4df9835514ad165d2b1dcee641d489f",
+    "hosted-launch-review-only.mjs": "5610257c7d790f470f9790c86329ff47323011dc09cde32fefed49601c7b9e45",
+    "REVIEW.md": "7a931d20191e52272627802cce1663895eb175e27deacced64eea23c338b4c4c"
+  }
+}

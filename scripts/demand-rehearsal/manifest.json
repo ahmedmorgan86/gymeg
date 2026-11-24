@@ -1,0 +1,240 @@
+{
+  "state": "HELD_REVIEW_CANDIDATE_LOCAL_FAITHFUL_PROOF_PLUS_SEPARATE_PROVIDER_EDGE_EVIDENCE",
+  "sources": [
+    {
+      "file": "20261121170000_workspace_entity_counters.sql",
+      "sha256": "6a855e8f5833f5e7c228380ca1f765a07d54fe28a66ce174f98159e3e6178190"
+    },
+    {
+      "file": "20261121180000_member_summary_inputs.sql",
+      "sha256": "024f84da922925b8d9025619d51ea95357afe9c0896828bd95c34dadbbf9d54c"
+    },
+    {
+      "file": "20261121190000_owner_change_version.sql",
+      "sha256": "3a4778584934746328a6c2aa9b561e632fe7ea47aa2bb5403474c80963b8607f"
+    },
+    {
+      "file": "20261122010000_visit_effective_clock.sql",
+      "sha256": "d9a38b8ca1f853b6f599aa2e29d29822ab379d09104a7b4ed93d720340b8d1f4"
+    },
+    {
+      "file": "20261122020000_demand_strict_keys.sql",
+      "sha256": "3c631c65f5a1362556053ead6219c66d47950740a4bb66dc83db465608f2f29e"
+    },
+    {
+      "file": "20261122030000_invoice_allocation_refs.sql",
+      "sha256": "6229f05bd98c35095789c9a1c974a661fd0becaf207835c098549abedcaf3ff3"
+    },
+    {
+      "file": "20261122070000_member_summary_branch.sql",
+      "sha256": "1a489e47444a4f1b25c4f4b3d4b11253a83f323959fcb9c7458ae4bc357702fe"
+    }
+  ],
+  "generated_columns": 7,
+  "rewrites": 1,
+  "concurrent_indexes": 14,
+  "rules": [
+    "Only manifest additive objects; exact captured original metadata must match under locks before first DDL",
+    "all schema statements 2s lock/15s statement, adapter server transaction_timeout 20s inclusive of locked checks and precommit postflight; session terminates on transaction timeout",
+    "indexes each outside transaction",
+    "postflight exact definitions/ACL/edges/readiness needed",
+    "no flags/backfill/recipients/sender in this artifact"
+  ],
+  "new_triggers": [
+    {
+      "name": "gym_entities_counter_ins",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_counter_upd",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_counter_del",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_photos_counter_ins",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_photos_counter_upd",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_photos_counter_del",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_states_counters_ready",
+      "table": "gym_states"
+    },
+    {
+      "name": "gym_entities_counter_trunc",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_photos_counter_trunc",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_entities_msum_ins",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_msum_upd",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_msum_del",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_states_msum_ready",
+      "table": "gym_states"
+    },
+    {
+      "name": "gym_entities_msum_trunc",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_zver_ins",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_zver_upd",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_zver_del",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_entities_zver_trunc",
+      "table": "gym_entities"
+    },
+    {
+      "name": "gym_states_zver",
+      "table": "gym_states"
+    },
+    {
+      "name": "gym_states_zver_trunc",
+      "table": "gym_states"
+    },
+    {
+      "name": "gym_photos_zver_ins",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_photos_zver_upd",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_photos_zver_del",
+      "table": "gym_photos"
+    },
+    {
+      "name": "gym_photos_zver_trunc",
+      "table": "gym_photos"
+    },
+    {
+      "name": "invoice_allocation_refs_ins",
+      "table": "gym_entities"
+    },
+    {
+      "name": "invoice_allocation_refs_upd",
+      "table": "gym_entities"
+    },
+    {
+      "name": "invoice_allocation_refs_del",
+      "table": "gym_entities"
+    },
+    {
+      "name": "invoice_allocation_refs_trunc",
+      "table": "gym_entities"
+    },
+    {
+      "name": "invoice_allocation_refs_epoch_upd",
+      "table": "gym_states"
+    },
+    {
+      "name": "invoice_allocation_refs_epoch_del",
+      "table": "gym_states"
+    },
+    {
+      "name": "invoice_allocation_refs_epoch_trunc",
+      "table": "gym_states"
+    }
+  ],
+  "limitations": [
+    "actual captured affected4table metadata with2originalfunctions/triggers; synthetic rows only",
+    "local non-super provider creator edge uses sandbox grantor; hosted CLI requires independently observed supabase_admin grantor with exact ADMIN/SET/INHERIT options",
+    "hosted combined first-run has not occurred; fresh catalog admission and postflight remain execution gates",
+    "no production authority; no backfill/readiness/flag changes"
+  ],
+  "new_sequences": [
+    "gym_change_seq",
+    "member_summary_gen"
+  ],
+  "concurrent_runtime_proof": {
+    "clients": 4,
+    "invoice_commits": 40,
+    "exact_refs": 40,
+    "scope": "local synthetic, not production throughput"
+  },
+  "new_functions": [
+    "apply_entity_counter_delta",
+    "backfill_member_summaries",
+    "bump_owner_version_del",
+    "bump_owner_version_ins",
+    "bump_owner_version_state",
+    "bump_owner_version_upd",
+    "canonical_visit_clock",
+    "invoice_allocation_odd_count",
+    "invoice_allocation_ref_rows",
+    "invoice_allocation_refs_complete",
+    "invoice_allocation_refs_epoch",
+    "invoice_allocation_refs_epoch_truncate",
+    "invoice_allocation_refs_mismatches",
+    "invoice_allocation_refs_rebuild",
+    "invoice_allocation_refs_sync",
+    "invoice_allocation_refs_truncate",
+    "mark_counters_ready",
+    "mark_member_summary_dirty_del",
+    "mark_member_summary_dirty_ins",
+    "mark_member_summary_dirty_upd",
+    "mark_member_summary_ready",
+    "msum_mark",
+    "msum_oversize",
+    "recount_entity_counters",
+    "reset_entity_counters",
+    "reset_member_summaries",
+    "reset_owner_version"
+  ],
+  "new_indexes": [
+    "gym_entities_demand_member_rows",
+    "gym_entities_demand_visit_clock",
+    "gym_entities_demand_visit_day",
+    "gym_entities_pay_day",
+    "gym_entities_pay_day_odd",
+    "gym_entities_visit_canon_order",
+    "gym_entities_visit_day_count",
+    "gym_entities_visit_irregular_clock",
+    "gym_entities_visit_member_clock",
+    "gym_entities_visit_member_odd",
+    "gym_entities_visit_odd",
+    "gym_member_summaries_branch",
+    "gym_member_summary_dirty_branch",
+    "invoice_allocation_refs_payment"
+  ],
+  "new_tables": [
+    "gym_entity_counters",
+    "gym_member_summaries",
+    "gym_member_summary_dirty",
+    "gym_member_summary_ready",
+    "gym_owner_version",
+    "invoice_allocation_odd",
+    "invoice_allocation_refs",
+    "invoice_allocation_refs_state"
+  ]
+}

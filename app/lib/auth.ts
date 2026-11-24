@@ -1,3 +1,13 @@
-import {createServerClient} from '@supabase/ssr';
-import {cookies} from 'next/headers';
-export async function serverAuth(){const store=await cookies();return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,{cookies:{getAll:()=>store.getAll(),setAll:values=>{try{values.forEach(({name,value,options})=>store.set(name,value,options));}catch{/* Server Components use proxy.ts for refresh. */}}}});}
+import { cookies } from 'next/headers';
+import { authBackend } from './auth-backend.ts';
+import { firebaseServerAuth } from './firebase-server-auth.ts';
+import { supabaseServerAuth } from './supabase-server-auth.ts';
+
+// Auth provider dispatch. The Firebase implementation is the legacy default;
+// the fresh build sets GYMOS_AUTH_BACKEND=supabase explicitly. Both return
+// the same interface consumed by the session, register, password, callback
+// and Google OAuth routes.
+export async function serverAuth() {
+  const store = await cookies();
+  return authBackend() === 'supabase' ? supabaseServerAuth(store) : firebaseServerAuth(store);
+}

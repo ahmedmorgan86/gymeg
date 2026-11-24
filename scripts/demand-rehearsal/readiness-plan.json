@@ -1,0 +1,12 @@
+{
+  "state": "PUBLIC_TEMPLATE_REQUIRES_NEW_BINDING_AND_REVIEW",
+  "project": "REVIEW_REQUIRED_ORIGINAL_PROJECT",
+  "owners": [],
+  "excluded": [
+    "PRIVATE_TARGETS_OMITTED"
+  ],
+  "writes": "derived counters/summary dirty/readiness/refs only",
+  "sourcePayloadEdits": false,
+  "flags": false,
+  "deployment": false
+}

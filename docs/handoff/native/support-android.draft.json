@@ -1,0 +1,33 @@
+{
+  "_status": "DRAFT UNPUBLISHED. Review only, not public download metadata.",
+  "_candidate_apk": "GymEG-Support-1.0.9.3.apk",
+  "_candidate_sha256": "665443c40b7c8b339e2cf8f3b3977a45bd877047f61d6a6c6361f5e8aa5d146e",
+  "_candidate_bytes": 3190592,
+  "_source_line": "fa27d0e (== c8734df android trees, verified empty diff)",
+  "package": "com.gymos.support.freshtest",
+  "independentApplication": true,
+  "sourceHashes": {
+    "AndroidManifest.xml": "5dc440d1304cb30a7457ef0b2e735c4ed26eb64bc69bfdf764f27357bd646899",
+    "res/drawable/ic_launcher_foreground.xml": "a76248dc0c70bc6e0fb9969a7b95340d8a8454df2791c8b13315490e031e26d2",
+    "res/drawable/ic_monochrome.xml": "3e1337eb0624ace40c2ab63652d1573ccecc1954084a36e8005e87c9a299b6ec",
+    "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
+    "res/mipmap-anydpi-v26/ic_launcher.xml": "5ac371232502d279c08a2e148cf01ddeb98032e024f2aa07d784dee32bd30868",
+    "res/mipmap-anydpi-v33/ic_launcher.xml": "91bc291fb13804a3a3621023f68e815d591da7d320035db393abad7c6119d9d0",
+    "res/mipmap-hdpi/ic_launcher.png": "7bfd9639a7162e6e8dd795bbf28e68c7453747a44a82ec9a228ede5fe7a3fffe",
+    "res/mipmap-mdpi/ic_launcher.png": "ef41307f2863a3c7e77b06abda320e2c53cbc801788155ac1d49e76738ec6a6d",
+    "res/mipmap-xhdpi/ic_launcher.png": "94bb947375b50f48d5f23ac902200d7573d33e5960789b8d4a443802ed49dde5",
+    "res/mipmap-xxhdpi/ic_launcher.png": "034ae23d083a472c973f72193bb65202b6786578417c8bfadc6d3e08182b2d37",
+    "res/mipmap-xxxhdpi/ic_launcher.png": "21b90863b3138d0db9c7783c954dd04f4716e0242e9ea09c600b6bc4fcbef9d0",
+    "res/values-ar/strings.xml": "66b9a2ff070d288219f1b92aea29e7435435194e20cc8552a4d50273425f2365",
+    "res/values/colors.xml": "0d273583f0892d70ba2a52d42085901618a489eddcb980db227ee28f06136595",
+    "res/values/strings.xml": "bc9ab5ebbfe58517c306da5d654ec8b254c8dd3e9ee3dcc731016d3bfc894871",
+    "res/values/styles.xml": "518120ebd6daceedbbfe68c93a5a5c4565623db89b57f8ec6e8ec8115ea91e3b",
+    "res/xml/data_extraction_rules.xml": "b4c151368d0cdf846b09d606d82bba57ef550bbb3783aa71bcd734a7ef1c2411",
+    "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
+    "src/com/gymos/support/AnnouncementBridge.java": "3f04c50a253e894bedcea3145f5b646ed5a5e8d3e7e533124696da5db8a98087",
+    "src/com/gymos/support/AnnouncementReceiver.java": "9614a8ebb62baef67d1258806437b16334fe83ade41ff2dac4c019cad7b63d5e",
+    "src/com/gymos/support/FcmMessageService.java": "5c550190537705e8855ee787937896411e0fd7ec9615cec9f46932616bf4fc8c",
+    "src/com/gymos/support/MainActivity.java": "23ad5cb357a55db4e54a3d0db3c9038e3e809204936e1a44c37b79efc1b1224f",
+    "src/com/gymos/support/NotificationBridge.java": "a3fa520e007b39fd7658a8f2c9124c20f7d3b611f07e2847e6a9db0f92763d2c"
+  }
+}

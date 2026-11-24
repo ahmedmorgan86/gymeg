@@ -1,0 +1,129 @@
+{
+  "capturedAt": "2026-11-23T18:48:09.859Z",
+  "source": "REVIEW_REQUIRED_ORIGINAL_PROJECT",
+  "units": [
+    {
+      "unit": "counters",
+      "source": [
+        "20261121170000_workspace_entity_counters.sql"
+      ],
+      "tables": [
+        "gym_entity_counters"
+      ],
+      "functions": [
+        "apply_entity_counter_delta",
+        "mark_counters_ready",
+        "recount_entity_counters",
+        "reset_entity_counters"
+      ],
+      "indexes": [],
+      "alreadyExistingTables": [],
+      "alreadyExistingFunctions": [],
+      "alreadyExistingIndexes": []
+    },
+    {
+      "unit": "summaries",
+      "source": [
+        "20261121180000_member_summary_inputs.sql",
+        "20261122070000_member_summary_branch.sql"
+      ],
+      "tables": [
+        "gym_member_summaries",
+        "gym_member_summary_dirty",
+        "gym_member_summary_ready"
+      ],
+      "functions": [
+        "backfill_member_summaries",
+        "mark_member_summary_dirty_del",
+        "mark_member_summary_dirty_ins",
+        "mark_member_summary_dirty_upd",
+        "mark_member_summary_ready",
+        "msum_mark",
+        "msum_oversize",
+        "reset_member_summaries"
+      ],
+      "indexes": [
+        "gym_member_summaries_branch",
+        "gym_member_summary_dirty_branch"
+      ],
+      "alreadyExistingTables": [],
+      "alreadyExistingFunctions": [],
+      "alreadyExistingIndexes": []
+    },
+    {
+      "unit": "owner_version",
+      "source": [
+        "20261121190000_owner_change_version.sql"
+      ],
+      "tables": [
+        "gym_owner_version"
+      ],
+      "functions": [
+        "bump_owner_version_del",
+        "bump_owner_version_ins",
+        "bump_owner_version_state",
+        "bump_owner_version_upd",
+        "reset_owner_version"
+      ],
+      "indexes": [],
+      "alreadyExistingTables": [],
+      "alreadyExistingFunctions": [],
+      "alreadyExistingIndexes": []
+    },
+    {
+      "unit": "strict_keys",
+      "source": [
+        "20261122010000_visit_effective_clock.sql",
+        "20261122020000_demand_strict_keys.sql"
+      ],
+      "tables": [],
+      "functions": [
+        "canonical_visit_clock"
+      ],
+      "indexes": [
+        "gym_entities_demand_member_rows",
+        "gym_entities_demand_visit_clock",
+        "gym_entities_demand_visit_day",
+        "gym_entities_visit_irregular_clock",
+        "gym_entities_visit_member_clock"
+      ],
+      "alreadyExistingTables": [],
+      "alreadyExistingFunctions": [],
+      "alreadyExistingIndexes": []
+    },
+    {
+      "unit": "allocation_refs",
+      "source": [
+        "20261122030000_invoice_allocation_refs.sql"
+      ],
+      "tables": [
+        "invoice_allocation_odd",
+        "invoice_allocation_refs",
+        "invoice_allocation_refs_state"
+      ],
+      "functions": [
+        "invoice_allocation_odd_count",
+        "invoice_allocation_ref_rows",
+        "invoice_allocation_refs_complete",
+        "invoice_allocation_refs_epoch",
+        "invoice_allocation_refs_epoch_truncate",
+        "invoice_allocation_refs_mismatches",
+        "invoice_allocation_refs_rebuild",
+        "invoice_allocation_refs_sync",
+        "invoice_allocation_refs_truncate"
+      ],
+      "indexes": [
+        "gym_entities_pay_day",
+        "gym_entities_pay_day_odd",
+        "gym_entities_visit_canon_order",
+        "gym_entities_visit_day_count",
+        "gym_entities_visit_member_odd",
+        "gym_entities_visit_odd",
+        "invoice_allocation_refs_payment"
+      ],
+      "alreadyExistingTables": [],
+      "alreadyExistingFunctions": [],
+      "alreadyExistingIndexes": []
+    }
+  ]
+}

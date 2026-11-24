@@ -1,0 +1,460 @@
+{
+  "columns": [
+    {
+      "relname": "gym_entities",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "collection",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "entity_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "position",
+      "type": "integer",
+      "attnotnull": true,
+      "expr": "0"
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": false,
+      "expr": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "payload",
+      "type": "jsonb",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "content",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "user_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "payload",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "revision",
+      "type": "integer",
+      "attnotnull": true,
+      "expr": "0"
+    },
+    {
+      "relname": "gym_states",
+      "attname": "updated_at",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "code",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "status",
+      "type": "text",
+      "attnotnull": true,
+      "expr": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "payload",
+      "type": "jsonb",
+      "attnotnull": true,
+      "expr": "'{}'::jsonb"
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "created_at",
+      "type": "timestamp with time zone",
+      "attnotnull": true,
+      "expr": "now()"
+    }
+  ],
+  "objects": [
+    {
+      "relname": "gym_entities",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_entities_owner_branch",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_owner_collection_branch_position",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_owner_collection_position",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_members_name",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_members_phone",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_photos",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_photos_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_states",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_states_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_visit_one_open",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arw/postgres}"
+    },
+    {
+      "relname": "membership_cards_member",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards_one_active",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    }
+  ],
+  "functions": [
+    {
+      "proname": "gym_state_payment_amount_guard",
+      "def": "CREATE OR REPLACE FUNCTION gymos.gym_state_payment_amount_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nDECLARE doc jsonb;\nBEGIN\n IF TG_OP='DELETE' THEN RETURN OLD; END IF;\n BEGIN\n  doc:=NEW.payload::jsonb;\n EXCEPTION WHEN invalid_text_representation THEN\n  RETURN NEW; -- Legacy non-JSON rows are handled by the application migration path.\n END;\n IF jsonb_typeof(doc->'payments')='array' AND EXISTS(\n   SELECT 1 FROM jsonb_array_elements(doc->'payments') payment\n   WHERE payment->'minor' IS NULL OR jsonb_typeof(payment->'minor')<>'number'\n      OR (payment->>'minor')::numeric<=0\n      OR (payment->>'minor')::numeric>10000000000\n      OR (payment->>'minor')::numeric<>trunc((payment->>'minor')::numeric)\n ) THEN\n  RAISE EXCEPTION 'invalidPaymentAmount' USING ERRCODE='23514';\n END IF;\n RETURN NEW;\nEND $function$\n",
+      "proacl": "{postgres=X/postgres,gymos_app=X/postgres}",
+      "owner": "postgres",
+      "prosecdef": false,
+      "proconfig": [
+        "search_path=pg_catalog"
+      ]
+    },
+    {
+      "proname": "sync_membership_cards",
+      "def": "CREATE OR REPLACE FUNCTION gymos.sync_membership_cards()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nDECLARE c jsonb; holder gymos.membership_cards%ROWTYPE; records jsonb; active_code text;\nBEGIN\n IF NEW.collection<>'members' THEN RETURN NEW; END IF;\n active_code:=nullif(NEW.payload->>'card','');records:=coalesce(NEW.payload->'cards','[]'::jsonb);\n IF active_code IS NOT NULL AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE x->>'code'=active_code) THEN records:=records||jsonb_build_array(jsonb_build_object('code',active_code,'status','active','issuedAt',null,'history','[]'::jsonb)); END IF;\n IF (SELECT count(*) FROM jsonb_array_elements(records) x WHERE x->>'status'='active')>1 OR EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE (x->>'status'='active') IS DISTINCT FROM coalesce(x->>'code'=active_code,false)) THEN RAISE EXCEPTION 'Invalid active card projection' USING ERRCODE='23514'; END IF;\n IF (SELECT count(*) FROM jsonb_array_elements(records))<>(SELECT count(DISTINCT x->>'code') FROM jsonb_array_elements(records) x) THEN RAISE EXCEPTION 'Duplicate card history' USING ERRCODE='23514'; END IF;\n UPDATE gymos.membership_cards SET status='replaced' WHERE owner_id=NEW.owner_id AND member_id=NEW.entity_id AND status='active' AND code IS DISTINCT FROM active_code;\n FOR c IN SELECT value FROM jsonb_array_elements(records) LOOP\n  SELECT * INTO holder FROM gymos.membership_cards WHERE owner_id=NEW.owner_id AND code=c->>'code' FOR UPDATE;\n  IF FOUND AND (holder.owner_id<>NEW.owner_id OR holder.member_id<>NEW.entity_id) THEN RAISE EXCEPTION 'Barcode already used' USING ERRCODE='23505'; END IF;\n  INSERT INTO gymos.membership_cards(code,owner_id,member_id,branch,status,payload) VALUES(c->>'code',NEW.owner_id,NEW.entity_id,NEW.branch,c->>'status',c)\n   ON CONFLICT(owner_id,code) DO UPDATE SET status=excluded.status,payload=excluded.payload,branch=excluded.branch WHERE membership_cards.owner_id=excluded.owner_id AND membership_cards.member_id=excluded.member_id;\n  IF NOT FOUND THEN RAISE EXCEPTION 'Barcode ownership conflict' USING ERRCODE='23505'; END IF;\n END LOOP;\n RETURN NEW;\nEND $function$\n",
+      "proacl": "{postgres=X/postgres,gymos_app=X/postgres}",
+      "owner": "postgres",
+      "prosecdef": false,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    }
+  ],
+  "policies": [
+    {
+      "tablename": "gym_entities",
+      "policyname": "gym_entities_runtime",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_photos",
+      "policyname": "gym_photos_runtime",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_states",
+      "policyname": "partition_runtime",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(user_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(user_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "membership_cards",
+      "policyname": "membership_cards_runtime",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    }
+  ],
+  "triggers": [
+    {
+      "relname": "gym_entities",
+      "tgname": "sync_membership_cards",
+      "def": "CREATE TRIGGER sync_membership_cards AFTER INSERT OR UPDATE OF payload ON gymos.gym_entities FOR EACH ROW EXECUTE FUNCTION gymos.sync_membership_cards()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_state_payment_amount_guard",
+      "def": "CREATE TRIGGER gym_state_payment_amount_guard BEFORE INSERT OR UPDATE OF payload ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.gym_state_payment_amount_guard()"
+    }
+  ],
+  "constraints": [
+    {
+      "relname": "gym_entities",
+      "conname": "gym_entities_pkey",
+      "definition": "PRIMARY KEY (owner_id, collection, entity_id)"
+    },
+    {
+      "relname": "gym_photos",
+      "conname": "gym_photos_content_check",
+      "definition": "CHECK ((length(content) <= 96000))"
+    },
+    {
+      "relname": "gym_photos",
+      "conname": "gym_photos_pkey",
+      "definition": "PRIMARY KEY (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_states",
+      "conname": "gym_states_pkey",
+      "definition": "PRIMARY KEY (user_id)"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_code_check",
+      "definition": "CHECK ((code ~ '^[A-Z0-9][A-Z0-9._-]{0,63}$'::text))"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_pkey",
+      "definition": "PRIMARY KEY (owner_id, code)"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_status_check",
+      "definition": "CHECK ((status = ANY (ARRAY['reserved'::text, 'active'::text, 'lost'::text, 'replaced'::text, 'cancelled'::text])))"
+    }
+  ],
+  "indexes": [
+    {
+      "relname": "gym_entities_owner_branch",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_branch ON gymos.gym_entities USING btree (owner_id, branch, collection)"
+    },
+    {
+      "relname": "gym_entities_owner_collection_branch_position",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_collection_branch_position ON gymos.gym_entities USING btree (owner_id, collection, branch, \"position\")"
+    },
+    {
+      "relname": "gym_entities_owner_collection_position",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_collection_position ON gymos.gym_entities USING btree (owner_id, collection, \"position\")"
+    },
+    {
+      "relname": "gym_entities_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_entities_pkey ON gymos.gym_entities USING btree (owner_id, collection, entity_id)"
+    },
+    {
+      "relname": "gym_members_name",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_members_name ON gymos.gym_entities USING btree (owner_id, lower((payload ->> 'name'::text))) WHERE (collection = 'members'::text)"
+    },
+    {
+      "relname": "gym_members_phone",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_members_phone ON gymos.gym_entities USING btree (owner_id, ((payload ->> 'phone'::text))) WHERE (collection = 'members'::text)"
+    },
+    {
+      "relname": "gym_photos_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_photos_pkey ON gymos.gym_photos USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_states_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_states_pkey ON gymos.gym_states USING btree (user_id)"
+    },
+    {
+      "relname": "gym_visit_one_open",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_visit_one_open ON gymos.gym_entities USING btree (owner_id, ((payload ->> 'member'::text))) WHERE ((collection = 'visits'::text) AND ((payload ->> 'leftAt'::text) IS NULL))"
+    },
+    {
+      "relname": "membership_cards_member",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX membership_cards_member ON gymos.membership_cards USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "membership_cards_one_active",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX membership_cards_one_active ON gymos.membership_cards USING btree (owner_id, member_id) WHERE (status = 'active'::text)"
+    },
+    {
+      "relname": "membership_cards_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX membership_cards_pkey ON gymos.membership_cards USING btree (owner_id, code)"
+    }
+  ],
+  "schema": [
+    {
+      "owner": "postgres",
+      "nspacl": "{postgres=UC/postgres,gymos_app=U/postgres}"
+    }
+  ],
+  "defaultAcls": []
+}

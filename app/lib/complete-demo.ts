@@ -1,3 +1,5 @@
+import {addDemoScenarios} from './demo-scenarios.ts';
+import {addDemoShowcase} from './demo-showcase.ts';
 import {demoProductImages} from './demo-product-images.ts';
 import {applyOperation,addDays,dayAt,type GymState,type Member} from './domain.ts';
 import {normalize,membershipIssue} from './extensions.ts';
@@ -5,6 +7,7 @@ import {validateBackup} from './backup.ts';
 import {presets} from './training.ts';
 import {applyMemberCredit} from './member-ledger.ts';
 import {coachBalance} from './coaches-shifts.ts';
+import {defaultWhatsApp} from './manual-whatsapp.ts';
 export const DEMO_PREFIX='sample-full-';
 /** Additive, deterministic fictional dataset for a dedicated test club only. */
 export function completeDemo(source:GymState,count:number,now:string){
@@ -25,8 +28,8 @@ export function completeDemo(source:GymState,count:number,now:string){
  const first=['أحمد','محمد','عمر','كريم','محمود','يوسف','سارة','منى','نور','مريم','دينا','هبة'],last=['حسن','علي','إبراهيم','محمود','خالد','عادل','سعيد','مصطفى','سمير','فاروق','شريف','فؤاد'];
  const areas=['202','212','213','312','415','617','646','702','808','917','305','206'];const phones=new Set(s.members.map(m=>m.phone));let phoneIndex=0;
  for(let i=0;i<count;i++){const id=DEMO_PREFIX+'member-'+String(i+1).padStart(4,'0');if(before.has(id))continue;let phone:string;do{phone='+1'+areas[Math.floor(phoneIndex/100)]+'55501'+String(phoneIndex%100).padStart(2,'0');phoneIndex++;}while(phones.has(phone));phones.add(phone);
-  const branch=branches[Math.floor(i/10)%2].id,prefix=DEMO_PREFIX+branch+'-',kind=i%10,plan=s.plans!.find(p=>p.id===prefix+'plan-'+(kind===3?2:kind===7?1:0))!,start=kind===0||kind===8?addDays(today,-60):kind===2?addDays(today,5):addDays(today,-10),end=addDays(start,29+(kind===1?7:0)),joined=addDays(start,-2),member:Member={id,branch,name:first[i%first.length]+' '+last[Math.floor(i/first.length)%last.length]+' — تجريبي '+String(i+1).padStart(4,'0'),phone,joined,expires:end,demo:false,archived:kind===8,consent:false,card:'SAMPLE-'+String(i+1).padStart(6,'0'),whatsapp:{enabled:false,at:now,actor:'بيانات وهمية'},health:{birthDate:(1980+i%25)+'-05-15',height:158+i%31,notes:'ملف وقياسات اصطناعية للتجربة فقط',consentedAt:now},vitals:[{id:id+'-vitals',day:today,weight:58+i%44,waist:68+i%35,pulse:62+i%22,systolic:110+i%15,diastolic:70+i%10,oxygen:98,note:'قيم تجريبية وليست قياسات شخص حقيقي',consentedAt:now}],membershipPeriods:[{id:id+'-term',plan:plan.id,start,end,visits:plan.visits}],contract:{id:id+'-term',plan:plan.id,start,visits:plan.visits}};
-  if(kind===1)member.freezes=[{from:today,to:addDays(today,6)}];if(i%4===0&&![0,1,2,8].includes(kind))member.shift=prefix+'shift';
+  const kind=i%10,branch=branches[kind>=3&&kind<=7?1:0].id,prefix=DEMO_PREFIX+branch+"-",plan=s.plans!.find(p=>p.id===prefix+'plan-'+(kind===3?2:kind===7?1:0))!,start=kind===0||kind===8?addDays(today,-60):kind===2?addDays(today,5):addDays(today,kind===9?-26:-10),end=addDays(start,29+(kind===1?7:0)),joined=addDays(start,-2),member:Member={id,branch,name:first[i%first.length]+' '+last[Math.floor(i/first.length)%last.length]+' — تجريبي '+String(i+1).padStart(4,'0'),phone,joined,expires:end,demo:false,archived:kind===8,consent:false,card:'SAMPLE-'+String(i+1).padStart(6,'0'),whatsapp:{enabled:false,at:now,actor:'بيانات وهمية'},health:{birthDate:(1980+i%25)+'-05-15',height:158+i%31,notes:'ملف وقياسات اصطناعية للتجربة فقط',consentedAt:now},vitals:[{id:id+'-vitals',day:today,weight:58+i%44,waist:68+i%35,pulse:62+i%22,systolic:110+i%15,diastolic:70+i%10,oxygen:98,note:'قيم تجريبية وليست قياسات شخص حقيقي',consentedAt:now}],membershipPeriods:[{id:id+'-term',plan:plan.id,start,end,visits:plan.visits}],contract:{id:id+'-term',plan:plan.id,start,visits:plan.visits}};
+  if(kind===1)member.freezes=[{from:today,to:addDays(today,6)}];
   s.members.push(member);const invoice=id+'-invoice',payment=id+'-payment',paid=kind===4?Math.round(plan.minor*0.3):kind===2?0:plan.minor;s.invoices!.push({id:invoice,member:id,branch,title:plan.name,total:plan.minor,due:start,voided:false,allocations:paid?[{payment,minor:paid}]:[]});if(paid)s.payments.push({id:payment,member:id,branch,minor:paid,day:start>today?today:start,method:i%3===0?'cash':i%3===1?'card':'transfer',voided:false});
   if(kind===5||kind===7)s.payments.push({id:id+'-advance',member:id,branch,minor:20000,day:today,method:'cash',voided:false,creditable:true});
   if(kind===6){const nextStart=addDays(end,1),nextEnd=addDays(nextStart,29);member.membershipPeriods!.push({id:id+'-next-term',plan:plan.id,start:nextStart,end:nextEnd,visits:plan.visits});member.expires=nextEnd;s.invoices!.push({id:id+'-next-invoice',member:id,branch,title:plan.name,total:plan.minor,due:nextStart,voided:false,allocations:[]});}
@@ -36,13 +39,27 @@ export function completeDemo(source:GymState,count:number,now:string){
   if(kind===5){const coach=prefix+'coach-0',coachingPayment=id+'-coaching-payment',coachingInvoice=id+'-coaching-invoice';s.payments.push({id:coachingPayment,member:id,branch,minor:100000,day:today,method:'transfer',voided:false,category:'coaching'});s.invoices!.push({id:coachingInvoice,member:id,branch,title:'تدريب شخصي تجريبي',total:150000,due:today,allocations:[{payment:coachingPayment,minor:100000}],voided:false,category:'coaching'});applyMemberCredit(s,s.invoices!.at(-1)!);s.coaching.push({id:id+'-coaching',member:id,coach,offer:coach+'-offer',invoice:coachingInvoice,title:'تدريب شخصي تجريبي',coachBps:7000,branch,at:now});}
  }
  for(const branch of branches){const prefix=DEMO_PREFIX+branch.id+'-',coach=prefix+'coach-0';if(!s.coachPayouts.some(p=>p.id===coach+'-payout')){const earned=coachBalance(s,coach,branch.id).earned;if(earned)s.coachPayouts.push({id:coach+'-payout',coach,branch:branch.id,minor:Math.floor(earned/2),day:today,method:'transfer',note:'تسوية وهمية للاختبار'});}
-  for(let c=0;c<3;c++){const id=prefix+'class-'+c;if(s.classes.some(x=>x.id===id))continue;const day=addDays(today,c+1),eligible=s.members.filter(m=>m.branch===branch.id&&!m.demo&&!m.archived&&membershipIssue(s,m,day)===null).slice(0,8);s.classes.push({id,branch:branch.id,title:['حديد وقوة — تجريبي','كارديو جماعي — تجريبي','مرونة وحركة — تجريبي'][c],at:stamp(day,16),capacity:4,members:eligible.slice(0,4).map(m=>m.id),waitlist:eligible.slice(4).map(m=>m.id),coach:'كابتن كريم — تجريبي',demo:false,cancelled:false});}
-  const lines=[['ar','أهلًا بكم في النادي التجريبي. نتمنى لكم تمرينًا موفقًا.'],['ar','تبدأ حصة اللياقة الجماعية بعد عشر دقائق. يرجى التوجه إلى القاعة.'],['ar','نرجو من الكابتن كريم التوجه إلى الاستقبال.'],['ar','يرجى إعادة الأوزان إلى أماكنها بعد الاستخدام.'],['ar','يتبقى نصف ساعة على إغلاق النادي. شكرًا لتعاونكم.'],['en','Welcome to the demo gym. Have a great workout.'],['en','The group fitness class starts in ten minutes.'],['en','Please return the weights after use. Thank you.']];for(const [index,[lang,text]]of lines.entries()){const id=prefix+'announcement-'+index;if(!s.announcements!.some(a=>a.id===id))s.announcements!.push({id,branch:branch.id,text,lang:lang as 'ar'|'en',voice:'',rate:0.95,at:stamp(addDays(today,1),7+index),enabled:index===0||index===5,repeat:'daily',timezone:s.settings.timezone,priority:1,quiet:{start:22,end:7}});}
+  for(let c=0;c<3;c++){const id=prefix+'class-'+c;if(s.classes.some(x=>x.id===id))continue;const day=addDays(today,c+1),eligible=s.members.filter(m=>m.branch===branch.id&&m.id.startsWith(DEMO_PREFIX)&&!m.demo&&!m.archived&&membershipIssue(s,m,day)===null).slice(0,8);s.classes.push({id,branch:branch.id,title:['حديد وقوة — تجريبي','كارديو جماعي — تجريبي','مرونة وحركة — تجريبي'][c],at:stamp(day,16),capacity:4,members:eligible.slice(0,4).map(m=>m.id),waitlist:eligible.slice(4).map(m=>m.id),coach:'كابتن كريم — تجريبي',demo:false,cancelled:false});}
+  const lines=[['ar','أهلًا بكم في النادي التجريبي. نتمنى لكم تمرينًا موفقًا.'],['ar','تبدأ حصة اللياقة الجماعية بعد عشر دقائق. يرجى التوجه إلى القاعة.'],['ar','نرجو من الكابتن كريم التوجه إلى الاستقبال.'],['ar','يرجى إعادة الأوزان إلى أماكنها بعد الاستخدام.'],['ar','يتبقى نصف ساعة على إغلاق النادي. شكرًا لتعاونكم.'],['en','Welcome to the demo gym. Have a great workout.'],['en','The group fitness class starts in ten minutes.'],['en','Please return the weights after use. Thank you.']];for(const [index,[lang,text]]of lines.entries()){const id=prefix+'announcement-'+index;if(!s.announcements!.some(a=>a.id===id))s.announcements!.push({id,branch:branch.id,text,lang:lang as 'ar'|'en',voice:'',rate:0.95,at:stamp(addDays(today,1),7+index),enabled:false,repeat:'daily',timezone:s.settings.timezone,priority:1,quiet:{start:22,end:7}});}
  }
  if(!s.events.some(e=>e.id===DEMO_PREFIX+'seed-event'))s.events.push({id:DEMO_PREFIX+'seed-event',branch:branches[0].id,at:now,kind:'demo.complete',subject:'workspace',actor:'إضافة بيانات اصطناعية بطلب المالك',detail:'Fictional reserved phone numbers; no messaging connections created.'});
- for(const p of s.products??[]){const match=/^sample-full-.+-product-([0-3])$/.exec(p.id);if(match){const i=Number(match[1]);p.brand='GYM OS Demo';p.unit=i===3?'قطعة':'عبوة';p.size=['1 كجم','300 جم','60 قرص','60 جم'][i];p.flavor=i===0||i===3?'شوكولاتة':'';p.description='منتج وعبوة اصطناعيان للتدريب على البيع والمخزون؛ ليس منتجًا حقيقيًا أو توصية غذائية.';p.photo=demoProductImages[i];}}
- // Upgrade only our synthetic members; retain the explicit label and reserved fictional phones.
- for(const m of s.members){const match=/^sample-full-member-(\d+)$/.exec(m.id);if(!match)continue;const i=Number(match[1])-1;m.name=first[i%first.length]+' '+last[Math.floor(i/first.length)%last.length]+' '+last[Math.floor(i/(first.length*last.length))%last.length]+' — تجريبي';}
+ for(const p of s.products??[]){const match=/^sample-full-.+-product-([0-3])$/.exec(p.id);if(match){const i=Number(match[1]);p.brand??='GymEG Demo';p.unit??=i===3?'قطعة':'عبوة';p.size??=['1 كجم','300 جم','60 قرص','60 جم'][i];p.flavor??=i===0||i===3?'شوكولاتة':'';p.description??='منتج وعبوة اصطناعيان للتدريب على البيع والمخزون؛ ليس منتجًا حقيقيًا أو توصية غذائية.';p.photo??=demoProductImages[i];}}
+ const demoTemplateNames: Record<string, string> = {
+    welcome: 'ترحيب بعضو جديد',
+    renewal: 'قرب انتهاء الاشتراك',
+    expired: 'انتهاء الاشتراك',
+    absence: 'غياب وانقطاع عن التمرين',
+    birthday: 'عيد ميلاد العضو',
+    policy: 'سياسات النادي والسلامة'
+  };
+  for(const t of s.manualWhatsApp ?? []){
+    if(t.id.startsWith(DEMO_PREFIX) || t.name.startsWith('قالب ') || t.body.includes('تاريخ عضويتك {expires}. يسعدنا مساعدتك')){
+      t.name = demoTemplateNames[t.kind] ?? t.name;
+      t.body = defaultWhatsApp(t.kind, true);
+    }
+  }
+  // Upgrade only our synthetic members; retain the explicit label and reserved fictional phones.
+ for(const m of s.members){const match=/^sample-full-member-(\d+)$/.exec(m.id);if(!match||before.has(m.id))continue;const i=Number(match[1])-1;m.name=first[i%first.length]+' '+last[Math.floor(i/first.length)%last.length]+' '+last[Math.floor(i/(first.length*last.length))%last.length]+' — تجريبي';}
  for(const branch of branches){const prefix=DEMO_PREFIX+branch.id+'-business-',marker=prefix+'seed';if(s.events.some(e=>e.id===marker))continue;let seq=0;const run=(type:string,data:Record<string,unknown>={})=>{const next=applyOperation(s,{type,branch:branch.id,...data},now,'Synthetic demo setup',()=>prefix+String(++seq));Object.assign(s,next);};
   run('book.shift.open',{opening:2000000});
   run('book.expense.add',{title:'إيجار مقر النادي - بيانات اصطناعية',category:'rent',minor:1200000,method:'transfer',day:today});
@@ -56,10 +73,16 @@ export function completeDemo(source:GymState,count:number,now:string){
    run('hr.payroll.generate',{employee,month:today.slice(0,7)});if(!i)run('hr.payroll.pay',{id:s.hr!.payroll.at(-1)!.id,method:'cash'});
    run('hr.leave.request',{employee,from:addDays(today,7+i*3),to:addDays(today,8+i*3),kind:'annual',reason:'إجازة سنوية - مثال اصطناعي'});if(!i)run('hr.leave.decide',{id:s.hr!.leaves.at(-1)!.id,approved:true});
   }
-  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:'قالب '+kind,kind,body:'أهلًا {name}، معك فريق {gym} - {branch}. تاريخ عضويتك {expires}. يسعدنا مساعدتك.',offset:7,enabled:true});
+  for(const kind of ['welcome','policy','renewal','expired','absence','birthday']as const)run('whatsapp.manual.save',{name:demoTemplateNames[kind],kind,body:defaultWhatsApp(kind,true),offset:7,enabled:true});
   run('community.post',{title:'مواعيد العمل وسياسة استخدام الأجهزة',body:'يرجى إعادة الأوزان إلى أماكنها والحفاظ على نظافة الأجهزة. هذه بيانات اصطناعية للتدريب على النظام.',publishAt:now,enabled:true});
   const member=s.members.find(m=>m.branch===branch.id&&m.id.startsWith(DEMO_PREFIX)&&!m.archived&&!m.demo);if(member)run('community.reply',{member:member.id,text:'مرحبًا بك، يمكنك متابعة الاشتراك والكارت والقياسات من حسابك. رسالة تدريب اصطناعية فقط.'});
   s.events.push({id:marker,branch:branch.id,at:now,kind:'demo.business',subject:'workspace',actor:'Synthetic demo setup'});
  }
+ addDemoScenarios(s,now);
+ addDemoShowcase(s,now);
+ // Keep schedule and class tools available, without linking demo members to either.
+ const demoIds=new Set(s.members.filter(m=>/^sample-full-member-\d+$/.test(m.id)).map(m=>m.id));
+ for(const member of s.members)if(demoIds.has(member.id))delete member.shift;
+ for(const item of s.classes)if(item.id.startsWith(DEMO_PREFIX)){item.members=[];item.waitlist=[];}
  return validateBackup(s);
 }

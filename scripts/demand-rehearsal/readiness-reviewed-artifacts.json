@@ -1,0 +1,14 @@
+{
+  "reviewId": "rehearsal-only-readiness-20261123-v1",
+  "sha256": {
+    "readiness-hosted-review-only.mjs": "cc43192194a8d14e92cbcaf87f244c336cc5609793cac4ca44b3dd40c0bb95b1",
+    "readiness-held.mjs": "c1097b09089aa1f221ba216985e4c6549cd81f59618d15361bb857c9f6e8cc66",
+    "readiness-plan.json": "acf59dd3b24c7d58843f47a7a33a55551a1330f5166aab43b47ac1d4257f3786",
+    "READINESS-REVIEW.md": "da7617730755bb8c67ac04addea5f36192dcbeb87051f1a2049472893b3e4a9d",
+    "candidate-snapshot.mjs": "bb961b281caad74b0996688c6fc551a98432bdbca0da9004e6224f974e023a94",
+    "expected-candidate-catalog.json": "46ffcbb977293f4823ec19066960f2a5a4df9835514ad165d2b1dcee641d489f",
+    "manifest.json": "8fd780fdf1767e7fd641b30968e7b191b960c8a35f61bbe4a59f7696230043b2",
+    "hosted-launch-review-only.mjs": "5610257c7d790f470f9790c86329ff47323011dc09cde32fefed49601c7b9e45",
+    "baseline-snapshot.mjs": "3c34860206b31e23416a3c5ad9f17f1ae23e7c8c17518b456d71d831f92eaf2e"
+  }
+}

@@ -1,0 +1,2 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {demandOwnerAllowed} from '../app/lib/demand-owner-scope.ts';
+test('optional exact authenticated storage-owner containment',()=>{assert.equal(demandOwnerAllowed('tenant:selected',{}),true);for(const raw of ['',',','tenant:other','selected','tenant:selected2'])assert.equal(demandOwnerAllowed('tenant:selected',{GYMOS_DEMAND_ALLOWED_OWNERS:raw}),false);assert.equal(demandOwnerAllowed('tenant:selected',{GYMOS_DEMAND_ALLOWED_OWNERS:' tenant:other, tenant:selected '}),true)});

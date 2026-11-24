@@ -1,0 +1,1861 @@
+{
+  "objects": [
+    {
+      "relname": "gym_change_seq",
+      "relkind": "S",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_entities_demand_member_rows",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_demand_visit_clock",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_demand_visit_day",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_owner_branch",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_owner_collection_branch_position",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_owner_collection_position",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_pay_day",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_pay_day_odd",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_canon_order",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_day_count",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_irregular_clock",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_member_clock",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_member_odd",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entities_visit_odd",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_entity_counters",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres}"
+    },
+    {
+      "relname": "gym_entity_counters_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_member_summaries",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_member_summaries_branch",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_member_summaries_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=rd/postgres}"
+    },
+    {
+      "relname": "gym_member_summary_dirty_branch",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_member_summary_ready",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres}"
+    },
+    {
+      "relname": "gym_member_summary_ready_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_members_name",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_members_phone",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_owner_version",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres}"
+    },
+    {
+      "relname": "gym_owner_version_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_photos",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_photos_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_states",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arwd/postgres}"
+    },
+    {
+      "relname": "gym_states_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "gym_visit_one_open",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres,gymos_refs_maint=ardD/postgres}"
+    },
+    {
+      "relname": "invoice_allocation_odd_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres,gymos_refs_maint=ardD/postgres}"
+    },
+    {
+      "relname": "invoice_allocation_refs_payment",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs_state",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=r/postgres,gymos_refs_maint=arwdD/postgres}"
+    },
+    {
+      "relname": "invoice_allocation_refs_state_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "member_summary_gen",
+      "relkind": "S",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "relkind": "r",
+      "owner": "postgres",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "relacl": "{postgres=arwdDxtm/postgres,gymos_app=arw/postgres}"
+    },
+    {
+      "relname": "membership_cards_member",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards_one_active",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    },
+    {
+      "relname": "membership_cards_pkey",
+      "relkind": "i",
+      "owner": "postgres",
+      "relrowsecurity": false,
+      "relforcerowsecurity": false,
+      "relacl": null
+    }
+  ],
+  "columns": [
+    {
+      "relname": "gym_entities",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "collection",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "entity_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "position",
+      "type": "integer",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "0",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "payload",
+      "type": "jsonb",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "demand_member_hash",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "\nCASE\n    WHEN (jsonb_typeof((payload -> 'member'::text)) = 'string'::text) THEN md5((payload ->> 'member'::text))\n    ELSE NULL::text\nEND",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "demand_visit_day",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "\nCASE\n    WHEN ((collection = 'visits'::text) AND (jsonb_typeof((payload -> 'day'::text)) = 'string'::text) AND ((payload ->> 'day'::text) ~ '^\\d{4}-\\d\\d-\\d\\d$'::text)) THEN (payload ->> 'day'::text)\n    ELSE NULL::text\nEND",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "demand_visit_clock",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "\nCASE\n    WHEN ((collection = 'visits'::text) AND gymos.canonical_visit_clock(payload)) THEN COALESCE((payload ->> 'activeAt'::text), (payload ->> 'at'::text))\n    ELSE NULL::text\nEND",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "pay_day",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "\nCASE\n    WHEN ((collection = 'payments'::text) AND (jsonb_typeof((payload -> 'day'::text)) = 'string'::text) AND ((payload ->> 'day'::text) ~ '^\\d{4}-\\d\\d-\\d\\d$'::text)) THEN (payload ->> 'day'::text)\n    ELSE NULL::text\nEND",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "pay_day_odd",
+      "type": "boolean",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "((collection = 'payments'::text) AND (NOT COALESCE(((jsonb_typeof((payload -> 'day'::text)) = 'string'::text) AND ((payload ->> 'day'::text) ~ '^\\d{4}-\\d\\d-\\d\\d$'::text)), false)))",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "visit_at",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "\nCASE\n    WHEN ((collection = 'visits'::text) AND (jsonb_typeof((payload -> 'at'::text)) = 'string'::text) AND ((payload ->> 'at'::text) ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'::text)) THEN (payload ->> 'at'::text)\n    ELSE NULL::text\nEND",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entities",
+      "attname": "visit_odd",
+      "type": "boolean",
+      "attnotnull": false,
+      "attgenerated": "s",
+      "expr": "((collection = 'visits'::text) AND (NOT COALESCE(((jsonb_typeof((payload -> 'day'::text)) = 'string'::text) AND ((payload ->> 'day'::text) ~ '^\\d{4}-\\d\\d-\\d\\d$'::text) AND (jsonb_typeof((payload -> 'at'::text)) = 'string'::text) AND ((payload ->> 'at'::text) ~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$'::text)), false)))",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entity_counters",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entity_counters",
+      "attname": "collection",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_entity_counters",
+      "attname": "row_count",
+      "type": "bigint",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "0",
+      "attacl": null
+    },
+    {
+      "relname": "gym_entity_counters",
+      "attname": "payload_bytes",
+      "type": "bigint",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "0",
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summaries",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summaries",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summaries",
+      "attname": "stored",
+      "type": "jsonb",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summaries",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "attname": "gen",
+      "type": "bigint",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_member_summary_ready",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_owner_version",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_owner_version",
+      "attname": "version",
+      "type": "bigint",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_photos",
+      "attname": "content",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "user_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "payload",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "revision",
+      "type": "integer",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "0",
+      "attacl": null
+    },
+    {
+      "relname": "gym_states",
+      "attname": "updated_at",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "attname": "invoice_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "attname": "odd_elements",
+      "type": "integer",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "attname": "invoice_branch",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "invoice_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "ord",
+      "type": "integer",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "payment_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "payment_key",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "has_minor",
+      "type": "boolean",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "minor",
+      "type": "jsonb",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "invoice_position",
+      "type": "integer",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "attname": "invoice_branch",
+      "type": "text",
+      "attnotnull": false,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs_state",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs_state",
+      "attname": "set_at",
+      "type": "timestamp with time zone",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "now()",
+      "attacl": null
+    },
+    {
+      "relname": "invoice_allocation_refs_state",
+      "attname": "ready",
+      "type": "boolean",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "true",
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "code",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "owner_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "member_id",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "branch",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "status",
+      "type": "text",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": null,
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "payload",
+      "type": "jsonb",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "'{}'::jsonb",
+      "attacl": null
+    },
+    {
+      "relname": "membership_cards",
+      "attname": "created_at",
+      "type": "timestamp with time zone",
+      "attnotnull": true,
+      "attgenerated": "",
+      "expr": "now()",
+      "attacl": null
+    }
+  ],
+  "functions": [
+    {
+      "proname": "apply_entity_counter_delta",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.apply_entity_counter_delta()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n -- Statement-level: one aggregate per owner and collection. TG_ARGV[0] selects the table family.\n IF TG_ARGV[0]='entities' THEN\n  IF TG_OP='INSERT' THEN\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,collection,count(*),sum(octet_length(payload::text)) FROM newrows GROUP BY 1,2\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  ELSIF TG_OP='DELETE' THEN\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,collection,-count(*),-sum(octet_length(payload::text)) FROM oldrows GROUP BY 1,2\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  ELSE\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes)\n    SELECT owner_id,collection,sum(c),sum(b) FROM (SELECT owner_id,collection,1 AS c,octet_length(payload::text) AS b FROM newrows UNION ALL SELECT owner_id,collection,-1,-octet_length(payload::text) FROM oldrows) d GROUP BY 1,2\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  END IF;\n ELSE\n  -- photos: the full state carries each photo inside its member as \"photo\":<json string>\n  IF TG_OP='INSERT' THEN\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,'photos',count(*),sum(octet_length(to_jsonb(content)::text)+9) FROM newrows GROUP BY 1\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  ELSIF TG_OP='DELETE' THEN\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,'photos',-count(*),-sum(octet_length(to_jsonb(content)::text)+9) FROM oldrows GROUP BY 1\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  ELSE\n   INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes)\n    SELECT owner_id,'photos',sum(c),sum(b) FROM (SELECT owner_id,1 AS c,octet_length(to_jsonb(content)::text)+9 AS b FROM newrows UNION ALL SELECT owner_id,-1,-(octet_length(to_jsonb(content)::text)+9) FROM oldrows) d GROUP BY 1\n   ON CONFLICT(owner_id,collection) DO UPDATE SET row_count=gym_entity_counters.row_count+EXCLUDED.row_count,payload_bytes=gym_entity_counters.payload_bytes+EXCLUDED.payload_bytes;\n  END IF;\n END IF;\n RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "backfill_member_summaries",
+      "args": "target text",
+      "def": "CREATE OR REPLACE FUNCTION gymos.backfill_member_summaries(target text)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n PERFORM 1 FROM gymos.gym_states WHERE user_id=target FOR UPDATE;\n DELETE FROM gymos.gym_member_summaries WHERE owner_id=target;DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=target;\n INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch) SELECT owner_id,entity_id,nextval('gymos.member_summary_gen'),branch FROM gymos.gym_entities WHERE owner_id=target AND collection='members' AND NOT gymos.msum_oversize(entity_id);\n IF NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=target AND collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END)) THEN INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES(target) ON CONFLICT DO NOTHING; END IF;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "bump_owner_version_del",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.bump_owner_version_del()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n INSERT INTO gymos.gym_owner_version(owner_id,version) SELECT owner_id,nextval('gymos.gym_change_seq') FROM (SELECT DISTINCT owner_id FROM oldrows ORDER BY owner_id) o\n  ON CONFLICT(owner_id) DO UPDATE SET version=EXCLUDED.version;RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "bump_owner_version_ins",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.bump_owner_version_ins()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n INSERT INTO gymos.gym_owner_version(owner_id,version) SELECT owner_id,nextval('gymos.gym_change_seq') FROM (SELECT DISTINCT owner_id FROM newrows ORDER BY owner_id) o\n  ON CONFLICT(owner_id) DO UPDATE SET version=EXCLUDED.version;RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "bump_owner_version_state",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.bump_owner_version_state()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nDECLARE o text:=COALESCE(NEW.user_id,OLD.user_id);\nBEGIN\n INSERT INTO gymos.gym_owner_version(owner_id,version) VALUES(o,nextval('gymos.gym_change_seq')) ON CONFLICT(owner_id) DO UPDATE SET version=EXCLUDED.version;RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "bump_owner_version_upd",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.bump_owner_version_upd()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n INSERT INTO gymos.gym_owner_version(owner_id,version) SELECT owner_id,nextval('gymos.gym_change_seq') FROM (SELECT owner_id FROM newrows UNION SELECT owner_id FROM oldrows ORDER BY 1) o\n  ON CONFLICT(owner_id) DO UPDATE SET version=EXCLUDED.version;RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "canonical_visit_clock",
+      "args": "p jsonb",
+      "def": "CREATE OR REPLACE FUNCTION gymos.canonical_visit_clock(p jsonb)\n RETURNS boolean\n LANGUAGE plpgsql\n IMMUTABLE\nAS $function$\nDECLARE t text;\nBEGIN\n IF jsonb_typeof(COALESCE(NULLIF(p->'activeAt','null'::jsonb),p->'at')) IS DISTINCT FROM 'string' THEN RETURN false; END IF;\n t=COALESCE(p->>'activeAt',p->>'at');\n IF t !~ '^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}Z$' THEN RETURN false; END IF;\n RETURN to_char(t::timestamptz AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')=t;\nEXCEPTION WHEN OTHERS THEN RETURN false;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": null,
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "gym_state_payment_amount_guard",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.gym_state_payment_amount_guard()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog'\nAS $function$\nDECLARE doc jsonb;\nBEGIN\n IF TG_OP='DELETE' THEN RETURN OLD; END IF;\n BEGIN\n  doc:=NEW.payload::jsonb;\n EXCEPTION WHEN invalid_text_representation THEN\n  RETURN NEW; -- Legacy non-JSON rows are handled by the application migration path.\n END;\n IF jsonb_typeof(doc->'payments')='array' AND EXISTS(\n   SELECT 1 FROM jsonb_array_elements(doc->'payments') payment\n   WHERE payment->'minor' IS NULL OR jsonb_typeof(payment->'minor')<>'number'\n      OR (payment->>'minor')::numeric<=0\n      OR (payment->>'minor')::numeric>10000000000\n      OR (payment->>'minor')::numeric<>trunc((payment->>'minor')::numeric)\n ) THEN\n  RAISE EXCEPTION 'invalidPaymentAmount' USING ERRCODE='23514';\n END IF;\n RETURN NEW;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres,gymos_app=X/postgres}",
+      "prosecdef": false,
+      "proconfig": [
+        "search_path=pg_catalog"
+      ]
+    },
+    {
+      "proname": "invoice_allocation_odd_count",
+      "args": "p_payload jsonb",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_odd_count(p_payload jsonb)\n RETURNS integer\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE\nAS $function$\n  SELECT CASE WHEN jsonb_typeof(p_payload->'allocations') IS DISTINCT FROM 'array' THEN 1\n              ELSE (SELECT count(*)::integer FROM jsonb_array_elements(p_payload->'allocations') a WHERE NOT COALESCE(jsonb_typeof(a)='object' AND jsonb_typeof(a->'payment')='string',false)) END $function$\n",
+      "owner": "postgres",
+      "proacl": "{=X/postgres,postgres=X/postgres,gymos_refs_maint=X/postgres}",
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "invoice_allocation_ref_rows",
+      "args": "p_owner text, p_invoice text, p_position integer, p_branch text, p_payload jsonb",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_ref_rows(p_owner text, p_invoice text, p_position integer, p_branch text, p_payload jsonb)\n RETURNS TABLE(owner_id text, invoice_id text, ord integer, payment_id text, payment_key text, has_minor boolean, minor jsonb, invoice_position integer, invoice_branch text)\n LANGUAGE sql\n IMMUTABLE PARALLEL SAFE\nAS $function$\n  SELECT p_owner,p_invoice,(a.ord-1)::integer,a.v->>'payment',md5(a.v->>'payment'),(a.v ? 'minor'),a.v->'minor',p_position,p_branch\n  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_payload->'allocations')='array' THEN p_payload->'allocations' ELSE '[]'::jsonb END) WITH ORDINALITY a(v,ord)\n  WHERE jsonb_typeof(a.v)='object' AND jsonb_typeof(a.v->'payment')='string' $function$\n",
+      "owner": "postgres",
+      "proacl": "{=X/postgres,postgres=X/postgres,gymos_refs_maint=X/postgres}",
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "invoice_allocation_refs_complete",
+      "args": "p_owner text, p_expected_generation text",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_complete(p_owner text, p_expected_generation text)\n RETURNS boolean\n LANGUAGE plpgsql\nAS $function$\nDECLARE cur text; have boolean;\nBEGIN\n  -- Lock order (shared with persistSpace restore, which locks the owner's gym_states row FIRST, then writes entities, then the metadata UPDATE): take the owner's gym_states row FOR SHARE before reading anything.\n  -- A restore then either committed before this lock (the generation compare below and the mismatch check, a fresh READ COMMITTED statement, see it) or blocks until this transaction commits and then writes its tombstone AFTER our\n  -- ready=true, so a committed tombstone is never overwritten by a stale completion. Refused under a snapshot-fixed isolation level.\n  IF current_setting('transaction_isolation')<>'read committed' THEN RAISE EXCEPTION 'invoice_allocation_refs_complete requires READ COMMITTED'; END IF;\n  -- NOT bounded from inside: a timeout set by a statement inside this function does not bound the already-running `SELECT complete(...)`. The caller (scripts/refs-ready.mjs) must run SET LOCAL lock_timeout and\n  -- statement_timeout as a SEPARATE completed command in the same transaction BEFORE invoking this function, bound connect/acquire/cleanup client-side, and ROLLBACK + dispose the connection on any timeout.\n  SELECT true INTO have FROM gymos.gym_states g WHERE g.user_id=p_owner FOR SHARE;\n  BEGIN SELECT ((g.payload::jsonb)->'generation')::text INTO cur FROM gymos.gym_states g WHERE g.user_id=p_owner; EXCEPTION WHEN data_exception THEN RETURN false; END; -- unparseable metadata: refuse\n  IF NOT COALESCE(have,false) THEN RETURN false; END IF;\n  IF cur IS DISTINCT FROM p_expected_generation THEN RETURN false; END IF;\n  PERFORM pg_advisory_xact_lock(hashtext('invoice_allocation_refs:'||p_owner));\n  IF gymos.invoice_allocation_refs_mismatches(p_owner)<>0 THEN RETURN false; END IF;\n  INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES(p_owner,true) ON CONFLICT (owner_id) DO UPDATE SET ready=true,set_at=now();RETURN true;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "invoice_allocation_refs_epoch",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_epoch()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nDECLARE changed boolean;\nBEGIN\n  IF TG_RELID IS DISTINCT FROM 'gymos.gym_states'::regclass OR TG_LEVEL<>'ROW' OR TG_WHEN<>'AFTER' OR TG_NARGS<>0 OR TG_OP NOT IN ('UPDATE','DELETE') OR pg_trigger_depth()<>1 THEN\n    RAISE EXCEPTION 'invoice_allocation_refs_epoch: unexpected trigger context';\n  END IF;\n  IF TG_OP='DELETE' THEN changed:=true;\n  ELSE\n    BEGIN changed:=((OLD.payload::jsonb)->'generation') IS DISTINCT FROM ((NEW.payload::jsonb)->'generation') OR OLD.user_id IS DISTINCT FROM NEW.user_id;\n    EXCEPTION WHEN data_exception THEN changed:=true; END;\n  END IF;\n  IF changed THEN\n    INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES(OLD.user_id,false) ON CONFLICT (owner_id) DO UPDATE SET ready=false,set_at=now();\n    IF TG_OP='UPDATE' THEN INSERT INTO gymos.invoice_allocation_refs_state(owner_id,ready) VALUES(NEW.user_id,false) ON CONFLICT (owner_id) DO UPDATE SET ready=false,set_at=now(); END IF;\n  END IF;\n  RETURN NULL;\nEND $function$\n",
+      "owner": "gymos_refs_maint",
+      "proacl": "{gymos_refs_maint=X/gymos_refs_maint}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, pg_temp"
+      ]
+    },
+    {
+      "proname": "invoice_allocation_refs_epoch_truncate",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_epoch_truncate()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nBEGIN\n  IF TG_RELID IS DISTINCT FROM 'gymos.gym_states'::regclass OR TG_LEVEL<>'STATEMENT' OR TG_OP<>'TRUNCATE' THEN RAISE EXCEPTION 'invoice_allocation_refs_epoch_truncate: unexpected trigger context'; END IF;\n  UPDATE gymos.invoice_allocation_refs_state SET ready=false,set_at=now(); RETURN NULL;\nEND $function$\n",
+      "owner": "gymos_refs_maint",
+      "proacl": "{gymos_refs_maint=X/gymos_refs_maint}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, pg_temp"
+      ]
+    },
+    {
+      "proname": "invoice_allocation_refs_mismatches",
+      "args": "p_owner text",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_mismatches(p_owner text)\n RETURNS bigint\n LANGUAGE sql\n STABLE\nAS $function$\n  -- every alternative is scoped to p_owner (and to invoices) before any OR: nothing here may depend on another tenant's rows\n  SELECT (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND\n    (SELECT COALESCE(jsonb_agg(to_jsonb(x) ORDER BY x.ord),'[]'::jsonb) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND x.invoice_id=i.entity_id)\n    IS DISTINCT FROM\n    (SELECT COALESCE(jsonb_agg(to_jsonb(y) ORDER BY y.ord),'[]'::jsonb) FROM gymos.invoice_allocation_ref_rows(p_owner,i.entity_id,i.position,i.branch,i.payload) y))\n  + (SELECT count(*) FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND (\n       COALESCE((SELECT o.odd_elements FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id),0)<>gymos.invoice_allocation_odd_count(i.payload)\n       OR EXISTS (SELECT 1 FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND o.invoice_id=i.entity_id AND o.invoice_branch IS DISTINCT FROM i.branch)))\n  + (SELECT count(DISTINCT x.invoice_id) FROM gymos.invoice_allocation_refs x WHERE x.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=x.invoice_id))\n  + (SELECT count(*) FROM gymos.invoice_allocation_odd o WHERE o.owner_id=p_owner AND NOT EXISTS (SELECT 1 FROM gymos.gym_entities i WHERE i.owner_id=p_owner AND i.collection='invoices' AND i.entity_id=o.invoice_id)) $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "invoice_allocation_refs_rebuild",
+      "args": "p_owner text, p_after text, p_limit integer",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_rebuild(p_owner text, p_after text, p_limit integer)\n RETURNS text\n LANGUAGE plpgsql\nAS $function$\nDECLARE last_id text; r record; n integer:=0;\nBEGIN\n  PERFORM 1 FROM gymos.gym_states WHERE user_id=p_owner FOR SHARE; -- same order as restore (owner gym_states row first, then invoice rows); never the reverse\n  FOR r IN SELECT entity_id,position,branch,payload FROM gymos.gym_entities WHERE owner_id=p_owner AND collection='invoices' AND (p_after IS NULL OR entity_id>p_after) ORDER BY entity_id LIMIT p_limit FOR UPDATE LOOP\n    DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=p_owner AND invoice_id=r.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=p_owner AND invoice_id=r.entity_id;\n    INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(p_owner,r.entity_id,r.position,r.branch,r.payload);\n    INSERT INTO gymos.invoice_allocation_odd SELECT p_owner,r.entity_id,gymos.invoice_allocation_odd_count(r.payload),r.branch WHERE gymos.invoice_allocation_odd_count(r.payload)>0;\n    last_id:=r.entity_id;n:=n+1;\n  END LOOP;\n  RETURN CASE WHEN n<p_limit THEN NULL ELSE last_id END; -- NULL = finished\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "invoice_allocation_refs_sync",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_sync()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nBEGIN\n  IF TG_RELID IS DISTINCT FROM 'gymos.gym_entities'::regclass OR TG_LEVEL<>'ROW' OR TG_WHEN<>'AFTER' OR TG_NARGS<>0 OR TG_OP NOT IN ('INSERT','UPDATE','DELETE') OR pg_trigger_depth()<>1 THEN\n    RAISE EXCEPTION 'invoice_allocation_refs_sync: unexpected trigger context';\n  END IF;\n  IF TG_OP IN ('UPDATE','DELETE') AND OLD.collection='invoices' THEN DELETE FROM gymos.invoice_allocation_refs WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id;DELETE FROM gymos.invoice_allocation_odd WHERE owner_id=OLD.owner_id AND invoice_id=OLD.entity_id; END IF;\n  IF TG_OP IN ('INSERT','UPDATE') AND NEW.collection='invoices' THEN\n    INSERT INTO gymos.invoice_allocation_refs SELECT * FROM gymos.invoice_allocation_ref_rows(NEW.owner_id,NEW.entity_id,NEW.position,NEW.branch,NEW.payload);\n    INSERT INTO gymos.invoice_allocation_odd SELECT NEW.owner_id,NEW.entity_id,gymos.invoice_allocation_odd_count(NEW.payload),NEW.branch WHERE gymos.invoice_allocation_odd_count(NEW.payload)>0;\n  END IF;\n  -- NO automatic readiness claim: readiness is only ever set by the migration-authorized complete() after an exact rebuild/verification. A virgin owner and an invalidated (restored) owner are therefore never confused.\n  RETURN NULL;\nEND $function$\n",
+      "owner": "gymos_refs_maint",
+      "proacl": "{gymos_refs_maint=X/gymos_refs_maint}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, pg_temp"
+      ]
+    },
+    {
+      "proname": "invoice_allocation_refs_truncate",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.invoice_allocation_refs_truncate()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'pg_temp'\nAS $function$\nBEGIN\n  IF TG_RELID IS DISTINCT FROM 'gymos.gym_entities'::regclass OR TG_LEVEL<>'STATEMENT' OR TG_OP<>'TRUNCATE' OR TG_NARGS<>0 THEN RAISE EXCEPTION 'invoice_allocation_refs_truncate: unexpected trigger context'; END IF;\n  TRUNCATE gymos.invoice_allocation_refs,gymos.invoice_allocation_odd,gymos.invoice_allocation_refs_state; RETURN NULL;\nEND $function$\n",
+      "owner": "gymos_refs_maint",
+      "proacl": "{gymos_refs_maint=X/gymos_refs_maint}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, pg_temp"
+      ]
+    },
+    {
+      "proname": "mark_counters_ready",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.mark_counters_ready()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n IF NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=NEW.user_id LIMIT 1) AND NOT EXISTS(SELECT 1 FROM gymos.gym_photos WHERE owner_id=NEW.user_id LIMIT 1) THEN\n  -- An empty owner starts from zero: drop any leftover deltas (an owner deleted and recreated) in the same statement before marking ready.\n  DELETE FROM gymos.gym_entity_counters WHERE owner_id=NEW.user_id;\n  INSERT INTO gymos.gym_entity_counters(owner_id,collection) VALUES(NEW.user_id,'_ready');\n ELSE\n  DELETE FROM gymos.gym_entity_counters WHERE owner_id=NEW.user_id AND collection='_ready'; -- rows already exist: never trust, until recount\n END IF; RETURN NEW;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "mark_member_summary_dirty_del",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_del()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM oldrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));\n PERFORM gymos.msum_mark(array_agg(owner_id),array_agg(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END),array_agg(branch)) FROM oldrows WHERE collection IN ('members','visits','payments','invoices');\n RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "mark_member_summary_dirty_ins",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_ins()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM newrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));\n PERFORM gymos.msum_mark(array_agg(owner_id),array_agg(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END),array_agg(branch)) FROM newrows WHERE collection IN ('members','visits','payments','invoices');\n RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "mark_member_summary_dirty_upd",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.mark_member_summary_dirty_upd()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n DELETE FROM gymos.gym_member_summary_ready WHERE owner_id IN (SELECT owner_id FROM newrows WHERE collection IN ('members','visits','payments','invoices') AND gymos.msum_oversize(CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END));\n PERFORM gymos.msum_mark(array_agg(owner_id),array_agg(mid),array_agg(branch)) FROM (\n   SELECT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END AS mid,branch FROM newrows WHERE collection IN ('members','visits','payments','invoices')\n   UNION ALL\n   SELECT owner_id,CASE WHEN collection='members' THEN entity_id ELSE payload->>'member' END,branch FROM oldrows WHERE collection IN ('members','visits','payments','invoices')) x;\n RETURN NULL;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "mark_member_summary_ready",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.mark_member_summary_ready()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n DELETE FROM gymos.gym_member_summaries WHERE owner_id=NEW.user_id;DELETE FROM gymos.gym_member_summary_dirty WHERE owner_id=NEW.user_id;DELETE FROM gymos.gym_member_summary_ready WHERE owner_id=NEW.user_id;\n IF NOT EXISTS(SELECT 1 FROM gymos.gym_entities WHERE owner_id=NEW.user_id LIMIT 1) THEN INSERT INTO gymos.gym_member_summary_ready(owner_id) VALUES(NEW.user_id); END IF;\n RETURN NEW;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "msum_mark",
+      "args": "owners text[], members text[], branches text[]",
+      "def": "CREATE OR REPLACE FUNCTION gymos.msum_mark(owners text[], members text[], branches text[])\n RETURNS void\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\n INSERT INTO gymos.gym_member_summary_dirty(owner_id,member_id,gen,branch)\n  SELECT g.o,g.m,nextval('gymos.member_summary_gen'),COALESCE(max(e.branch),max(g.b))\n  FROM unnest(owners,members,branches) AS g(o,m,b) LEFT JOIN gymos.gym_entities e ON e.owner_id=g.o AND e.collection='members' AND e.entity_id=g.m\n  WHERE g.m IS NOT NULL AND NOT gymos.msum_oversize(g.m) GROUP BY g.o,g.m\n  ON CONFLICT(owner_id,member_id) DO UPDATE SET gen=EXCLUDED.gen,branch=EXCLUDED.branch\n$function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "msum_oversize",
+      "args": "k text",
+      "def": "CREATE OR REPLACE FUNCTION gymos.msum_oversize(k text)\n RETURNS boolean\n LANGUAGE sql\n IMMUTABLE\nAS $function$ SELECT octet_length(k)>1024 $function$\n",
+      "owner": "postgres",
+      "proacl": null,
+      "prosecdef": false,
+      "proconfig": null
+    },
+    {
+      "proname": "recount_entity_counters",
+      "args": "target text",
+      "def": "CREATE OR REPLACE FUNCTION gymos.recount_entity_counters(target text)\n RETURNS void\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN\n PERFORM 1 FROM gymos.gym_states WHERE user_id=target FOR UPDATE; -- serialize against persistSpace for this owner\n DELETE FROM gymos.gym_entity_counters WHERE owner_id=target;\n INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,collection,count(*),sum(octet_length(payload::text)) FROM gymos.gym_entities WHERE owner_id=target GROUP BY 1,2;\n INSERT INTO gymos.gym_entity_counters(owner_id,collection,row_count,payload_bytes) SELECT owner_id,'photos',count(*),sum(octet_length(to_jsonb(content)::text)+9) FROM gymos.gym_photos WHERE owner_id=target GROUP BY 1;\n INSERT INTO gymos.gym_entity_counters(owner_id,collection) VALUES(target,'_ready');\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "reset_entity_counters",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.reset_entity_counters()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN DELETE FROM gymos.gym_entity_counters; RETURN NULL; END $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "reset_member_summaries",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.reset_member_summaries()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN DELETE FROM gymos.gym_member_summary_ready;DELETE FROM gymos.gym_member_summaries;DELETE FROM gymos.gym_member_summary_dirty; RETURN NULL; END $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "reset_owner_version",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.reset_owner_version()\n RETURNS trigger\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nBEGIN DELETE FROM gymos.gym_owner_version;RETURN NULL;END $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres}",
+      "prosecdef": true,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    },
+    {
+      "proname": "sync_membership_cards",
+      "args": "",
+      "def": "CREATE OR REPLACE FUNCTION gymos.sync_membership_cards()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'pg_catalog', 'gymos'\nAS $function$\nDECLARE c jsonb; holder gymos.membership_cards%ROWTYPE; records jsonb; active_code text;\nBEGIN\n IF NEW.collection<>'members' THEN RETURN NEW; END IF;\n active_code:=nullif(NEW.payload->>'card','');records:=coalesce(NEW.payload->'cards','[]'::jsonb);\n IF active_code IS NOT NULL AND NOT EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE x->>'code'=active_code) THEN records:=records||jsonb_build_array(jsonb_build_object('code',active_code,'status','active','issuedAt',null,'history','[]'::jsonb)); END IF;\n IF (SELECT count(*) FROM jsonb_array_elements(records) x WHERE x->>'status'='active')>1 OR EXISTS(SELECT 1 FROM jsonb_array_elements(records) x WHERE (x->>'status'='active') IS DISTINCT FROM coalesce(x->>'code'=active_code,false)) THEN RAISE EXCEPTION 'Invalid active card projection' USING ERRCODE='23514'; END IF;\n IF (SELECT count(*) FROM jsonb_array_elements(records))<>(SELECT count(DISTINCT x->>'code') FROM jsonb_array_elements(records) x) THEN RAISE EXCEPTION 'Duplicate card history' USING ERRCODE='23514'; END IF;\n UPDATE gymos.membership_cards SET status='replaced' WHERE owner_id=NEW.owner_id AND member_id=NEW.entity_id AND status='active' AND code IS DISTINCT FROM active_code;\n FOR c IN SELECT value FROM jsonb_array_elements(records) LOOP\n  SELECT * INTO holder FROM gymos.membership_cards WHERE owner_id=NEW.owner_id AND code=c->>'code' FOR UPDATE;\n  IF FOUND AND (holder.owner_id<>NEW.owner_id OR holder.member_id<>NEW.entity_id) THEN RAISE EXCEPTION 'Barcode already used' USING ERRCODE='23505'; END IF;\n  INSERT INTO gymos.membership_cards(code,owner_id,member_id,branch,status,payload) VALUES(c->>'code',NEW.owner_id,NEW.entity_id,NEW.branch,c->>'status',c)\n   ON CONFLICT(owner_id,code) DO UPDATE SET status=excluded.status,payload=excluded.payload,branch=excluded.branch WHERE membership_cards.owner_id=excluded.owner_id AND membership_cards.member_id=excluded.member_id;\n  IF NOT FOUND THEN RAISE EXCEPTION 'Barcode ownership conflict' USING ERRCODE='23505'; END IF;\n END LOOP;\n RETURN NEW;\nEND $function$\n",
+      "owner": "postgres",
+      "proacl": "{postgres=X/postgres,gymos_app=X/postgres}",
+      "prosecdef": false,
+      "proconfig": [
+        "search_path=pg_catalog, gymos"
+      ]
+    }
+  ],
+  "indexes": [
+    {
+      "relname": "gym_entities_demand_member_rows",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_demand_member_rows ON gymos.gym_entities USING btree (owner_id, collection, demand_member_hash, branch, \"position\") WHERE (demand_member_hash IS NOT NULL)"
+    },
+    {
+      "relname": "gym_entities_demand_visit_clock",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_demand_visit_clock ON gymos.gym_entities USING btree (owner_id, branch, demand_member_hash, demand_visit_clock DESC, \"position\") WHERE ((collection = 'visits'::text) AND (demand_visit_clock IS NOT NULL))"
+    },
+    {
+      "relname": "gym_entities_demand_visit_day",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_demand_visit_day ON gymos.gym_entities USING btree (owner_id, branch, demand_member_hash, demand_visit_day DESC) WHERE ((collection = 'visits'::text) AND (demand_visit_day IS NOT NULL))"
+    },
+    {
+      "relname": "gym_entities_owner_branch",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_branch ON gymos.gym_entities USING btree (owner_id, branch, collection)"
+    },
+    {
+      "relname": "gym_entities_owner_collection_branch_position",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_collection_branch_position ON gymos.gym_entities USING btree (owner_id, collection, branch, \"position\")"
+    },
+    {
+      "relname": "gym_entities_owner_collection_position",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_owner_collection_position ON gymos.gym_entities USING btree (owner_id, collection, \"position\")"
+    },
+    {
+      "relname": "gym_entities_pay_day",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_pay_day ON gymos.gym_entities USING btree (owner_id, branch, pay_day, \"position\", entity_id) WHERE ((collection = 'payments'::text) AND (pay_day IS NOT NULL))"
+    },
+    {
+      "relname": "gym_entities_pay_day_odd",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_pay_day_odd ON gymos.gym_entities USING btree (owner_id, branch) WHERE pay_day_odd"
+    },
+    {
+      "relname": "gym_entities_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_entities_pkey ON gymos.gym_entities USING btree (owner_id, collection, entity_id)"
+    },
+    {
+      "relname": "gym_entities_visit_canon_order",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_canon_order ON gymos.gym_entities USING btree (owner_id, branch, demand_visit_day DESC, visit_at DESC, \"position\", entity_id) WHERE ((collection = 'visits'::text) AND (NOT visit_odd))"
+    },
+    {
+      "relname": "gym_entities_visit_day_count",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_day_count ON gymos.gym_entities USING btree (owner_id, branch, demand_visit_day) WHERE ((collection = 'visits'::text) AND (demand_visit_day IS NOT NULL))"
+    },
+    {
+      "relname": "gym_entities_visit_irregular_clock",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_irregular_clock ON gymos.gym_entities USING btree (owner_id, branch) WHERE ((collection = 'visits'::text) AND (NOT gymos.canonical_visit_clock(payload)))"
+    },
+    {
+      "relname": "gym_entities_visit_member_clock",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_member_clock ON gymos.gym_entities USING btree (owner_id, md5((payload ->> 'member'::text)), branch, COALESCE((payload ->> 'activeAt'::text), (payload ->> 'at'::text)) COLLATE \"C\" DESC, \"position\") WHERE ((collection = 'visits'::text) AND gymos.canonical_visit_clock(payload))"
+    },
+    {
+      "relname": "gym_entities_visit_member_odd",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_member_odd ON gymos.gym_entities USING btree (owner_id, branch) WHERE ((collection = 'visits'::text) AND (demand_member_hash IS NULL))"
+    },
+    {
+      "relname": "gym_entities_visit_odd",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_entities_visit_odd ON gymos.gym_entities USING btree (owner_id, branch, \"position\", entity_id) WHERE visit_odd"
+    },
+    {
+      "relname": "gym_entity_counters_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_entity_counters_pkey ON gymos.gym_entity_counters USING btree (owner_id, collection)"
+    },
+    {
+      "relname": "gym_member_summaries_branch",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_member_summaries_branch ON gymos.gym_member_summaries USING btree (owner_id, branch, member_id)"
+    },
+    {
+      "relname": "gym_member_summaries_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_member_summaries_pkey ON gymos.gym_member_summaries USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_member_summary_dirty_branch",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_member_summary_dirty_branch ON gymos.gym_member_summary_dirty USING btree (owner_id, branch, gen)"
+    },
+    {
+      "relname": "gym_member_summary_dirty_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_member_summary_dirty_pkey ON gymos.gym_member_summary_dirty USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_member_summary_ready_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_member_summary_ready_pkey ON gymos.gym_member_summary_ready USING btree (owner_id)"
+    },
+    {
+      "relname": "gym_members_name",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_members_name ON gymos.gym_entities USING btree (owner_id, lower((payload ->> 'name'::text))) WHERE (collection = 'members'::text)"
+    },
+    {
+      "relname": "gym_members_phone",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX gym_members_phone ON gymos.gym_entities USING btree (owner_id, ((payload ->> 'phone'::text))) WHERE (collection = 'members'::text)"
+    },
+    {
+      "relname": "gym_owner_version_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_owner_version_pkey ON gymos.gym_owner_version USING btree (owner_id)"
+    },
+    {
+      "relname": "gym_photos_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_photos_pkey ON gymos.gym_photos USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_states_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_states_pkey ON gymos.gym_states USING btree (user_id)"
+    },
+    {
+      "relname": "gym_visit_one_open",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX gym_visit_one_open ON gymos.gym_entities USING btree (owner_id, ((payload ->> 'member'::text))) WHERE ((collection = 'visits'::text) AND ((payload ->> 'leftAt'::text) IS NULL))"
+    },
+    {
+      "relname": "invoice_allocation_odd_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX invoice_allocation_odd_pkey ON gymos.invoice_allocation_odd USING btree (owner_id, invoice_id)"
+    },
+    {
+      "relname": "invoice_allocation_refs_payment",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX invoice_allocation_refs_payment ON gymos.invoice_allocation_refs USING btree (owner_id, payment_key, invoice_position, invoice_id, ord)"
+    },
+    {
+      "relname": "invoice_allocation_refs_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX invoice_allocation_refs_pkey ON gymos.invoice_allocation_refs USING btree (owner_id, invoice_id, ord)"
+    },
+    {
+      "relname": "invoice_allocation_refs_state_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX invoice_allocation_refs_state_pkey ON gymos.invoice_allocation_refs_state USING btree (owner_id)"
+    },
+    {
+      "relname": "membership_cards_member",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE INDEX membership_cards_member ON gymos.membership_cards USING btree (owner_id, member_id)"
+    },
+    {
+      "relname": "membership_cards_one_active",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX membership_cards_one_active ON gymos.membership_cards USING btree (owner_id, member_id) WHERE (status = 'active'::text)"
+    },
+    {
+      "relname": "membership_cards_pkey",
+      "indisvalid": true,
+      "indisready": true,
+      "definition": "CREATE UNIQUE INDEX membership_cards_pkey ON gymos.membership_cards USING btree (owner_id, code)"
+    }
+  ],
+  "constraints": [
+    {
+      "relname": "gym_entities",
+      "conname": "gym_entities_pkey",
+      "definition": "PRIMARY KEY (owner_id, collection, entity_id)"
+    },
+    {
+      "relname": "gym_entity_counters",
+      "conname": "gym_entity_counters_pkey",
+      "definition": "PRIMARY KEY (owner_id, collection)"
+    },
+    {
+      "relname": "gym_member_summaries",
+      "conname": "gym_member_summaries_pkey",
+      "definition": "PRIMARY KEY (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_member_summary_dirty",
+      "conname": "gym_member_summary_dirty_pkey",
+      "definition": "PRIMARY KEY (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_member_summary_ready",
+      "conname": "gym_member_summary_ready_pkey",
+      "definition": "PRIMARY KEY (owner_id)"
+    },
+    {
+      "relname": "gym_owner_version",
+      "conname": "gym_owner_version_pkey",
+      "definition": "PRIMARY KEY (owner_id)"
+    },
+    {
+      "relname": "gym_photos",
+      "conname": "gym_photos_content_check",
+      "definition": "CHECK ((length(content) <= 96000))"
+    },
+    {
+      "relname": "gym_photos",
+      "conname": "gym_photos_pkey",
+      "definition": "PRIMARY KEY (owner_id, member_id)"
+    },
+    {
+      "relname": "gym_states",
+      "conname": "gym_states_pkey",
+      "definition": "PRIMARY KEY (user_id)"
+    },
+    {
+      "relname": "invoice_allocation_odd",
+      "conname": "invoice_allocation_odd_pkey",
+      "definition": "PRIMARY KEY (owner_id, invoice_id)"
+    },
+    {
+      "relname": "invoice_allocation_refs",
+      "conname": "invoice_allocation_refs_pkey",
+      "definition": "PRIMARY KEY (owner_id, invoice_id, ord)"
+    },
+    {
+      "relname": "invoice_allocation_refs_state",
+      "conname": "invoice_allocation_refs_state_pkey",
+      "definition": "PRIMARY KEY (owner_id)"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_code_check",
+      "definition": "CHECK ((code ~ '^[A-Z0-9][A-Z0-9._-]{0,63}$'::text))"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_pkey",
+      "definition": "PRIMARY KEY (owner_id, code)"
+    },
+    {
+      "relname": "membership_cards",
+      "conname": "membership_cards_status_check",
+      "definition": "CHECK ((status = ANY (ARRAY['reserved'::text, 'active'::text, 'lost'::text, 'replaced'::text, 'cancelled'::text])))"
+    }
+  ],
+  "triggers": [
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_counter_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_counter_del AFTER DELETE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('entities')"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_counter_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_counter_ins AFTER INSERT ON gymos.gym_entities REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('entities')"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_counter_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_counter_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_entity_counters()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_counter_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_counter_upd AFTER UPDATE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('entities')"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_msum_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_msum_del AFTER DELETE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.mark_member_summary_dirty_del()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_msum_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_msum_ins AFTER INSERT ON gymos.gym_entities REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.mark_member_summary_dirty_ins()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_msum_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_msum_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_member_summaries()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_msum_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_msum_upd AFTER UPDATE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.mark_member_summary_dirty_upd()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_zver_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_zver_del AFTER DELETE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_del()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_zver_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_zver_ins AFTER INSERT ON gymos.gym_entities REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_ins()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_zver_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_zver_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_owner_version()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "gym_entities_zver_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_entities_zver_upd AFTER UPDATE ON gymos.gym_entities REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_upd()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "invoice_allocation_refs_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_del AFTER DELETE ON gymos.gym_entities FOR EACH ROW WHEN ((old.collection = 'invoices'::text)) EXECUTE FUNCTION gymos.invoice_allocation_refs_sync()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "invoice_allocation_refs_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_ins AFTER INSERT ON gymos.gym_entities FOR EACH ROW WHEN ((new.collection = 'invoices'::text)) EXECUTE FUNCTION gymos.invoice_allocation_refs_sync()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "invoice_allocation_refs_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_trunc AFTER TRUNCATE ON gymos.gym_entities FOR EACH STATEMENT EXECUTE FUNCTION gymos.invoice_allocation_refs_truncate()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "invoice_allocation_refs_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_upd AFTER UPDATE ON gymos.gym_entities FOR EACH ROW WHEN ((((new.collection = 'invoices'::text) OR (old.collection = 'invoices'::text)) AND (((old.payload -> 'allocations'::text) IS DISTINCT FROM (new.payload -> 'allocations'::text)) OR (old.\"position\" IS DISTINCT FROM new.\"position\") OR (old.branch IS DISTINCT FROM new.branch) OR (old.entity_id IS DISTINCT FROM new.entity_id) OR (old.owner_id IS DISTINCT FROM new.owner_id) OR (old.collection IS DISTINCT FROM new.collection)))) EXECUTE FUNCTION gymos.invoice_allocation_refs_sync()"
+    },
+    {
+      "relname": "gym_entities",
+      "tgname": "sync_membership_cards",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER sync_membership_cards AFTER INSERT OR UPDATE OF payload ON gymos.gym_entities FOR EACH ROW EXECUTE FUNCTION gymos.sync_membership_cards()"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_counter_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_counter_del AFTER DELETE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('photos')"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_counter_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_counter_ins AFTER INSERT ON gymos.gym_photos REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('photos')"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_counter_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_counter_trunc AFTER TRUNCATE ON gymos.gym_photos FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_entity_counters()"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_counter_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_counter_upd AFTER UPDATE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.apply_entity_counter_delta('photos')"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_zver_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_zver_del AFTER DELETE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_del()"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_zver_ins",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_zver_ins AFTER INSERT ON gymos.gym_photos REFERENCING NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_ins()"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_zver_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_zver_trunc AFTER TRUNCATE ON gymos.gym_photos FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_owner_version()"
+    },
+    {
+      "relname": "gym_photos",
+      "tgname": "gym_photos_zver_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_photos_zver_upd AFTER UPDATE ON gymos.gym_photos REFERENCING OLD TABLE AS oldrows NEW TABLE AS newrows FOR EACH STATEMENT EXECUTE FUNCTION gymos.bump_owner_version_upd()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_state_payment_amount_guard",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_state_payment_amount_guard BEFORE INSERT OR UPDATE OF payload ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.gym_state_payment_amount_guard()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_states_counters_ready",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_states_counters_ready AFTER INSERT ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.mark_counters_ready()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_states_msum_ready",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_states_msum_ready AFTER INSERT ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.mark_member_summary_ready()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_states_zver",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_states_zver AFTER INSERT OR DELETE OR UPDATE ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.bump_owner_version_state()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "gym_states_zver_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER gym_states_zver_trunc AFTER TRUNCATE ON gymos.gym_states FOR EACH STATEMENT EXECUTE FUNCTION gymos.reset_owner_version()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "invoice_allocation_refs_epoch_del",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_epoch_del AFTER DELETE ON gymos.gym_states FOR EACH ROW EXECUTE FUNCTION gymos.invoice_allocation_refs_epoch()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "invoice_allocation_refs_epoch_trunc",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_epoch_trunc AFTER TRUNCATE ON gymos.gym_states FOR EACH STATEMENT EXECUTE FUNCTION gymos.invoice_allocation_refs_epoch_truncate()"
+    },
+    {
+      "relname": "gym_states",
+      "tgname": "invoice_allocation_refs_epoch_upd",
+      "tgenabled": "O",
+      "def": "CREATE TRIGGER invoice_allocation_refs_epoch_upd AFTER UPDATE ON gymos.gym_states FOR EACH ROW WHEN (((old.payload IS DISTINCT FROM new.payload) OR (old.user_id IS DISTINCT FROM new.user_id))) EXECUTE FUNCTION gymos.invoice_allocation_refs_epoch()"
+    }
+  ],
+  "policies": [
+    {
+      "tablename": "gym_entities",
+      "policyname": "gym_entities_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_entity_counters",
+      "policyname": "gym_entity_counters_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "SELECT",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": null
+    },
+    {
+      "tablename": "gym_member_summaries",
+      "policyname": "gym_member_summaries_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_member_summary_dirty",
+      "policyname": "gym_member_summary_dirty_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_member_summary_ready",
+      "policyname": "gym_member_summary_ready_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_owner_version",
+      "policyname": "gym_owner_version_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "SELECT",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": null
+    },
+    {
+      "tablename": "gym_photos",
+      "policyname": "gym_photos_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "gym_states",
+      "policyname": "partition_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(user_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(user_id = current_setting('app.gym_owner'::text, true))"
+    },
+    {
+      "tablename": "invoice_allocation_odd",
+      "policyname": "invoice_allocation_odd_maint",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_refs_maint}",
+      "cmd": "ALL",
+      "qual": "true",
+      "with_check": "true"
+    },
+    {
+      "tablename": "invoice_allocation_odd",
+      "policyname": "invoice_allocation_odd_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "SELECT",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": null
+    },
+    {
+      "tablename": "invoice_allocation_refs",
+      "policyname": "invoice_allocation_refs_maint",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_refs_maint}",
+      "cmd": "ALL",
+      "qual": "true",
+      "with_check": "true"
+    },
+    {
+      "tablename": "invoice_allocation_refs",
+      "policyname": "invoice_allocation_refs_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "SELECT",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": null
+    },
+    {
+      "tablename": "invoice_allocation_refs_state",
+      "policyname": "invoice_allocation_refs_state_maint",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_refs_maint}",
+      "cmd": "ALL",
+      "qual": "true",
+      "with_check": "true"
+    },
+    {
+      "tablename": "invoice_allocation_refs_state",
+      "policyname": "invoice_allocation_refs_state_read",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "SELECT",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": null
+    },
+    {
+      "tablename": "membership_cards",
+      "policyname": "membership_cards_runtime",
+      "permissive": "PERMISSIVE",
+      "roles": "{gymos_app}",
+      "cmd": "ALL",
+      "qual": "(owner_id = current_setting('app.gym_owner'::text, true))",
+      "with_check": "(owner_id = current_setting('app.gym_owner'::text, true))"
+    }
+  ],
+  "role": [
+    {
+      "rolname": "gymos_refs_maint",
+      "rolsuper": false,
+      "rolinherit": false,
+      "rolcreaterole": false,
+      "rolcreatedb": false,
+      "rolcanlogin": false,
+      "rolreplication": false,
+      "rolbypassrls": false,
+      "rolconnlimit": -1,
+      "rolvaliduntil": null
+    }
+  ],
+  "schema": [
+    {
+      "owner": "postgres",
+      "nspacl": "{postgres=UC/postgres,gymos_app=U/postgres,gymos_refs_maint=U/postgres}"
+    }
+  ],
+  "defaultAcls": [],
+  "roleSettings": []
+}

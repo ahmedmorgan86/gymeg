@@ -1,0 +1,31 @@
+> Historical preparation snapshot, superseded for current state. Do not use the permission, version, deployment or missing-reader statements below as current evidence. Selected Rehearsal materialization and a protected member preview were later completed on a separate dedicated source line. Current local omission audit is [packet-omission-readiness-current.md](packet-omission-readiness-current.md); omission remains hardfalse and no production activation is implied. The older body is preserved for provenance.
+
+# Rehearsal reader canary dependency closure, held
+
+Approved work complete: shared schema/index preparation and selected Rehearsal counters/summary dirty/ref readiness. No reader or deployment approval exists.
+
+Fresh read-only 22:23 Cairo source: Rehearsal version is NULL, one dirty member, zero stored summaries; Morgan version NULL, no dirty/stored rows. `readConsoleCandidates` refuses before refreshing when no version token exists. Do not force a source edit. A reviewed selected derived-only initialization can insert an initial owner-version token from gym_change_seq, only when absent, then explicitly refresh the selected owner's dirty summaries through the same application code and compare against legacy results. This is an additional effect requiring authority; readiness approval did not cover it. Sequence gaps are expected on failed attempts.
+
+## Containment source prepared
+
+`GYMOS_DEMAND_ALLOWED_OWNERS` is an optional server-only exact storage-owner allowlist. When set, all twelve held demand reader routes reject excluded authenticated ctx.owner values before data/summary work; hot-operation optimization falls back to the existing path for excluded owners. Unset preserves previous flag semantics, empty denies everyone. It is not authentication and never trusts request headers as owner identity. A canary must explicitly set only the reviewed Rehearsal storage key. All other independent flags (private financial/member portal/messages/device/WhatsApp) remain OFF. There is no blanket containment claim for those separate features.
+
+Client public flags remain global build-time values. For this candidate keep packet omission and strict mode OFF, keep the complete legacy packet, and use normal exact legacy fallback when an excluded owner's new route returns404. Before any deployment request the exact flagged client build must pass a two-owner UI test proving no excluded owner request produces an unknown/error state, summary writes or switched result. Server tests alone do not close that requirement.
+
+## Intended smallest canary, not yet authorized
+
+Only member summary list/detail reader flags and the exact owner allowlist, with selected version initialization/materialization verified first. Keep attendance/payment/history/dues/report flags and hot operations OFF initially. No packet omission, full-load reduction claim or whole-app completion. Deployment needs the exact source/build/env diff and rollback reference, a reviewed no-Morgan-write acceptance path and explicit user approval. Readiness markers alone are not permission.
+
+## Remaining full-demand work
+
+`app/packet-capable.ts` deliberately holds OMIT_READERS_COMPLETE=false. Its comment is not a current missing-reader inventory: workspace.tsx already wires the Overview quota/renewal aggregate, and QuickVisit is a day-pass form rather than a quota-history reader. Packet history must stay present until an actual consumer audit closes remaining direct packet paths, including Operations presentVisits and full report/WhatsApp/device fallbacks, with parity/error tests. This flag is not to be loosened to make a test pass. Those consumers are separate implementation work, not a user API-choice menu.
+
+## Prepared version/materialization body
+
+`app/lib/demand-canary-materialize.ts` is an uncalled operator helper, not a live route. Exact selected-owner equality is mandatory. It inserts a version only when absent, preserves any existing version, drains at most 500 dirty summaries and refuses if work remains. Synthetic integration proves wrong owner refusal, complete transaction rollback, excluded-owner derived rows unchanged, source entity payload parity, stable version on rerun, actual candidate reader success and legacy oracle equality for issue/debt/paid/remaining/visitsRemaining. This is not a hosted execution adapter or permission, and it does not itself supply identity/TLS/admission/timeouts/source parity. Those belong in the combined reviewed canary executor.
+
+The source-only `canary-prepare-held.mjs` now wraps materialization in 20s server transaction / 2s lock / 15s statement bounds, exact selected identity/schema/edge admission, existing counters/summary/refs prerequisite checks, all-owner source parity and excluded-owner derived parity. Faithful non-super PG17.12 proof passed actual materialization and injected source-tamper rollback. It still has no hosted CLI or deployment mutation. Uncertain COMMIT is classified, never retried.
+
+Operations presence cannot safely reuse the existing open-visits result without a new proof: `presentVisits` picks each member's latest eligible visit including CLOSED rows before deciding whether they are present. `readOpenVisits` fetches only open rows. A newer closed visit can therefore disqualify an older open row under the legacy rule but disappear from the open-only response. A bounded latest-visit-per-member query and differential edge-case test are needed, plus UI failure/Retry semantics. Merely wiring the existing open endpoint would be a plausible-but-wrong replacement.
+
+The held hosted materialization entrypoint and recursive source/dependency pins are now prepared. Default invocation verifies pins then prints review scope without connecting. Executing it would require exact new owner permission and independently supplied review root, verified TLS, selected fresh identity, existing readiness, full source/excluded parity and timeout checks. It never deploys, flips flags, changes original payload or initializes Morgan. This preparation is one part of the combined rollout review, not a reason to ask for a single-field permission now. Deployment closure remains unresolved: exact remote HEAD/current deployment/environment diff/rollback and authorized hosted canary acceptance path must be read live before recommending any app launch.

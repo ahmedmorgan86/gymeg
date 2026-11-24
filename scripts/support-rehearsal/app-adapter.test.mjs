@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {registerHooks} from 'node:module';
+registerHooks({resolve(s,c,n){if(s==='server-only')return{url:'data:text/javascript,export{}',shortCircuit:true};return n(s,c)}});
+const {enqueueSyntheticSupportAlert}=await import('../../app/lib/support-alert-enqueue.ts');
+test('actual app adapter default off and isolated target guard',async()=>{const db={query(){throw Error('DB must not run')}};delete process.env.GYMOS_SYNTHETIC_SUPPORT_ENQUEUE;assert.deepEqual(await enqueueSyntheticSupportAlert(db,'x'),{status:'disabled'});process.env.GYMOS_SYNTHETIC_SUPPORT_ENQUEUE='1';process.env.DATABASE_URL='postgresql://gymos_app.unapproved@localhost:5432/postgres';await assert.rejects(()=>enqueueSyntheticSupportAlert(db,'synthetic:1234567890123456'),/isolated Support target/);delete process.env.GYMOS_SYNTHETIC_SUPPORT_ENQUEUE;delete process.env.DATABASE_URL});

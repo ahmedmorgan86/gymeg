@@ -108,8 +108,22 @@
 
 ## 10. حدود النسخة الحالية
 
-إعدادات كل نادٍ وفرع معزولة وصلاحيات تعديلها للمالك والمدير المخول. لا يوجد ربط OAuth تلقائي موحد لكل أندية العملاء، ولا صندوق محادثات واردة أو Webhook لتأكيد التسليم/القراءة أو معالجة رد STOP تلقائيًا. عند طلب عضو إيقاف الرسائل، أوقف موافقته يدويًا وراجع الردود عبر أداة إدارة واتساب التي تستخدمها. إضافة قناة واردة كاملة تحتاج تنفيذًا واختبارات منفصلة.
+إعدادات كل نادٍ وفرع معزولة وصلاحيات تعديلها للمالك والمدير المخول. لا يوجد ربط OAuth تلقائي موحد لكل أندية العملاء، ولا صندوق محادثات واردة كامل. معالجة STOP وتأكيدات التسليم/القراءة متاحة الآن عبر الـ Webhook الموضح في القسم 11، لكن الرد على الرسائل أو إلغاء الإلغاء (opt-out) من الواجهة غير متاح. إضافة محادثة واردة كاملة تحتاج تنفيذًا واختبارات منفصلة.
+
+## 11. الـ Webhook الوارد: STOP وحالة التسليم
+
+أُضيف في GYM OS مسار `GET /api/whatsapp/webhook` للتحقق ومسار `POST /api/whatsapp/webhook` لاستقبال أحداث Meta. لتفعيله:
+
+1. في لوحة تطبيق Meta أضف Webhook بعنوان `https://<نطاق النادي>/api/whatsapp/webhook` واشترك في حقل `messages` لحساب واتساب المستخدم فعليًا للإرسال.
+2. اضبط متغيرين على الخادم فقط، دون بادئة `NEXT_PUBLIC_` ودون عرضهما في الواجهة أو السجلات:
+   - `GYMEG_WHATSAPP_WEBHOOK_VERIFY_TOKEN`: نفس قيمة رمز التحقق التي أدخلتها في لوحة Meta.
+   - `GYMEG_WHATSAPP_APP_SECRET`: سر تطبيق Meta المرتبط بحساب واتساب؛ يُستخدم للتحقق من توقيع الطلب.
+3. يُعيد مسار GET قيمة `hub.challenge` فقط إذا تطابق `hub.verify_token` مع المتغير السري. كل طلب POST يُرفض ما لم تكن ترويسة `X-Hub-Signature-256` مطابقة لـ HMAC-SHA256 المحسوب على جسم الطلب الخام باستخدام سر التطبيق، مع مقارنة ثابتة الزمن. لا يُسجَّل السر ولا جسم الرسالة.
+4. عند ورود نص `STOP` أو `UNSUBSCRIBE` أو `CANCEL` أو `END` (دون حساسية لحالة الحروف وبعد تقليم المسافات)، تُحفظ تجزئة SHA-256 لرقم المرسل مرتبطة بأصحاب النادي عبر معرّف رقم Meta، ويُمنع الإرسال اللاحق لهذا الرقم حتى لو ظلت موافقة واتساب مفعّلة في الواجهة. الرجوع إلى الإرسال يحتاج إجراءً صريحًا خارج هذا المسار؛ لا يوجد زر لإلغاء الإلغاء حاليًا.
+5. تُسجَّل حالات `sent` و`delivered` و`read` و`failed` على صف الإرسال المقبول في `gymos.whatsapp_outbox` داخل العمودين `delivery_status` و`delivery_updated_at`، وبشرط تطابق `id` القادم من Meta مع `provider_id` المحفوظ من رد Graph API. لا يُعدَّل عمود `status` الذي يعني قبول المزوّد، ولا يُفترض قبول لم يحدث. إعادة تسليم نفس الحدث لا تضيف أثرًا ثانيًا لأن مفتاح الحدث حتمي ومخزّن في `gymos.whatsapp_webhook_events`.
+
+حدود مهمة: لا يوجد صندوق محادثات وارد أو رد تلقائي غير STOP؛ الأرقام تُخزَّن كتجزئة فقط ولا تُحفظ بأشكالها الخام؛ إن لم يكن معرّف رقم Meta مرتبطًا بأي نادٍ يُسجَّل إلغاء عام (`owner_id='*'`) حمايةً للمستلم؛ وإذا لم يتطابق `provider_id` مع صف موجود يُقرّ الطلب بأمان دون اختراع حالة تسليم. التحقق الفعلي مع حساب Meta ووصول الرسائل يظل `UNVERIFIED` محليًا.
 
 ## English quick reference
 
-Use Meta WhatsApp Business Platform, not WhatsApp Web QR login. Provision the club's business number/app; obtain its Phone Number ID, a supported Graph API version and a properly scoped system-user access token. Approve templates/languages in Meta. In GYM OS select the correct club/branch, open Club WhatsApp, save the three connection fields, enable explicit member opt-in, and create due rules with parameters `{name}`, `{gym}`, `{expires}` in exact template order, one per line. Test only with a consenting recipient. Run due can send real messages. Provider acceptance is not delivery confirmation. Unknown attempts are not automatically retried. Current setup has no inbound inbox/STOP or delivery-receipt webhook.
+Use Meta WhatsApp Business Platform, not WhatsApp Web QR login. Provision the club's business number/app; obtain its Phone Number ID, a supported Graph API version and a properly scoped system-user access token. Approve templates/languages in Meta. In GYM OS select the correct club/branch, open Club WhatsApp, save the three connection fields, enable explicit member opt-in, and create due rules with parameters `{name}`, `{gym}`, `{expires}` in exact template order, one per line. Test only with a consenting recipient. Run due can send real messages. Provider acceptance is not delivery confirmation. Unknown attempts are not automatically retried. A server-only signed webhook at `/api/whatsapp/webhook` now verifies `GYMEG_WHATSAPP_WEBHOOK_VERIFY_TOKEN` on GET and `GYMEG_WHATSAPP_APP_SECRET` on POST, stores STOP opt-outs by owner and SHA-256 phone digest, and records sent/delivered/read/failed on outbox rows whose `provider_id` matches the provider message id; redeliveries are idempotent. There is still no inbound inbox or opt-out reversal UI, unmatched provider ids are only acknowledged (no invented delivery status), and real provider acceptance/delivery remains UNVERIFIED locally.

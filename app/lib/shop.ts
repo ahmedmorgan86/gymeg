@@ -1,9 +1,12 @@
+import {isPhotoDataUrl} from './photo-data-url.ts';
+/** Largest accepted WebP side for product photos; JPEG keeps the legacy prefix rule. */
+export const PRODUCT_PHOTO_SIDE=1024;
 import {z} from 'zod';
 import {RuleError,type GymState,type Operation} from './domain.ts';
 const id=z.string().min(1).max(250),name=z.string().trim().min(1).max(150);
 const qty=z.number().int().min(1).max(100000),money=z.number().int().min(0).max(100000000);
 const day=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(v=>Number.isFinite(Date.parse(v))&&new Date(v+'T12:00:00Z').toISOString().slice(0,10)===v);
-export const productSchema=z.object({id,branch:id,name,sku:name,brand:z.string().trim().max(100).optional(),unit:z.string().trim().max(60).optional(),size:z.string().trim().max(80).optional(),flavor:z.string().trim().max(80).optional(),description:z.string().trim().max(2000).optional(),photo:z.string().max(90000).regex(/^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/).optional(),categoryLabel:z.string().trim().max(80).optional(),category:z.enum(['protein','creatine','vitamins','snacks','accessories','other']),price:money.refine(v=>v>0),lowStock:z.number().int().min(0).max(100000),archived:z.boolean()}).strict();
+export const productSchema=z.object({id,branch:id,name,sku:name,brand:z.string().trim().max(100).optional(),unit:z.string().trim().max(60).optional(),size:z.string().trim().max(80).optional(),flavor:z.string().trim().max(80).optional(),description:z.string().trim().max(2000).optional(),photo:z.string().max(90000).refine(v=>isPhotoDataUrl(v,90000,PRODUCT_PHOTO_SIDE)).optional(),categoryLabel:z.string().trim().max(80).optional(),category:z.enum(['protein','creatine','vitamins','snacks','accessories','other']),price:money.refine(v=>v>0),lowStock:z.number().int().min(0).max(100000),archived:z.boolean()}).strict();
 export const supplierSchema=z.object({id,branch:id,name,phone:z.string().max(100),archived:z.boolean()}).strict();
 export type Supplier=z.infer<typeof supplierSchema>;
 export const adjustmentSchema=z.object({id,quantity:z.number().int().min(-100000).max(100000).refine(v=>v!==0),reason:z.string().trim().min(1).max(500),at:z.string().datetime({offset:true})}).strict();

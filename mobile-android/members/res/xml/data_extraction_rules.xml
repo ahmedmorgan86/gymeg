@@ -1,0 +1,1 @@
+<data-extraction-rules><cloud-backup><exclude domain="root" path="."/><exclude domain="sharedpref" path="gymeg_oauth.xml"/></cloud-backup><device-transfer><exclude domain="root" path="."/><exclude domain="sharedpref" path="gymeg_oauth.xml"/></device-transfer></data-extraction-rules>

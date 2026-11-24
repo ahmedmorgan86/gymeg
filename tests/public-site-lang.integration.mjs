@@ -1,0 +1,13 @@
+import {test,after} from 'node:test';import assert from 'node:assert/strict';import {JSDOM} from 'jsdom';
+const dom=new JSDOM('<!doctype html><div id="root"></div>',{url:'https://gymos.test',pretendToBeVisual:true});
+Object.defineProperty(globalThis,'window',{value:dom.window,configurable:true});Object.defineProperty(globalThis,'document',{value:dom.window.document,configurable:true});Object.defineProperty(globalThis,'navigator',{value:dom.window.navigator,configurable:true});globalThis.HTMLElement=dom.window.HTMLElement;globalThis.Event=dom.window.Event;globalThis.CustomEvent=dom.window.CustomEvent;globalThis.FormData=dom.window.FormData;globalThis.IS_REACT_ACT_ENVIRONMENT=true;
+const React=await import('react'),{createRoot}=await import('react-dom/client'),PublicSite=(await import('../app/public-site.tsx')).default;
+globalThis.localStorage=dom.window.localStorage;globalThis.location=dom.window.location;globalThis.requestAnimationFrame=dom.window.requestAnimationFrame.bind(dom.window);globalThis.cancelAnimationFrame=dom.window.cancelAnimationFrame.bind(dom.window);dom.window.scrollTo=()=>{};
+after(async()=>{dom.window.close();setTimeout(()=>process.exit(0),200);});
+const h=React.createElement,root=createRoot(document.getElementById('root'));const html=document.documentElement;
+test('Public site keeps <html> lang/dir in step with page language, switches on prop change and restores on unmount',async()=>{html.lang='ar';html.dir='rtl';globalThis.matchMedia??=()=>({matches:false,addEventListener(){},removeEventListener(){}});dom.window.matchMedia??=globalThis.matchMedia;
+ await React.act(async()=>root.render(h(PublicSite,{en:true})));assert.equal(html.lang,'en');assert.equal(html.dir,'ltr');assert.equal(document.querySelector('main').getAttribute('lang'),'en');
+ await React.act(async()=>root.render(h(PublicSite,{en:false})));assert.equal(html.lang,'ar');assert.equal(html.dir,'rtl');
+ await React.act(async()=>root.render(h(PublicSite,{en:true})));assert.equal(html.lang,'en');
+ await React.act(async()=>root.unmount());assert.equal(html.lang,'ar');assert.equal(html.dir,'rtl');
+ const r2=createRoot(document.getElementById('root'));html.lang='en';html.dir='ltr';await React.act(async()=>r2.render(h(PublicSite,{en:false})));assert.equal(html.lang,'ar');await React.act(async()=>r2.unmount());assert.equal(html.lang,'en');assert.equal(html.dir,'ltr');});

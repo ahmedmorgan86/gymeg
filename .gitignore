@@ -53,6 +53,8 @@ next-env.d.ts
 /.agents/
 /.codex/
 /outputs/
+/output/
+/.pdf-deps/
 /work/
 
 /npm.cmd
@@ -97,3 +99,36 @@ next-env.d.ts
 /public/downloads/*.idsig
 
 /.demo-artifacts/
+
+/android-management/build/
+/android-support/build/
+
+/tests/windows-devices/bin/
+/tests/windows-devices/obj/
+/tests/windows-announcement-scheduler/bin/
+/tests/windows-announcement-scheduler/obj/
+
+/mobile-android/build/
+/mobile-android/*/build/
+/mobile-android/.gradle/
+/mobile-android/local.properties
+/.android-task/
+/.firebase-private/
+/.gradle-task/
+*.p12
+
+/windows/release-gymeg/
+/windows/store-staging/
+*.jks
+*.keystore
+*.pfx
+*.p12
+
+/windows/release-audit-20261029/
+
+__pycache__/
+*.pyc
+
+*serviceAccount*.json
+*adminsdk*.json
+
