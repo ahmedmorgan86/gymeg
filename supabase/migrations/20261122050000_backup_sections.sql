@@ -64,15 +64,8 @@ REVOKE ALL ON FUNCTION gymos.cleanup_expired_backup_sections() FROM PUBLIC,anon,
 GRANT EXECUTE ON FUNCTION gymos.cleanup_expired_backup_sections() TO gymos_app;
 -- Install disabled. Enable only after the matching application release is deployed.
 DO $$
-DECLARE job_id bigint;
 BEGIN
- IF to_regclass('cron.job') IS NOT NULL THEN
-  IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='gymos-backup-section-cleanup') THEN
-   PERFORM cron.schedule('gymos-backup-section-cleanup','*/15 * * * *','SELECT gymos.cleanup_expired_backup_sections()');
-  END IF;
-  SELECT jobid INTO job_id FROM cron.job WHERE jobname='gymos-backup-section-cleanup';
-  IF job_id IS NOT NULL THEN PERFORM cron.alter_job(job_id,active=>false); END IF;
- END IF;
+ PERFORM gymos.cron_install_disabled('gymos-backup-section-cleanup','*/15 * * * *','SELECT gymos.cleanup_expired_backup_sections()');
 END $$;
 CREATE INDEX gym_backup_sections_scope ON gymos.gym_backup_sections(owner_id,actor_id,direction,expires_at);
 ALTER TABLE gymos.gym_backup_sections ENABLE ROW LEVEL SECURITY;
