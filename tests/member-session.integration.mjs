@@ -60,9 +60,18 @@ test('Two memberships in the same club select by branch-disambiguated names',asy
 });
 
 
-test('defaultOFF session selector restricts reads to exact account member and branch without changing PIN scope',async()=>{
- const prior=process.env.GYMOS_MEMBER_SESSION_READS;process.env.GYMOS_MEMBER_SESSION_READS='1';globalThis.__qaPhoneSlices=[];
- try{const qa=setup(true,true),r=await POST(request({phone,pin:'123456'}));assert.equal(r.status,200);assert.deepEqual(qa.sessions[0].slice(1),['club-b','member-b',2]);assert.ok(globalThis.__qaPhoneSlices.length>0);for(const {owner,q} of globalThis.__qaPhoneSlices){assert.deepEqual(q.collections,['members']);assert.equal(q.ids.length,1);assert.deepEqual(q.branches,['main']);assert.equal(q.ids[0],owner==='club-a'?'member-a':'member-b');}
- const body=await r.json();assert.equal(JSON.stringify(body).includes('club-a'),false);
- }finally{if(prior===undefined)delete process.env.GYMOS_MEMBER_SESSION_READS;else process.env.GYMOS_MEMBER_SESSION_READS=prior;}
+test('Session reads only the PIN-matched member in the selected branch',async()=>{
+ const {sessions}=setup(true,true);
+ globalThis.__qaPhoneSlices=[];
+ const wrong=await POST(request({phone,pin:'999999'}));
+ assert.equal(wrong.status,401);
+ assert.deepEqual(globalThis.__qaPhoneSlices,[]);
+ const wrongSelection=await POST(request({phone,pin:'123456',account:'club-a|member-a'}));
+ assert.equal(wrongSelection.status,401);
+ assert.deepEqual(globalThis.__qaPhoneSlices,[]);
+ const selected=await POST(request({phone,pin:'123456',account:'club-b|member-b'}));
+ assert.equal(selected.status,200);
+ assert.deepEqual(sessions[0].slice(1),['club-b','member-b',2]);
+ assert.deepEqual(globalThis.__qaPhoneSlices,[{owner:'club-b',q:{collections:['members'],ids:['member-b'],branches:['main']}}]);
+ assert.equal(JSON.stringify(await selected.json()).includes('club-a'),false);
 });
