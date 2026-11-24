@@ -70,9 +70,6 @@ REVOKE ALL ON FUNCTION gymos.close_attendance_sessions() FROM PUBLIC,anon,authen
 -- Install disabled. Enable only after snapshot, migration validation and matching application deployment.
 DO $$
 BEGIN
- IF to_regclass('cron.job') IS NULL THEN RETURN; END IF;
- IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='gymos-attendance-auto-exit') THEN
-  PERFORM cron.schedule('gymos-attendance-auto-exit','* * * * *','SELECT gymos.close_attendance_sessions()');
- END IF;
- UPDATE cron.job SET active=false WHERE jobname='gymos-attendance-auto-exit';
+ IF to_regnamespace('cron') IS NULL THEN RETURN; END IF;
+ PERFORM gymos.cron_install_disabled('gymos-attendance-auto-exit','* * * * *','SELECT gymos.close_attendance_sessions()');
 END $$;
