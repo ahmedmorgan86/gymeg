@@ -38,9 +38,17 @@ function firestoreReadScanLimit(): number {
 }
 
 export class FirestoreReadBudgetError extends Error {
-  constructor(readonly scanned: number, readonly limit: number) {
+  // Declared as erasable class fields rather than constructor parameter
+  // properties so the module loads under Node's strip-only TypeScript parsing
+  // (Node 24), which cannot transform parameter properties.
+  declare readonly scanned: number;
+  declare readonly limit: number;
+
+  constructor(scanned: number, limit: number) {
     super(`firestoreReadSpace exceeded its document scan limit (${scanned} > ${limit})`);
     this.name = 'FirestoreReadBudgetError';
+    this.scanned = scanned;
+    this.limit = limit;
   }
 }
 
