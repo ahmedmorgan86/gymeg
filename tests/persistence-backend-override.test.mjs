@@ -4,7 +4,7 @@ import {readFileSync,readdirSync,statSync} from 'node:fs';
 import {join,relative} from 'node:path';
 import {isFirebaseConfigured,isFirestorePersistence} from '../app/lib/firestore-db.ts';
 
-const FIREBASE_ENV=['GYMEG_FIREBASE_SERVICE_ACCOUNT','FIREBASE_PROJECT_ID','NEXT_PUBLIC_FIREBASE_PROJECT_ID'];
+const FIREBASE_ENV=['GYMEG_FIREBASE_SERVICE_ACCOUNT','GYMEG_FIREBASE_PROJECT_ID','FIREBASE_PROJECT_ID','NEXT_PUBLIC_FIREBASE_PROJECT_ID'];
 function withEnv(env,fn){
   const saved={};
   for(const k of [...FIREBASE_ENV,'GYMOS_DATA_BACKEND']){saved[k]=process.env[k];delete process.env[k];}

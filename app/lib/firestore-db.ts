@@ -61,6 +61,7 @@ function sanitize<T>(value: T): T {
 export function isFirebaseConfigured(): boolean {
   return Boolean(
     process.env.GYMEG_FIREBASE_SERVICE_ACCOUNT ||
+    process.env.GYMEG_FIREBASE_PROJECT_ID ||
     process.env.FIREBASE_PROJECT_ID ||
     process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID
   );

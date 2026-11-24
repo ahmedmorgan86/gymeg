@@ -4,6 +4,7 @@ import {execFileSync} from 'node:child_process';
 import {mkdtempSync, readFileSync, writeFileSync, existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {fileURLToPath} from 'node:url';
 import {emptyState} from '../app/lib/domain.ts';
 import {completeDemo} from '../app/lib/complete-demo.ts';
 import {addDemoShowcase} from '../app/lib/demo-showcase.ts';
@@ -19,8 +20,8 @@ function fixture() {
   return {owner: 'synthetic-offline-test', state, revision: 1};
 }
 
-const CWD = new URL('..', import.meta.url).pathname;
-const node = (args) => execFileSync('node', ['--experimental-strip-types', 'scripts/reduce-demo.mjs', ...args], {cwd: CWD, stdio: 'pipe'});
+const CWD = fileURLToPath(new URL('..', import.meta.url));
+const node = (args) => execFileSync(process.execPath, ['--experimental-strip-types', 'scripts/reduce-demo.mjs', ...args], {cwd: CWD, stdio: 'pipe'});
 const status = (args) => { try { node(args); return 0; } catch (e) { return e.status; } };
 // Dry run (no --write) reports the plan digest; the write then names exactly that digest and accepts the unproven rows it listed.
 function dryRun(input, keep) { return JSON.parse(node([input, '--keep', String(keep)]).toString()); }
