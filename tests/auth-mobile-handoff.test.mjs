@@ -181,6 +181,8 @@ test('callback rejects a partial android marker in the state cookie', async () =
 test('handoff table: runtime row secrecy and expiry cleanup evidence', async () => {
   const { readdirSync, readFileSync, statSync } = await import('node:fs');
   const { join } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const handoffStore = fileURLToPath(new URL('../app/lib/mobile-handoff.ts', import.meta.url));
   // Only the handoff store may reference the table at runtime: no route,
   // page, or other lib can read session rows out of it.
   const roots = ['app', 'components'];
@@ -191,10 +193,10 @@ test('handoff table: runtime row secrecy and expiry cleanup evidence', async () 
       if (statSync(file).isDirectory()) { walk(file); continue; }
       if (!/\.(ts|tsx|mjs)$/.test(name)) continue;
       const text = readFileSync(file, 'utf8');
-      if (text.includes('auth_handoff_codes') && !file.endsWith('app/lib/mobile-handoff.ts')) offenders.push(file);
+      if (text.includes('auth_handoff_codes') && file !== handoffStore) offenders.push(file);
     }
   };
-  for (const root of roots) walk(new URL('../' + root, import.meta.url).pathname);
+  for (const root of roots) walk(fileURLToPath(new URL('../' + root, import.meta.url)));
   assert.deepEqual(offenders, []);
   // The migration keeps the table gymos_app-only with FORCE RLS, and the
   // store sweeps expired rows on every create so secrets never linger.
