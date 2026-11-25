@@ -1,5 +1,5 @@
 import {test} from 'node:test';
-import {writeFileSync} from 'node:fs';
+import {mkdtempSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join} from 'node:path';
 import assert from 'node:assert/strict';
 import {registerHooks} from 'node:module';
 import {bootstrapDb} from './db-bootstrap-helpers.mjs';
@@ -25,7 +25,7 @@ test('paged automatic WhatsApp inputs equal legacy dueMessages for every rule; n
  }
  const captured=queries.find(q=>q.sql.includes('LATERAL'));
  const lit=v=>Array.isArray(v)?'ARRAY['+v.map(lit).join(',')+']::text[]':"'"+String(v).replaceAll("'","''")+"'";
- writeFileSync('/tmp/whatsapp-generated-plan.sql','-- Captured from real selector test, synthetic values only. HELD query, not applied to live database.\nEXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) '+captured.sql.replace(/\$(\d+)/g,(_,n)=>lit(captured.p[Number(n)-1]))+';\n');
+ writeFileSync(join(mkdtempSync(join(tmpdir(),'gymeg-plan-')),'whatsapp-generated-plan.sql'),'-- Captured from real selector test, synthetic values only. HELD query, not applied to live database.\nEXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) '+captured.sql.replace(/\$(\d+)/g,(_,n)=>lit(captured.p[Number(n)-1]))+';\n');
  assert.ok(queries.some(q=>q.sql.includes('LATERAL')));assert.ok(queries.filter(q=>q.sql.includes('LATERAL')).every(q=>q.p[2].length<=250));
  assert.ok(queries.every(q=>!q.sql.includes('gym_photos')));assert.ok(queries.filter(q=>q.sql.includes('gym_entities')).every(q=>/collection='(members|visits)'/.test(q.sql)));
  const p=await readWhatsAppJobPage(scope,{owner:'W1',rule,now,memberId:'m1'});assert.equal(p.status,'ok');assert.deepEqual(p.jobs,dueMessages(s,rule,now).filter(j=>j.member==='m1'));
