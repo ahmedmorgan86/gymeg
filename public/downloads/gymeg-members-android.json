@@ -6,7 +6,7 @@
   "origin": "https://gymeg.vercel.app",
   "home": "/member",
   "minAndroid": "8.0",
-  "sha256": "3bc60549fc02dd14fc83353c95b6d0768227ffa11777d8883ca1e3cc936606aa",
+  "sha256": "6103491b39c293081225e3b8ec22fd5f36d54a029fb4abecd7711e298d15567b",
   "bytes": 3194684,
   "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "builtAt": "2026-11-25T05:34:03.345Z",
@@ -33,7 +33,7 @@
     "res/xml/data_extraction_rules.xml": "07bc6fa86ea8257ec7deeaa0d5eb1ebe091e20d03aea0d7d849134dbcae52c61",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
     "src/com/pushtorq/members/FcmMessageService.java": "96b908be8bd3714288a13ec8ec8441f6fba6b9d23856072540b74ae68b67ed8b",
-    "src/com/pushtorq/members/MainActivity.java": "0511580b84823f69650e933ce4a53d253bdd3e050f04504c82c7de71067d8da4",
+    "src/com/pushtorq/members/MainActivity.java": "39c6dcb83fa226f73ac0610d9acc03814cfa53e7fb47757de726377dd76eda3f",
     "src/com/pushtorq/members/NotificationBridge.java": "a9c53be861bfabbb8c942d476475174a206f4ede2e52a317fcb4686cc637a608"
   }
 }

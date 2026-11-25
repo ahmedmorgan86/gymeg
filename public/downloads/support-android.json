@@ -6,8 +6,8 @@
   "origin": "https://gymeg.vercel.app",
   "home": "/support-login",
   "minAndroid": "8.0",
-  "sha256": "c5e5a801c5fe170d9de5f94e40acf177bd599b324d1fffbccd2837fbd97cff60",
-  "bytes": 3190136,
+  "sha256": "0cb0b5ae451c5bbf2b6923411837e69d8a70e4cc81205613320175a820b5e2df",
+  "bytes": 3190184,
   "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "builtAt": "2026-11-25T05:34:03.405Z",
   "independentApplication": true,
@@ -15,7 +15,7 @@
   "upgradeFromCertificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "physicalDeviceTested": false,
   "sourceHashes": {
-    "AndroidManifest.xml": "2bd5b88245cdca3778b37c2a481562157a8375e5976c67d967cecfcecf061ead",
+    "AndroidManifest.xml": "33c59ae253155e2b3b92ed16e57a79f4b561520244d8f18d416289d4ea4c7055",
     "res/drawable/ic_launcher_foreground.xml": "a76248dc0c70bc6e0fb9969a7b95340d8a8454df2791c8b13315490e031e26d2",
     "res/drawable/ic_monochrome.xml": "3e1337eb0624ace40c2ab63652d1573ccecc1954084a36e8005e87c9a299b6ec",
     "res/drawable/logo.png": "55f6f46c8dec0c3ad0893ba1ca2ce216b7ad26f71d47f0c9e017fa14b75d2268",
@@ -34,8 +34,8 @@
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
     "src/com/gymos/support/AnnouncementBridge.java": "3f04c50a253e894bedcea3145f5b646ed5a5e8d3e7e533124696da5db8a98087",
     "src/com/gymos/support/AnnouncementReceiver.java": "9614a8ebb62baef67d1258806437b16334fe83ade41ff2dac4c019cad7b63d5e",
-    "src/com/gymos/support/FcmMessageService.java": "5c550190537705e8855ee787937896411e0fd7ec9615cec9f46932616bf4fc8c",
-    "src/com/gymos/support/MainActivity.java": "fab7077f59162efbeacda0982ed4adb34c562b1e3d16980b66639cc09472d965",
+    "src/com/gymos/support/FcmMessageService.java": "059285456a6714492e16eaca70f3a16e4fdb24556bc4227b8e280645147d3aa9",
+    "src/com/gymos/support/MainActivity.java": "efc7964e11bf0a86f68993af2f9904d11854c896ba34d560ea75a852d28f67d9",
     "src/com/gymos/support/NotificationBridge.java": "a3fa520e007b39fd7658a8f2c9124c20f7d3b611f07e2847e6a9db0f92763d2c"
   }
 }

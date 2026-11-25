@@ -109,7 +109,7 @@ public final class MainActivity extends Activity {
   refreshFcmToken();if(!handleHandoffIntent(getIntent()))loadHome();
  }
  private void refreshFcmToken(){try{com.google.firebase.messaging.FirebaseMessaging.getInstance().getToken().addOnSuccessListener(token->getSharedPreferences("gymeg_fcm",MODE_PRIVATE).edit().putString("token",token).apply());}catch(Exception ignored){}}
- private void loadHome(){error.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);String target=getIntent()!=null?getIntent().getStringExtra("gymeg_url"):null;web.loadUrl("/member".equals(target)?"https://"+HOST+"/member":HOME);}
+ private void loadHome(){error.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);String target=getIntent()!=null?getIntent().getStringExtra("gymeg_url"):null;web.loadUrl("/member".equals(target)?"https://"+HOST+"/member":"/support-requests".equals(target)?"https://"+HOST+"/support-requests":HOME);}
  @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent==null)return;if(handleHandoffIntent(intent))return;if("com.pushtorq.management.OPEN_FCM".equals(intent.getAction()))loadHome();}
  private void showError(){if(splash!=null)splash.setVisibility(View.GONE);runOnUiThread(new Runnable(){@Override public void run(){progress.setVisibility(View.GONE);web.setVisibility(View.GONE);error.setVisibility(View.VISIBLE);}});}
  private void handleBack(){if(web!=null&&web.canGoBack())web.goBack();else finish();}

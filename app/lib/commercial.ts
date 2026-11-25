@@ -94,18 +94,20 @@ export async function commercialWork(client:PoolClient,platform:boolean,user:Cha
    if(!existing)throw new CommercialError('notFound',404);
    await client.query("SELECT set_config('app.gym_owner',$1,true)",[existing.storage_key]);
    await audit(client,user,null,'club.deleted',{tenant_id:id,name:existing.name,note:typeof body.note==='string'?body.note.trim().slice(0,500):''});
-   for(const tbl of ['gymos.gym_photos','gymos.gym_entities','gymos.gym_activity_archive','gymos.gym_recovery_photos','gymos.gym_recovery','gymos.gym_access','gymos.workspace_events','gymos.workspace_outbox','gymos.member_faces','gymos.whatsapp_outbox','gymos.whatsapp_rules','gymos.whatsapp_connections','gymos.gym_states']){
+   for(const tbl of ['gymos.member_code_access','gymos.gym_photos','gymos.gym_entities','gymos.gym_activity_archive','gymos.gym_recovery_photos','gymos.gym_recovery','gymos.gym_access','gymos.workspace_events','gymos.workspace_outbox','gymos.member_faces','gymos.whatsapp_outbox','gymos.whatsapp_rules','gymos.whatsapp_connections','gymos.gym_invites','gymos.gym_entity_counters','gymos.gym_member_summaries','gymos.gym_owner_version','gymos.membership_cards','gymos.card_number_counters','gymos.invoice_allocation_refs','gymos.gym_backup_transfers','gymos.gym_backup_sections','gymos.gym_backup_sessions','gymos.gym_states']){
     await client.query(`SAVEPOINT sp_del`);
     try{await client.query(`DELETE FROM ${tbl} WHERE owner_id=$1 OR user_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');try{await client.query(`DELETE FROM ${tbl} WHERE owner_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');try{await client.query(`DELETE FROM ${tbl} WHERE user_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');}}}
     await client.query('RELEASE SAVEPOINT sp_del');
    }
-   for(const tbl of ['gymos.support_requests','gymos.activation_requests','gymos.tenant_licenses','gymos.tenant_memberships']){
+   for(const tbl of ['gymos.trial_claims','gymos.activation_requests','gymos.tenant_licenses','gymos.tenant_memberships']){
     await client.query(`SAVEPOINT sp_t`);
     try{await client.query(`DELETE FROM ${tbl} WHERE tenant_id=$1`,[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_t');}
     await client.query('RELEASE SAVEPOINT sp_t');
    }
    await client.query('UPDATE gymos.commercial_audit SET tenant_id=NULL WHERE tenant_id=$1',[id]);
-   await client.query('DELETE FROM gymos.tenants WHERE id=$1',[id]);
+   await client.query(`SAVEPOINT sp_tenant`);
+   try{await client.query('DELETE FROM gymos.tenants WHERE id=$1',[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_tenant');await client.query('UPDATE gymos.tenants SET name=$1 WHERE id=$2',['[deleted] '+existing.name.slice(0,100),id]);}
+   await client.query('RELEASE SAVEPOINT sp_tenant');
    return{ok:true};
   }
   if(action==='settings'){const payload={company:text(body.company),support:String(body.support??'').slice(0,300),paymentInstructions:String(body.paymentInstructions??'').slice(0,4000),terms:String(body.terms??'').slice(0,8000),privacy:String(body.privacy??'').slice(0,8000)};const changed=await client.query('UPDATE gymos.platform_settings SET payload=$1,revision=revision+1 WHERE id=1 AND revision=$2',[JSON.stringify(payload),body.revision]);if(!changed.rowCount)throw new CommercialError('conflict',409);await audit(client,user,null,'settings.updated');return{ok:true};}

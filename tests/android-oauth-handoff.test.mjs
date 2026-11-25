@@ -38,7 +38,8 @@ for (const role of ['members','management']) {
     assert.ok((main.match(/if\(!verifier\.equals\(inflightVerifier\)\)return;inflightVerifier=null;/g) || []).length === 3, 'stale exchange responses ignored in all three outcomes');
     assert.ok(main.includes('installingVerifier=verifier;CookieManager.getInstance().setCookie("https://"+HOST,cookie'), 'cookie install owns the installing phase');
     assert.ok(main.includes('if(!verifier.equals(installingVerifier))return;installingVerifier=null;'), 'stale cookie completion ignored');
-    assert.ok(main.includes('}else if(attemptCurrent(verifier)){web.loadUrl("https://"+HOST+"/sign-in?error=google_failed");'), 'rejected cookie navigates only while attempt current');
+    const oauthFailPath = role === 'members' ? '/member?error=google_failed' : '/sign-in?error=google_failed';
+    assert.ok(main.includes('}else if(attemptCurrent(verifier)){web.loadUrl("https://"+HOST+"'+oauthFailPath+'");'), 'rejected cookie navigates only while attempt current');
     assert.ok(main.indexOf('setCookie("https://"+HOST,cookie') < main.indexOf('clearPendingVerifierIfMatches(verifier)'), 'clear after bound exchange');
     assert.ok(!main.includes('takePendingVerifier'), 'no delete-on-read proof');
     // The proof file is explicitly excluded from backup and device transfer.
@@ -65,7 +66,7 @@ for (const role of ['members','management']) {
 
     // Transient-error handling: exchange failures and missing/expired
     // verifiers fail cleanly back to sign-in, never loop or crash.
-    assert.ok(main.includes('/sign-in?error=google_failed'), 'clean failure path');
+    assert.ok(main.includes(oauthFailPath), 'clean failure path');
     assert.ok(main.includes('catch(Exception e)'), 'transient network failure handled');
   });
 
