@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { canAccessSupportRequest, type SupportRequest } from '../lib/support-requests';
 
@@ -22,6 +22,7 @@ export default function SupportRequests({ platform, userId, available }: { platf
   const [thread, setThread] = useState<Thread | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const createKey = useRef<{ signature: string; id: string } | null>(null);
   const endpoint = '/api/support-requests?platform=' + (platform ? '1' : '0');
   const getThread = useCallback((id: string, signal?: AbortSignal) => loadJson<Thread>(endpoint + '&id=' + encodeURIComponent(id), { signal }), [endpoint]);
 
@@ -57,7 +58,7 @@ export default function SupportRequests({ platform, userId, available }: { platf
   }, [getThread, selected]);
 
   async function mutate(body: object) {
-    if (busy) return;
+    if (busy) return false;
     setBusy(true);
     setError('');
     try {
@@ -66,11 +67,18 @@ export default function SupportRequests({ platform, userId, available }: { platf
       });
       setSelected(result.id);
       setThread(await getThread(result.id));
-      const data = await loadJson<{ requests: Ticket[] }>(endpoint);
+      const [data, activity] = await Promise.all([
+        loadJson<{ requests: Ticket[] }>(endpoint),
+        loadJson<{ updates: Update[] }>(endpoint + '&updates=1'),
+      ]);
       setTickets(data.requests);
+      setUpdates(activity.updates);
       return true;
-    } catch {
-      setError('تعذر تنفيذ الطلب. تحقق من صلاحياتك وحالة الطلب ثم أعد المحاولة.');
+    } catch (err) {
+      const status = err instanceof Error ? err.message : '';
+      setError(status === '429'
+        ? 'تم إرسال عدد كبير من الطلبات. انتظر قليلًا ثم أعد المحاولة.'
+        : 'تعذر تنفيذ الطلب. تحقق من صلاحياتك وحالة الطلب ثم أعد المحاولة.');
       return false;
     } finally {
       setBusy(false);
@@ -81,10 +89,20 @@ export default function SupportRequests({ platform, userId, available }: { platf
     event.preventDefault();
     const form = event.currentTarget;
     const fields = new FormData(form);
-    const body = form.dataset.kind === 'create'
-      ? { action: 'create', title: fields.get('title'), message: fields.get('message') }
-      : { action: 'reply', id: selected, message: fields.get('message') };
-    if (await mutate(body)) form.reset();
+    if (form.dataset.kind === 'create') {
+      const title = String(fields.get('title') ?? '');
+      const message = String(fields.get('message') ?? '');
+      const signature = `${title}\u0000${message}`;
+      if (!createKey.current || createKey.current.signature !== signature) {
+        createKey.current = { signature, id: crypto.randomUUID() };
+      }
+      if (await mutate({ action: 'create', title, message, clientRequestId: createKey.current.id })) {
+        createKey.current = null;
+        form.reset();
+      }
+      return;
+    }
+    if (await mutate({ action: 'reply', id: selected, message: fields.get('message') })) form.reset();
   }
 
   const current = thread?.request.id === selected ? thread : null;
