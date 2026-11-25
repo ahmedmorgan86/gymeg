@@ -58,8 +58,56 @@ export async function firebaseDirectory(user: ChatGPTUser, platformView = false)
 
 export async function firebaseAction(user: ChatGPTUser, body: Record<string, unknown>) {
   const action = body.action, db = database();
-  if (['settings', 'plan', 'quote', 'approve', 'reject', 'suspend', 'resume'].includes(String(action))) {
+  if (['settings', 'plan', 'quote', 'approve', 'reject', 'suspend', 'resume', 'club.update', 'club.delete'].includes(String(action))) {
     if (!await firebasePlatform(user)) throw new CommercialError('forbidden', 403);
+    if (action === 'club.update') {
+      const id = text(body.tenant), name = text(body.name, 120);
+      await db.runTransaction(async tx => {
+        const tSnap = await tx.get(tenantRef(id)), lSnap = await tx.get(licenseRef(id));
+        if (!tSnap.exists || !lSnap.exists) throw new CommercialError('notFound', 404);
+        const current = lSnap.data() as License;
+        if (current.revision !== body.revision) throw new CommercialError('conflict', 409);
+        const mode = ['trial', 'monthly', 'annual', 'perpetual'].includes(String(body.mode)) ? String(body.mode) : current.mode;
+        const status = ['pending', 'active', 'suspended'].includes(String(body.status)) ? String(body.status) : current.status;
+        const cap = body.limits ? limits(body.limits) : current.limits;
+        const endsRaw = typeof body.ends_at === 'string' ? body.ends_at.trim() : '';
+        const ends_at = mode === 'perpetual' || !endsRaw ? null : (Number.isFinite(Date.parse(endsRaw)) ? new Date(endsRaw.length === 10 ? endsRaw + 'T23:59:59.000Z' : endsRaw).toISOString() : (() => { throw new CommercialError('date'); })());
+        tx.update(tenantRef(id), { name });
+        tx.update(licenseRef(id), { mode, status, ends_at, limits: cap, revision: current.revision + 1, updated_at: new Date().toISOString() });
+        tx.create(auditRef(), audit(user.userId, id, 'club.updated', { name, mode, status, ends_at, limits: cap }));
+      });
+      return { ok: true };
+    }
+    if (action === 'club.delete') {
+      if (body.confirm !== 'DELETE_CLUB') throw new CommercialError('confirmation');
+      const id = text(body.tenant);
+      const tSnap = await tenantRef(id).get();
+      if (!tSnap.exists) throw new CommercialError('notFound', 404);
+      const tData = tSnap.data() as { storage_key?: string; name?: string } | undefined;
+      const storageKey = tData?.storage_key || `tenant:${id}`;
+      const deleteMatches = async (col: string, field: string, value: string) => {
+        const snap = await db.collection(col).where(field, '==', value).get();
+        for (let i = 0; i < snap.docs.length; i += 400) {
+          const batch = db.batch();
+          snap.docs.slice(i, i + 400).forEach(d => batch.delete(d.ref));
+          await batch.commit();
+        }
+      };
+      await deleteMatches('tenant_memberships', 'tenant_id', id);
+      await deleteMatches('activation_requests', 'tenant_id', id);
+      await deleteMatches('support_requests', 'tenant_id', id);
+      for (const col of ['gym_entities', 'gym_photos', 'gym_workspace_deltas', 'workspace_outbox', 'gym_recovery', 'gym_access', 'member_faces']) {
+        await deleteMatches(col, 'owner_id', storageKey);
+      }
+      const b = db.batch();
+      b.delete(tenantRef(id));
+      b.delete(licenseRef(id));
+      b.delete(db.collection('open_orders').doc(id));
+      b.delete(db.collection('gym_states').doc(storageKey));
+      b.create(auditRef(), audit(user.userId, null, 'club.deleted', { tenant_id: id, name: tData?.name ?? '', note: typeof body.note === 'string' ? body.note.trim().slice(0, 500) : '' }));
+      await b.commit();
+      return { ok: true };
+    }
     if (action === 'settings') {
       const ref = db.collection('platform_settings').doc('primary');
       const payload = { company: text(body.company), support: String(body.support ?? '').slice(0, 300), paymentInstructions: String(body.paymentInstructions ?? '').slice(0, 4000), terms: String(body.terms ?? '').slice(0, 8000), privacy: String(body.privacy ?? '').slice(0, 8000) };

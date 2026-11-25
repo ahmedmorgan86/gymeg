@@ -23,7 +23,9 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
  const [savedTheme,setMemberTheme]=usePreference<'light'|'dark'>('gymos.member-theme','dark');
  const memberTheme=savedTheme==='light'?'light':'dark';
  const preview=Boolean(previewData),staffMode=Boolean(staffRequest),online=useNetworkStatus();
- const [ar,setAr]=useState(true),[data,setData]=useState<View|null>(previewData??null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(!preview),[tab,setTab]=useState<Section>('profile'),[showPass,setShowPass]=useState(false);
+ const [savedLang,setSavedLang]=usePreference<'ar'|'en'>('gymos.language','ar');
+ const ar=savedLang!=='en';const setAr=(next:boolean)=>setSavedLang(next?'ar':'en');
+ const [data,setData]=useState<View|null>(previewData??null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(!preview),[tab,setTab]=useState<Section>('profile'),[showPass,setShowPass]=useState(false);
  const [phone,setPhone]=useState(''),[choices,setChoices]=useState<{id:string;name:string}[]>([]),[loginMessage,setLoginMessage]=useState('');
  const [selectedBranch,setSelectedBranch]=useState('');
  const [mustChangePin,setMustChangePin]=useState(false),[showPinForm,setShowPinForm]=useState(false);
@@ -49,7 +51,7 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
  useEffect(()=>{const initTimer=setTimeout(()=>void init(),0),loginFallback=setTimeout(()=>revealLogin(),4000);return()=>{clearTimeout(initTimer);clearTimeout(loginFallback);};},[]);
  const selectedClub=data?.selected;
  const poll=useEffectEvent(()=>{if(!busy&&navigator.onLine)void load(selectedClub??'');});
- useEffect(()=>{if(preview||!selectedClub)return;const timer=setInterval(()=>{const notificationsGranted='Notification'in window&&Notification.permission==='granted';if(document.visibilityState==='visible'||notificationsGranted)poll();},5000);return()=>clearInterval(timer);},[preview,selectedClub]);
+ useEffect(()=>{if(preview||!selectedClub)return;const onFocus=()=>{if(document.visibilityState==='visible')poll();};const timer=setInterval(()=>{const notificationsGranted='Notification'in window&&Notification.permission==='granted';if(document.visibilityState==='visible'||notificationsGranted)poll();},5000);window.addEventListener('focus',onFocus);window.addEventListener('online',onFocus);document.addEventListener('visibilitychange',onFocus);return()=>{clearInterval(timer);window.removeEventListener('focus',onFocus);window.removeEventListener('online',onFocus);document.removeEventListener('visibilitychange',onFocus);};},[preview,selectedClub]);
  async function signOut(){setBusy(true);try{const r=await fetch('/api/member-session',{method:'DELETE'});if(!r.ok)throw Error();sequence.current++;refreshing.current?.abort();refreshing.current=null;seenMessageIds.current=null;setMustChangePin(false);setShowPinForm(false);setData(null);setShowPass(false);setMessage('');setLoginMessage('');}catch{setMessage(t('تعذر تسجيل الخروج. أعد المحاولة.','Sign-out failed. Please retry.'));}finally{setBusy(false);}}
  function pinChanged(){refreshing.current?.abort();refreshing.current=null;sequence.current++;setMustChangePin(false);setShowPinForm(false);void load();}
  const money=(minor:number)=>new Intl.NumberFormat(ar?'ar-EG-u-nu-latn':'en-GB',{style:'currency',currency:data?.gym.currency??'EGP'}).format(minor/100);
@@ -71,6 +73,8 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
     {choices.length>0&&<label>{t('اختيار النادي','Choose your club')}<select name="account" value={selectedBranch} onChange={e=>{setSelectedBranch(e.target.value);setLoginMessage('');}} required><option value="">{t('اختر النادي','Choose your club')}</option>{choices.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
     {loginMessage&&<p role="alert" className="member-login-error">{loginMessage}</p>}<button className="button primary" disabled={busy}>{busy?t('جارٍ الدخول…','Signing in…'):choices.length>0?t('تأكيد النادي والدخول','Confirm club and sign in'):t('افتح مساحتك','Open your space')}<ArrowUpRight size={20}/></button>
    </form>}
+   <p className="member-login-help" style={{marginTop:'12px',fontSize:'0.85rem',opacity:0.85}}>{t('نسيت الرقم السري؟ تواصل مع استقبال ناديك لإعادة تعيينه.','Forgot your PIN? Ask your club reception to reset it.')}</p>
+   <div style={{display:'flex',gap:'14px',justifyContent:'center',flexWrap:'wrap',marginTop:'8px',fontSize:'0.85rem'}}><Link href={'/terms'+(ar?'':'?lang=en')}>{t('شروط الخدمة','Terms of Service')}</Link><Link href={'/privacy'+(ar?'':'?lang=en')}>{t('سياسة الخصوصية','Privacy Policy')}</Link></div>
 
 
   </section>}
@@ -94,6 +98,7 @@ export default function MemberApp({previewData,staffRequest}:{previewData?:View;
    {data.clubs.length>1&&<label>{t('تغيير النادي','Switch club')}<select value={data.selected} onChange={e=>{setData(null);setShowPass(false);void load(e.target.value);}}>{data.clubs.map((c,i)=><option key={c.id} value={c.id}>{t('عضوية النادي','Club membership')} {i+1}</option>)}</select></label>}
    {!staffMode&&!preview&&<><button className="button secondary" onClick={()=>setShowPinForm(!showPinForm)}>{t('تغيير الرقم السري','Change PIN')}</button>{showPinForm&&<MemberPinForm ar={ar} mandatory={false} onChanged={pinChanged}/>}</>}
    {!staffMode&&<button className="button secondary" disabled={preview||busy} onClick={()=>void signOut()}>{t('تسجيل الخروج','Sign out')}</button>}
+   <div style={{display:'flex',gap:'14px',justifyContent:'center',flexWrap:'wrap',marginTop:'12px',fontSize:'0.85rem',opacity:0.85}}><Link href={'/terms'+(ar?'':'?lang=en')}>{t('شروط الخدمة','Terms of Service')}</Link><Link href={'/privacy'+(ar?'':'?lang=en')}>{t('سياسة الخصوصية','Privacy Policy')}</Link></div>
   </>}
 
 

@@ -513,7 +513,17 @@ export async function firestorePersistSpace(
 
   // Prime the cache with the just-written state so the next read on this
   // instance (typically the client's own follow-up) costs one document read.
-  if (persisted) cacheSpace(owner, current.revision + 1, next);
+  if (persisted) {
+    cacheSpace(owner, current.revision + 1, next);
+    const targetTenant = owner.startsWith('tenant:') ? owner.slice(7) : owner;
+    void import('./realtime-broadcast').then(({ sendRealtimeBroadcast }) =>
+      sendRealtimeBroadcast(targetTenant, 'workspace.updated', {
+        revision: current.revision + 1,
+        tenantId: targetTenant,
+        timestamp: new Date().toISOString(),
+      })
+    ).catch(() => undefined);
+  }
   return persisted;
 }
 

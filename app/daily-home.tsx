@@ -2,6 +2,7 @@
 import {useState} from 'react';
 import {useTodayVisits,LAZY_STRICT,TODAY_ON} from './use-today-visits';
 import {addDays,type GymState,type Member} from './lib/domain';
+const normSearch=(s:string)=>s.normalize('NFKC').replace(/[أإآ]/g,'ا').replace(/ة/g,'ه').replace(/ى/g,'ي').replace(/[\u064B-\u065F\u0670]/g,'').trim().toLocaleLowerCase();
 import type {Role} from './lib/access';
 type Task='add'|'renew'|'collect'|'checkin'|'members'|'reports'|'team'|'settings'|'classes';
 export default function DailyHome({state,branch,role,ar,today,canEdit,admin,onTask,onMember,owner}:{owner?:string;state:GymState;branch:string;role:Role;ar:boolean;today:string;canEdit:boolean;admin:boolean;onTask:(task:Task)=>void;onMember:(member:Member)=>void}){
@@ -9,7 +10,8 @@ export default function DailyHome({state,branch,role,ar,today,canEdit,admin,onTa
  const t=(a:string,e:string)=>ar?a:e;
  const members=state.members.filter(m=>m.branch===branch&&!m.archived&&!m.demo);const {data:todayData,failed:todayFailed,retry:todayRetry}=useTodayVisits(state,owner,branch,today),todayStrict=LAZY_STRICT&&TODAY_ON&&!todayData;
  const renewals=members.filter(m=>m.awaitingSubscription||m.expires<=addDays(today,7)).sort((a,b)=>a.expires.localeCompare(b.expires));
- const matches=members.filter(m=>[m.name,m.phone,m.card??''].some(v=>v.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))).slice(0,8);
+ const normalizedQuery=normSearch(query);
+ const matches=members.filter(m=>[m.name,m.phone,m.card??''].some(v=>normSearch(v).includes(normalizedQuery))).slice(0,8);
  const tasks:{id:Task;title:string;detail:string;write?:boolean}[]=role==='reception'?[
  {id:'members',title:t('البحث عن عضو','Find a member'),detail:t('بيانات العضو وحالة اشتراكه','Member details and membership status')},
  {id:'classes',title:t('جدول الحصص','Class schedule'),detail:t('مواعيد الحصص والحجوزات','Class times and bookings')}

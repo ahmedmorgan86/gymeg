@@ -44,17 +44,31 @@ export default function SupportRequests({ platform, userId, available }: { platf
       }
     }
     void refresh();
-    const timer = window.setInterval(() => void refresh(), 20000);
-    return () => { abort.abort(); window.clearInterval(timer); };
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    const timer = window.setInterval(onVisible, 5000);
+    window.addEventListener('focus', onVisible);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      abort.abort();
+      window.clearInterval(timer);
+      window.removeEventListener('focus', onVisible);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, [available, endpoint]);
 
   useEffect(() => {
     if (!selected) return;
     const abort = new AbortController();
-    void getThread(selected, abort.signal).then(data => {
-      if (!abort.signal.aborted) setThread(data);
-    }).catch(() => { if (!abort.signal.aborted) setError('تعذر فتح طلب الدعم.'); });
-    return () => abort.abort();
+    const loadThread = () => {
+      if (document.visibilityState !== 'visible') return;
+      void getThread(selected, abort.signal).then(data => {
+        if (!abort.signal.aborted) setThread(data);
+      }).catch(() => { if (!abort.signal.aborted) setError('تعذر فتح طلب الدعم.'); });
+    };
+    loadThread();
+    const timer = window.setInterval(loadThread, 5000);
+    window.addEventListener('focus', loadThread);
+    return () => { abort.abort(); window.clearInterval(timer); window.removeEventListener('focus', loadThread); };
   }, [getThread, selected]);
 
   async function mutate(body: object) {
@@ -124,24 +138,30 @@ export default function SupportRequests({ platform, userId, available }: { platf
         {update.type === 'claim' ? 'فريق الدعم بدأ متابعة طلبك' : update.type === 'reply' ? 'رد جديد على طلب دعم' : 'تم حل طلب دعم'}
       </button></li>)}</ul>
     </section>}
-    {available && <section aria-label="الطلبات">
+    {available && <section className="card" aria-label="الطلبات">
+      <h2>{tickets ? `الطلبات (${tickets.length})` : 'الطلبات'}</h2>
       {tickets === null ? <p aria-busy={!error}>{error ? 'تعذر تحميل القائمة' : 'جارٍ التحميل…'}</p>
         : tickets.length === 0 ? <p>مفيش طلبات دعم حاليًا.</p>
-        : <ul>{tickets.map(ticket => <li key={ticket.id}><button type="button" className="button secondary"
+        : <ul style={{listStyle:'none',padding:0,margin:0,display:'grid',gap:'8px'}}>{tickets.map(ticket => <li key={ticket.id}><button type="button" className="button secondary" style={{width:'100%',justifyContent:'space-between'}}
           disabled={busy} aria-pressed={selected === ticket.id} onClick={() => { setSelected(ticket.id); setError(''); }}>
-          {ticket.title} · {statusLabels[ticket.status]}
+          <span>{ticket.title}</span><span>{statusLabels[ticket.status]}</span>
         </button></li>)}</ul>}
     </section>}
     {current && <section className="card">
       <h2>{current.request.title}</h2>
-      <p>{statusLabels[current.request.status]}</p>
-      {canAccessSupportRequest(current.request, actor, 'claim') && <button type="button" disabled={busy}
+      <p><strong>الحالة:</strong> {statusLabels[current.request.status]}</p>
+      <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'12px'}}>
+      {canAccessSupportRequest(current.request, actor, 'claim') && <button type="button" className="button secondary" disabled={busy}
         onClick={() => void mutate({ id: selected, action: 'claim' })}>تولّي الطلب</button>}
-      {canAccessSupportRequest(current.request, actor, 'resolve') && <button type="button" disabled={busy}
+      {canAccessSupportRequest(current.request, actor, 'resolve') && <button type="button" className="button secondary" disabled={busy}
         onClick={() => void mutate({ id: selected, action: 'resolve' })}>تحديد كمحلول</button>}
-      <ol>{current.messages.map(item => <li key={item.id}>
-        <b>{item.author === userId ? 'أنت' : item.author === current.request.requester ? 'صاحب الطلب' : 'الدعم'}</b>
-        <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.text}</p>
+      </div>
+      <ol style={{listStyle:'none',padding:0,margin:0,display:'grid',gap:'10px'}}>{current.messages.map(item => <li key={item.id} style={{padding:'10px 12px',borderRadius:'10px',background:'rgba(124,58,237,0.08)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',gap:'8px',marginBottom:'4px'}}>
+         <b>{item.author === userId ? 'أنت' : item.author === current.request.requester ? 'صاحب الطلب' : 'الدعم'}</b>
+         <small style={{opacity:0.75}}>{new Date(item.at).toLocaleString('ar-EG',{timeZone:'Africa/Cairo'})}</small>
+        </div>
+        <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', margin:0 }}>{item.text}</p>
       </li>)}</ol>
       {canAccessSupportRequest(current.request, actor, 'reply') && <form onSubmit={submit}>
         <p><label>الرد <textarea name="message" required maxLength={2000} rows={3} /></label></p>

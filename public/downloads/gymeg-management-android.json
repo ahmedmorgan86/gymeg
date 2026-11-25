@@ -6,7 +6,7 @@
   "origin": "https://gymeg.vercel.app",
   "home": "/clubs",
   "minAndroid": "8.0",
-  "sha256": "b9ac85a9c764560539cc7b78f4e8007994a51408908951e4d0de3f2a7608ebfa",
+  "sha256": "77ac4dc6da225c220601c46f13ee2c61cb2b6964c761a98df0b5dc2e4b97002e",
   "bytes": 3212984,
   "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "builtAt": "2026-11-25T05:34:03.268Z",
@@ -35,7 +35,7 @@
     "src/com/pushtorq/management/AnnouncementBridge.java": "efe3692d75f265065204cbdd84473b0936ce28c8324d11dc7748d709ee4ee616",
     "src/com/pushtorq/management/AnnouncementReceiver.java": "ab23d5c5d20f40ae8566c9306a6ce40615deddad8726ba371fe694ba400e300e",
     "src/com/pushtorq/management/FcmMessageService.java": "dfec2a3483460e25c7fc3fe07dbe1e0f41b4e027fb23b5047ce695e157eeca92",
-    "src/com/pushtorq/management/MainActivity.java": "cee49a5293f1d75d1772668b0ccdd5d7ba4d5b2c783367fb1f7f667fadbdbba8",
+    "src/com/pushtorq/management/MainActivity.java": "ff6ce2fc102f95b44eec345d5fe116ed2b78efe591ad8f39bd8792c7868f6df2",
     "src/com/pushtorq/management/NotificationBridge.java": "32a7f45516f080f7f64a0e8555f3de3eb543880fb7fd6af1a7e9468ad13ceaef"
   }
 }

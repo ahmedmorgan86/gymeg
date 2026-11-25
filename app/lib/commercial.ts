@@ -67,8 +67,47 @@ export async function commercialWork(client:PoolClient,platform:boolean,user:Cha
   }else if(action==='setup'&&body.startTrial)await commercialWork(client,platform,user,{action:'trial.start',tenant:id});
   return{id};
  }
- if(['settings','plan','quote','approve','reject','suspend','resume'].includes(String(action))){
+ if(['settings','plan','quote','approve','reject','suspend','resume','club.update','club.delete'].includes(String(action))){
   if(!platform)throw new CommercialError('forbidden',403);
+  if(action==='club.update'){
+   const id=text(body.tenant),name=text(body.name,120);
+   await client.query("SELECT set_config('app.tenant',$1,true)",[id]);
+   const existing=(await client.query('SELECT id,storage_key FROM gymos.tenants WHERE id=$1 FOR UPDATE',[id])).rows[0];
+   if(!existing)throw new CommercialError('notFound',404);
+   const current=(await client.query('SELECT * FROM gymos.tenant_licenses WHERE tenant_id=$1 FOR UPDATE',[id])).rows[0] as License|undefined;
+   if(!current||current.revision!==body.revision)throw new CommercialError('conflict',409);
+   const mode=['trial','monthly','annual','perpetual'].includes(String(body.mode))?String(body.mode):current.mode;
+   const status=['pending','active','suspended'].includes(String(body.status))?String(body.status):current.status;
+   const cap=body.limits?limits(body.limits):current.limits;
+   const endsRaw=typeof body.ends_at==='string'?body.ends_at.trim():'';
+   const endsAt=mode==='perpetual'||!endsRaw?null:(Number.isFinite(Date.parse(endsRaw))?new Date(endsRaw.length===10?endsRaw+'T23:59:59.000Z':endsRaw).toISOString():(()=>{throw new CommercialError('date');})());
+   await client.query('UPDATE gymos.tenants SET name=$1 WHERE id=$2',[name,id]);
+   await client.query('UPDATE gymos.tenant_licenses SET mode=$1,status=$2,ends_at=$3,limits=$4,revision=revision+1,updated_at=now() WHERE tenant_id=$5',[mode,status,endsAt,JSON.stringify(cap),id]);
+   await audit(client,user,id,'club.updated',{name,mode,status,ends_at:endsAt,limits:cap});
+   return{ok:true};
+  }
+  if(action==='club.delete'){
+   if(body.confirm!=='DELETE_CLUB')throw new CommercialError('confirmation');
+   const id=text(body.tenant);
+   await client.query("SELECT set_config('app.tenant',$1,true)",[id]);
+   const existing=(await client.query('SELECT id,storage_key,name FROM gymos.tenants WHERE id=$1 FOR UPDATE',[id])).rows[0] as {id:string;storage_key:string;name:string}|undefined;
+   if(!existing)throw new CommercialError('notFound',404);
+   await client.query("SELECT set_config('app.gym_owner',$1,true)",[existing.storage_key]);
+   await audit(client,user,null,'club.deleted',{tenant_id:id,name:existing.name,note:typeof body.note==='string'?body.note.trim().slice(0,500):''});
+   for(const tbl of ['gymos.gym_photos','gymos.gym_entities','gymos.gym_activity_archive','gymos.gym_recovery_photos','gymos.gym_recovery','gymos.gym_access','gymos.workspace_events','gymos.workspace_outbox','gymos.member_faces','gymos.whatsapp_outbox','gymos.whatsapp_rules','gymos.whatsapp_connections','gymos.gym_states']){
+    await client.query(`SAVEPOINT sp_del`);
+    try{await client.query(`DELETE FROM ${tbl} WHERE owner_id=$1 OR user_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');try{await client.query(`DELETE FROM ${tbl} WHERE owner_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');try{await client.query(`DELETE FROM ${tbl} WHERE user_id=$1`,[existing.storage_key]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_del');}}}
+    await client.query('RELEASE SAVEPOINT sp_del');
+   }
+   for(const tbl of ['gymos.support_requests','gymos.activation_requests','gymos.tenant_licenses','gymos.tenant_memberships']){
+    await client.query(`SAVEPOINT sp_t`);
+    try{await client.query(`DELETE FROM ${tbl} WHERE tenant_id=$1`,[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_t');}
+    await client.query('RELEASE SAVEPOINT sp_t');
+   }
+   await client.query('UPDATE gymos.commercial_audit SET tenant_id=NULL WHERE tenant_id=$1',[id]);
+   await client.query('DELETE FROM gymos.tenants WHERE id=$1',[id]);
+   return{ok:true};
+  }
   if(action==='settings'){const payload={company:text(body.company),support:String(body.support??'').slice(0,300),paymentInstructions:String(body.paymentInstructions??'').slice(0,4000),terms:String(body.terms??'').slice(0,8000),privacy:String(body.privacy??'').slice(0,8000)};const changed=await client.query('UPDATE gymos.platform_settings SET payload=$1,revision=revision+1 WHERE id=1 AND revision=$2',[JSON.stringify(payload),body.revision]);if(!changed.rowCount)throw new CommercialError('conflict',409);await audit(client,user,null,'settings.updated');return{ok:true};}
   if(action==='plan'){const id=text(body.id,50);if(!/^[a-z0-9-]+$/.test(id)||id==='legacy')throw new CommercialError('invalid');const cap=limits(body.limits);if(cap.branches>100||cap.members>10000)throw new CommercialError('limits');const name=text(body.name,100),currency=text(body.currency,3).toUpperCase();if(!/^[A-Z]{3}$/.test(currency))throw new CommercialError('invalid');const prices=['monthly','annual','perpetual','maintenance'].map(mode=>priceMinor(body[mode],true));
    const result=await client.query('INSERT INTO gymos.commercial_plans(id,name,currency,monthly_minor,annual_minor,perpetual_minor,maintenance_minor,limits,published) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(id) DO UPDATE SET name=excluded.name,currency=excluded.currency,monthly_minor=excluded.monthly_minor,annual_minor=excluded.annual_minor,perpetual_minor=excluded.perpetual_minor,maintenance_minor=excluded.maintenance_minor,limits=excluded.limits,published=excluded.published,revision=gymos.commercial_plans.revision+1 WHERE gymos.commercial_plans.revision=$10 RETURNING id',[id,name,currency,...prices,JSON.stringify(cap),body.published===true,body.revision??0]);if(!result.rowCount)throw new CommercialError('conflict',409);await audit(client,user,null,'plan.saved',{id});return{ok:true};}
