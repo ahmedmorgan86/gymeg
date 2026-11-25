@@ -1,0 +1,79 @@
+name: Firestore emulator
+on:
+  pull_request:
+    paths:
+      - 'app/lib/firestore-db.ts'
+      - '.github/workflows/firestore-emulator.yml'
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --ignore-scripts
+      - name: Test snapshot backfill and photo hydration on loopback
+        env:
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8797
+          GYMEG_FIREBASE_PROJECT_ID: demo-gymeg-snapshot
+        run: |
+          set -euo pipefail
+          jar="$RUNNER_TEMP/cloud-firestore-emulator.jar"
+          curl --retry 2 --fail --silent --show-error --location \
+            https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar --output "$jar"
+          echo "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c  $jar" | sha256sum -c -
+          java -jar "$jar" --host 127.0.0.1 --port 8797 --project_id demo-gymeg-snapshot > "$RUNNER_TEMP/firestore.log" 2>&1 &
+          emulator=$!
+          trap 'kill "$emulator" 2>/dev/null || true; cat "$RUNNER_TEMP/firestore.log"' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8797/ > /dev/null; then break; fi
+            kill -0 "$emulator"
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8797/ > /dev/null
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { gzipSync } from 'node:zlib';
+          assert.equal(process.env.FIRESTORE_EMULATOR_HOST,'127.0.0.1:8797');
+          assert.equal(process.env.GYMEG_FIREBASE_PROJECT_ID,'demo-gymeg-snapshot');
+          const {getFirestoreDb,firestoreReadSpace}=await import('./app/lib/firestore-db.ts');
+          const db=getFirestoreDb();
+          const owner='synthetic-'+crypto.randomUUID();
+          const root=db.collection('gym_states').doc(owner);
+          const photo='data:image/jpeg;base64,/9j/';
+          try {
+            await root.set({payload:JSON.stringify({_entityStorage:1,settings:{name:'Emulator club'}}),revision:2});
+            await db.collection('gym_entities').doc(owner+'_member').set({owner_id:owner,collection:'members',entity_id:'one',position:0,payload:{id:'one',name:'Test Member',photo:''}});
+            const photoRef=db.collection('gym_photos').doc(owner+'_one');
+            await photoRef.set({owner_id:owner,member_id:'one',content:photo});
+            const cold=await firestoreReadSpace(owner);
+            assert.equal(cold.state.settings.name,'Emulator club');
+            assert.equal(cold.state.members[0].photo,photo);
+            const manifest=(await root.get()).data().readSnapshot;
+            assert.deepEqual(manifest,{revision:2,count:1});
+            const first=(await root.collection('revision_snapshot_v1').doc('0').get()).data();
+            assert.ok(Buffer.isBuffer(first.data));
+            assert.equal(first.revision,2);
+            const next=gzipSync(JSON.stringify({state:{members:[{id:'one',name:'Test Member',photo:''}],settings:{name:'Snapshot only'}},photoIds:['one']}));
+            await db.runTransaction(async tx=>{
+              tx.update(root,{revision:3,readSnapshot:{revision:3,count:1}});
+              tx.set(root.collection('revision_snapshot_v1').doc('0'),{revision:3,count:1,index:0,data:next});
+            });
+            const cached=await firestoreReadSpace(owner);
+            assert.equal(cached.revision,3);
+            assert.equal(cached.state.settings.name,'Snapshot only');
+            assert.equal(cached.state.members[0].photo,photo);
+            console.log('Firestore emulator: bounded scan, atomic manifest backfill, Buffer round trip, cold snapshot, and legacy photo passed');
+          } finally {
+            await db.terminate();
+          }
+          NODE

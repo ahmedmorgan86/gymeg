@@ -1,5 +1,6 @@
 const apps = [{ name: 'gymeg-workspace' }];
 const store = new Map();
+export const __hooks = { afterDocRead: null };
 export const __counters = { docReads: 0, queryReads: 0, returnedDocs: 0, queries: [] };
 
 function collectionStore(name) {
@@ -11,26 +12,38 @@ export const __store = { get: collectionStore };
 
 export function __reset() {
   store.clear();
+  __hooks.afterDocRead = null;
   __counters.docReads = 0;
   __counters.queryReads = 0;
   __counters.returnedDocs = 0;
   __counters.queries.length = 0;
 }
 
-function snapshot(id, data) {
-  return { id, exists: data !== undefined, data: () => data };
+function snapshot(id, data, ref) {
+  return { id, ref, exists: data !== undefined, data: () => data };
 }
 
 function documentApi(name, id) {
-  return {
+  const ref = {
     get: async () => {
       __counters.docReads++;
-      return snapshot(id, collectionStore(name).get(id));
+      const result = snapshot(id, collectionStore(name).get(id), ref);
+      __hooks.afterDocRead?.(name, id);
+      return result;
     },
+    collection: child => {
+      const sub = [name, id, child].join('/');
+      return { doc: key => documentApi(sub, key), ...queryApi(sub) };
+    },
+    update: async data => collectionStore(name).set(id, { ...collectionStore(name).get(id), ...data }),
     set: async data => {
       collectionStore(name).set(id, data);
     },
+    delete: async () => {
+      collectionStore(name).delete(id);
+    },
   };
+  return ref;
 }
 
 function queryApi(name, filters = [], orders = [], maxDocs) {
@@ -55,7 +68,7 @@ function queryApi(name, filters = [], orders = [], maxDocs) {
       __counters.queryReads++;
       __counters.returnedDocs += rows.length;
       __counters.queries.push({ collection: name, limit: maxDocs, returned: rows.length });
-      return { docs: rows.map(([id, data]) => snapshot(id, data)), size: rows.length, empty: rows.length === 0 };
+      return { docs: rows.map(([id, data]) => snapshot(id, data, documentApi(name, id))), size: rows.length, empty: rows.length === 0 };
     },
   };
 }
@@ -63,6 +76,16 @@ function queryApi(name, filters = [], orders = [], maxDocs) {
 export function getFirestore() {
   return {
     collection: name => ({ doc: id => documentApi(name, id), ...queryApi(name) }),
+    runTransaction: async callback => {
+      const writes = [];
+      await callback({
+        get: ref => ref.get(),
+        set: (ref, data) => writes.push(() => ref.set(data)),
+        update: (ref, data) => writes.push(() => ref.update(data)),
+        delete: ref => writes.push(() => ref.delete()),
+      });
+      for (const write of writes) await write();
+    },
   };
 }
 
