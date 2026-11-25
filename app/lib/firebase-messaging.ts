@@ -61,3 +61,19 @@ export async function sendCommunityFcm(owner:string,branch:string,recipient:'sta
  }));
  return{configured:true,sent,failed};
 }
+
+/** Alerts only registered devices owned by the authorized support session actor. */
+export async function sendSupportFcm(userId:string,event:'started'|'ended'){
+ if(isFirestorePersistence())return;
+ const account=serviceAccount();
+ if(!account)return;
+ const rows=await withScope(userId,async client=>(await client.query(
+  'SELECT token_hash,token_ciphertext FROM gymos.support_fcm_subscriptions WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 12',[userId])).rows);
+ const tag=event+'-'+crypto.randomUUID();
+ await Promise.allSettled(rows.map(async row=>{
+  const result=await sendOne(account,decryptFcmToken(String(row.token_ciphertext)),'/platform',tag);
+  if(result.expired)await withScope(userId,client=>client.query(
+   'DELETE FROM gymos.support_fcm_subscriptions WHERE user_id=$1 AND token_hash=$2 AND token_ciphertext=$3',
+   [userId,row.token_hash,row.token_ciphertext]));
+ }));
+}
