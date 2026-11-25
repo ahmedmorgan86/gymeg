@@ -33,3 +33,54 @@ test('real platform authority enrolls dashboard without club/support cookie; rea
  assert.equal((await db.query('SELECT 1 FROM gymos.fcm_subscriptions')).rows.length,0);
 });
 after(async()=>{await db.close();});
+
+test('session push sends only to the actor and removes only their expired token',async()=>{
+ const {generateKeyPairSync}=await import('node:crypto');
+ const {sendSupportFcm}=await import('../app/lib/firebase-messaging.ts');
+ const {encryptFcmToken}=await import('../app/lib/push-crypto.ts');
+ const private_key=generateKeyPairSync('rsa',{modulusLength:2048}).privateKey.export({format:'pem',type:'pkcs8'});
+ const previous=process.env.GYMEG_MOBILE_NOTIFICATIONS_SERVICE_ACCOUNT;
+ const originalFetch=globalThis.fetch;
+ const deviceTokens=[token,token+'expired',token+'other'];
+ for(const [index,value] of deviceTokens.entries())await db.query(
+  'INSERT INTO gymos.support_fcm_subscriptions(user_id,token_hash,token_ciphertext) VALUES($1,$2,$3)',
+  [index===2?other:user,fcmTokenDigest(value),encryptFcmToken(value)]);
+ const sent=[];
+ process.env.GYMEG_MOBILE_NOTIFICATIONS_SERVICE_ACCOUNT=JSON.stringify({project_id:'gymeg-mobile-notifications',client_email:'gymeg-fcm-sender@gymeg-mobile-notifications.iam.gserviceaccount.com',private_key});
+ globalThis.fetch=async (url,options)=>{
+  if(String(url)==='https://oauth2.googleapis.com/token')return Response.json({access_token:'mock'});
+  assert.match(String(url),/^https:\/\/fcm.googleapis.com\//);
+  const {message}=JSON.parse(options.body);sent.push(message);
+  return message.token===deviceTokens[1]?Response.json({error:{status:'UNREGISTERED'}},{status:404}):Response.json({});
+ };
+ try{
+  await sendSupportFcm(user,'started');
+  assert.deepEqual(sent.map(message=>message.token).sort(),deviceTokens.slice(0,2).sort());
+  for(const message of sent){
+   assert.equal(message.data.url,'/platform');
+   assert.match(message.data.tag,/^started-/);
+   assert.equal(message.notification.title,'GymEG Support');
+  }
+  assert.deepEqual((await rows()).rows.map(row=>row.token_hash).sort(),[fcmTokenDigest(token),fcmTokenDigest(deviceTokens[2])].sort());
+
+  // Support-request ticket update push targets /support-requests with generic privacy-safe body
+  sent.length=0;
+  await sendSupportFcm(user,'ticket_reply','req12345');
+  assert.equal(sent.length,1);
+  assert.equal(sent[0].data.url,'/support-requests');
+  assert.equal(sent[0].data.tag,'ticket_reply-req12345');
+  assert.doesNotMatch(sent[0].notification.body,/owner|secret|password/i);
+ }finally{
+  globalThis.fetch=originalFetch;
+  if(previous===undefined)delete process.env.GYMEG_MOBILE_NOTIFICATIONS_SERVICE_ACCOUNT;
+  else process.env.GYMEG_MOBILE_NOTIFICATIONS_SERVICE_ACCOUNT=previous;
+ }
+});
+
+test('ending the same support session records a single event',async()=>{
+ const {startSupport,endSupport}=await import('../app/lib/platform-support.ts');
+ const {supportToken}=await db.transaction(client=>startSupport(client,true,user,'club-one','Synthetic session for the ending check'));
+ assert.equal((await db.transaction(client=>endSupport(client,true,other,supportToken))).ended,false);
+ assert.equal((await db.transaction(client=>endSupport(client,true,user,supportToken))).ended,true);
+ assert.equal((await db.transaction(client=>endSupport(client,true,user,supportToken))).ended,false);
+});
