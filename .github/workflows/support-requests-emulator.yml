@@ -1,0 +1,88 @@
+name: Support requests on Firestore emulator
+on:
+  pull_request:
+    paths:
+      - 'app/api/support-requests/**'
+      - '.github/workflows/support-requests-emulator.yml'
+permissions:
+  contents: read
+jobs:
+  support-requests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - run: npm ci --ignore-scripts
+      - name: Test private support requests and inboxes on loopback
+        env:
+          FIRESTORE_EMULATOR_HOST: 127.0.0.1:8797
+          GYMEG_FIREBASE_PROJECT_ID: demo-gymeg-snapshot
+        run: |
+          set -euo pipefail
+          jar="$RUNNER_TEMP/cloud-firestore-emulator.jar"
+          curl --retry 2 --fail --silent --show-error --location \
+            https://storage.googleapis.com/firebase-preview-drop/emulator/cloud-firestore-emulator-v1.22.0.jar --output "$jar"
+          echo "9b6498b7f62714d67f48f59b3818883cd682dbcd46b9f59511de81c97bb5166c  $jar" | sha256sum -c -
+          java -jar "$jar" --host 127.0.0.1 --port 8797 --project_id demo-gymeg-snapshot > "$RUNNER_TEMP/firestore.log" 2>&1 &
+          emulator=$!
+          trap 'kill "$emulator" 2>/dev/null || true; cat "$RUNNER_TEMP/firestore.log"' EXIT
+          for attempt in $(seq 1 40); do
+            if curl --fail --silent http://127.0.0.1:8797/ > /dev/null; then break; fi
+            kill -0 "$emulator"
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:8797/ > /dev/null
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {registerHooks} from 'node:module';
+          assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:8797');
+          assert.equal(process.env.GYMEG_FIREBASE_PROJECT_ID, 'demo-gymeg-snapshot');
+          const moduleStubs = new Map([
+            ['../../chatgpt-auth', 'export const getChatGPTUser=async()=>globalThis.testActor;'],
+            ['../../lib/platform-authority', 'export const platformAuthority=async user=>user.platform===true;'],
+            ['../../lib/server-workspace', 'export const reply=(body,status=200)=>Response.json(body,{status}); export const sameOrigin=req=>new URL(req.url).origin===req.headers.get("origin");'],
+          ]);
+          registerHooks({resolve(specifier,ctx,next){
+            if (ctx.parentURL?.endsWith('/app/api/support-requests/route.ts') && moduleStubs.has(specifier))
+              return {url:'data:text/javascript,'+encodeURIComponent(moduleStubs.get(specifier)),shortCircuit:true};
+            try { return next(specifier,ctx); }
+            catch (error) {
+              if (error.code==='ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && !/\.[a-z]+$/i.test(specifier))return next(specifier+'.ts',ctx);
+              throw error;
+            }
+          }});
+          const {GET,POST}=await import('./app/api/support-requests/route.ts');
+          const {getFirestoreDb}=await import('./app/lib/firestore-db.ts');
+          const site='https://synthetic.invalid';
+          const endpoint=site+'/api/support-requests';
+          const call=(actor,action)=>{ globalThis.testActor=actor; return POST(new Request(endpoint,{method:'POST',headers:{origin:site,'content-type':'application/json'},body:JSON.stringify(action)})); };
+          const read=(actor,qs='')=>{ globalThis.testActor=actor;return GET(new Request(endpoint+qs)); };
+          const owner={userId:'requester-a'}, other={userId:'requester-b'}, agent={userId:'agent-a',platform:true};
+          try {
+           const created=await call(owner,{action:'create',title:'Synthetic issue',message:'First message'});
+           assert.equal(created.status,201);
+           const {id}=await created.json();
+           assert.equal((await read(other,'?id='+id)).status,404);
+           assert.equal((await read(other,'?platform=1')).status,403);
+           assert.equal((await call(owner,{action:'claim',id})).status,403);
+           assert.equal((await call(agent,{action:'claim',id})).status,200);
+           assert.equal((await call(agent,{action:'reply',id,message:'Test update'})).status,200);
+           assert.equal((await call(agent,{action:'resolve',id})).status,200);
+           assert.equal((await call(owner,{action:'reply',id,message:'Closed'})).status,403);
+           const detail=await (await read(owner,'?id='+id)).json();
+           assert.equal(detail.request.status,'resolved');
+           assert.equal(detail.messages.length,2);
+           const inbox=await (await read(owner,'?updates=1')).json();
+           assert.deepEqual(inbox.updates.map(u=>u.type).sort(),['claim','reply','resolve']);
+           assert.deepEqual((await (await read(other,'?updates=1')).json()).updates,[]);
+           console.log('Support requests: real Firestore creates private threads, claims, replies, resolution and scoped inbox events.');
+          } finally { await getFirestoreDb().terminate(); }
+          NODE
