@@ -1,5 +1,5 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {currentAttendance,visitTiming,durationLabel} from '../app/lib/attendance-presence.ts';
+import {currentAttendance,visitTiming,durationLabel,resolveAttendanceNow} from '../app/lib/attendance-presence.ts';
 import {emptyState} from '../app/lib/domain.ts';
 const now='2026-10-26T10:00:00Z';
 const visit={id:'v',member:'a',branch:'main',day:'2026-10-26',at:'2026-10-26T08:00:00Z'};
@@ -13,4 +13,15 @@ test('Duration follows a non-default exit limit and ignores malformed historical
  assert.equal(visitTiming(reentry,now,30).durationMs,25*60000);
  assert.equal(visitTiming(reentry,'2026-10-26T10:40:00Z',30).durationMs,45*60000);
  assert.equal(visitTiming(reentry,'2026-10-26T10:40:00Z',30).expired,true);
+});
+
+test('Attendance clock anchors to server asOf or fallbackServerNow, ignoring device clock skew',()=>{
+ const serverIso='2026-11-25T10:00:00.000Z',serverMs=Date.parse(serverIso);
+ // Even before /api/presence arrives (check=null), fallbackServerNow + monotonic elapsed time is used
+ assert.equal(resolveAttendanceNow('o','main',null,1500,serverMs,1000),'2026-11-25T10:00:00.500Z');
+ // With /api/presence check scoped to current owner|branch, check.asOf wins
+ const check={scope:'o|main',checkedAt:2000,asOf:'2026-11-25T10:05:00.000Z',connected:true};
+ assert.equal(resolveAttendanceNow('o','main',check,7000,serverMs,1000),'2026-11-25T10:05:05.000Z');
+ // Mismatched scope falls back to fallbackServerNow rather than stale branch check
+ assert.equal(resolveAttendanceNow('o','other',check,3000,serverMs,1000),'2026-11-25T10:00:02.000Z');
 });

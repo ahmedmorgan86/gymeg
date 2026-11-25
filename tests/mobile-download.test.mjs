@@ -10,11 +10,11 @@ test('Platform support, management and members download metadata map to latest d
   assert.equal(variant.url,`/downloads/${variant.filename}`);
   assert.equal(existsSync(new URL('../public'+variant.url,import.meta.url)),true,`Missing APK artifact for ${variant.id}: ${variant.url}`);
  }
- assert.equal(supportApkVersion,'1.0.10');
- assert.equal(managementApkVersion,'1.1.10');
- assert.equal(membersApkVersion,'1.1.9');
+ assert.equal(supportApkVersion,'1.0.11');
+ assert.equal(managementApkVersion,'1.1.11');
+ assert.equal(membersApkVersion,'1.1.10');
  const managementRelease=JSON.parse(readFileSync(new URL('../public/downloads/gymeg-management-android.json',import.meta.url),'utf8'));
- assert.equal(managementRelease.versionCode,15);
+ assert.equal(managementRelease.versionCode,16);
  assert.equal(managementRelease.requiresReinstallFromPreviousBrand,false);
  assert.equal(supportApkUrl,`/downloads/${supportApkFilename}`);
  assert.equal(managementApkUrl,`/downloads/${managementApkFilename}`);

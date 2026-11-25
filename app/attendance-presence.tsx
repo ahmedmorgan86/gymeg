@@ -1,15 +1,14 @@
 'use client';
 import {useEffect,useState} from 'react';
 import type {GymState,Member} from './lib/domain';
-import {currentAttendance,durationLabel} from './lib/attendance-presence';
-export type PresenceCheck={scope:string;checkedAt:number;asOf:string;connected:boolean};
-export function useAttendanceClock(owner:string,branch:string,check:PresenceCheck|null,active=true){
- const [clock,setClock]=useState(()=>Date.now());
- useEffect(()=>{if(!active)return;const timer=setInterval(()=>setClock(Date.now()),1000);return()=>clearInterval(timer);},[active]);
- const scoped=check?.scope===owner+'|'+branch?check:null;
- const server=scoped?Date.parse(scoped.asOf):NaN;
- const stamp=Number.isFinite(server)?server+Math.max(0,clock-scoped!.checkedAt):clock;
- return new Date(stamp).toISOString();
+import {currentAttendance,durationLabel,resolveAttendanceNow,type PresenceCheck} from './lib/attendance-presence';
+export type {PresenceCheck};
+export {resolveAttendanceNow};
+const monoNow=()=>typeof performance!=='undefined'?performance.now():Date.now();
+export function useAttendanceClock(owner:string,branch:string,check:PresenceCheck|null,active=true,fallbackServerNow?:number,fallbackCheckedAt?:number){
+ const [tick,setTick]=useState(()=>monoNow());
+ useEffect(()=>{if(!active)return;const timer=setInterval(()=>setTick(monoNow()),1000);return()=>clearInterval(timer);},[active]);
+ return resolveAttendanceNow(owner,branch,check,tick,fallbackServerNow,fallbackCheckedAt);
 }
 export default function AttendancePresence({state,branch,owner,ar,canEdit,busy,check,onMember,onExit}:{state:GymState;branch:string;owner:string;ar:boolean;canEdit:boolean;busy:boolean;check:PresenceCheck|null;onMember:(member:Member)=>void;onExit:(visitId:string)=>void}){
  const now=useAttendanceClock(owner,branch,check);

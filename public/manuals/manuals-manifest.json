@@ -1,0 +1,38 @@
+[
+  {
+    "file": "GymEG_Club_Manager_AR_EN.pdf",
+    "pages": 20,
+    "topics": 17,
+    "url": "https://gymeg.vercel.app/management-install"
+  },
+  {
+    "file": "GymEG_Members_Mobile_AR_EN.pdf",
+    "pages": 11,
+    "topics": 9,
+    "url": "https://gymeg.vercel.app/member-install"
+  },
+  {
+    "file": "GymEG_Support_Mobile_AR_EN.pdf",
+    "pages": 5,
+    "topics": 3,
+    "url": "https://gymeg.vercel.app/support-install"
+  },
+  {
+    "file": "GymEG_Windows_Desktop_AR_EN.pdf",
+    "pages": 5,
+    "topics": 3,
+    "url": "https://gymeg.vercel.app/downloads/windows"
+  },
+  {
+    "file": "GymEG_Platform_Owner_AR_EN.pdf",
+    "pages": 14,
+    "topics": 12,
+    "url": "https://gymeg.vercel.app/platform"
+  },
+  {
+    "file": "GymEG_Employees_AR_EN.pdf",
+    "pages": 14,
+    "topics": 12,
+    "url": "https://gymeg.vercel.app/management-install"
+  }
+]

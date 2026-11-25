@@ -1,12 +1,12 @@
 {
   "schema": "gymeg.apk-supersessions.v1",
-  "updated": "2026-11-24",
+  "updated": "2026-11-25",
   "notice": "Historical APK files are preserved for existing install links. A lower version label on a byte-identical APK does not describe a distinct build. Use the identicalTo label for that build and the currentReleases entries for new installs.",
   "filesPreserved": true,
   "currentReleases": {
-    "management": "GymEG-Manager-Android-1.1.10.apk",
-    "members": "GymEG-Members-Android-1.1.9.apk",
-    "support": "GymEG-Support-Android-1.0.10.apk"
+    "management": "GymEG-Manager-Android-1.1.11.apk",
+    "members": "GymEG-Members-Android-1.1.10.apk",
+    "support": "GymEG-Support-Android-1.0.11.apk"
   },
   "aliases": [
     {

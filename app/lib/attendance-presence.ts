@@ -14,4 +14,13 @@ export function currentAttendance(state:GymState,branch:string,now:string){
  const members=new Map(state.members.filter(m=>m.branch===branch&&!m.archived&&!m.demo).map(m=>[m.id,m]));
  return presentVisits(state,branch,now).filter(v=>members.has(v.member)).sort((a,b)=>(b.activeAt??b.at).localeCompare(a.activeAt??a.at)).map(visit=>({visit,member:members.get(visit.member)!,timing:visitTiming(visit,now,receptionPolicy(state).autoExitMinutes)}));
 }
+export type PresenceCheck={scope:string;checkedAt:number;asOf:string;connected:boolean};
+export function resolveAttendanceNow(owner:string,branch:string,check:PresenceCheck|null,elapsedTick:number,fallbackServerNow?:number,fallbackCheckedAt?:number){
+ const scoped=check?.scope===owner+'|'+branch?check:null;
+ const server=scoped?Date.parse(scoped.asOf):NaN;
+ const anchorServer=Number.isFinite(server)?server:fallbackServerNow;
+ const anchorAt=Number.isFinite(server)?scoped!.checkedAt:(fallbackCheckedAt??elapsedTick);
+ const stamp=typeof anchorServer==='number'&&Number.isFinite(anchorServer)?anchorServer+Math.max(0,elapsedTick-anchorAt):Date.now();
+ return new Date(stamp).toISOString();
+}
 export function durationLabel(milliseconds:number,ar:boolean){const minutes=Math.floor(Math.max(0,milliseconds)/60000),hours=Math.floor(minutes/60);return hours?(ar?`${hours} س ${minutes%60} د`:`${hours}h ${minutes%60}m`):(ar?`${minutes} دقيقة`:`${minutes} min`);}
