@@ -1,14 +1,22 @@
 import 'server-only';
+import { randomBytes } from 'node:crypto';
 import type { ChatGPTUser } from '../chatgpt-auth';
 import { commercialTransaction } from './commercial';
 import {
   canAccessSupportRequest,
-  newSupportRequestId,
   SupportRequestError,
   supportRequestUpdateRecipient,
   type SupportRequest,
   type SupportRequestStatus,
 } from './support-requests';
+
+const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function newSupportRequestId(): string {
+  const bytes = randomBytes(20);
+  let id = '';
+  for (let i = 0; i < 20; i++) id += ALPHABET[bytes[i]! % ALPHABET.length];
+  return id;
+}
 
 type TicketRow = {
   id: string;

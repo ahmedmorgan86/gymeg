@@ -1,5 +1,3 @@
-import { randomBytes } from 'node:crypto';
-
 export type SupportRequestStatus = 'open' | 'in_progress' | 'resolved';
 
 export type SupportRequest = {
@@ -13,15 +11,7 @@ export type SupportRequest = {
 type Actor = { id: string; platform: boolean };
 export type RequestAction = 'read' | 'reply' | 'claim' | 'resolve';
 
-const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 export const SUPPORT_REQUEST_ID_RE = /^[A-Za-z0-9]{20}$/;
-
-export function newSupportRequestId(): string {
-  const bytes = randomBytes(20);
-  let id = '';
-  for (let i = 0; i < 20; i++) id += ALPHABET[bytes[i]! % ALPHABET.length];
-  return id;
-}
 
 export class SupportRequestError extends Error {
   declare readonly code: string;

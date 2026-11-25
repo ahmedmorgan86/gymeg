@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { getChatGPTUser } from '../../chatgpt-auth';
+import { sendSupportFcm, sendSupportQueueFcm } from '../../lib/firebase-messaging';
 import { getFirestoreDb, isFirestorePersistence } from '../../lib/firestore-db';
 import { platformAuthority } from '../../lib/platform-authority';
 import {
@@ -91,9 +92,14 @@ export async function POST(request: Request) {
     if (!isFirestorePersistence()) {
       if (input.action === 'create') {
         const created = await pgCreateSupportRequest(user, input);
+        if (created.created) await sendSupportQueueFcm(created.id).catch(() => console.warn('support_ticket_push_failed'));
         return reply({ id: created.id }, created.created ? 201 : 200);
       }
       const result = await pgActOnSupportRequest(user, input);
+      if (result.recipient) {
+        const event = input.action === 'claim' ? 'ticket_claim' : input.action === 'reply' ? 'ticket_reply' : 'ticket_resolve';
+        await sendSupportFcm(result.recipient, event, result.id).catch(() => console.warn('support_ticket_push_failed'));
+      }
       return reply({ id: result.id });
     }
 
