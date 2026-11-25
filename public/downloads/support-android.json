@@ -6,7 +6,7 @@
   "origin": "https://gymeg.vercel.app",
   "home": "/support-login",
   "minAndroid": "8.0",
-  "sha256": "0cb0b5ae451c5bbf2b6923411837e69d8a70e4cc81205613320175a820b5e2df",
+  "sha256": "793e88f001a1107e9463cda3ba7cd3bf2fbdc80b8054da881a05627e39f0f891",
   "bytes": 3190184,
   "certificateSha256": "413b3db51468b0ed14765ae410b2d7c5a6f7fc3121b67aaae82d3e378ccdf4c2",
   "builtAt": "2026-11-25T05:34:03.405Z",
@@ -28,14 +28,14 @@
     "res/mipmap-xxxhdpi/ic_launcher.png": "21b90863b3138d0db9c7783c954dd04f4716e0242e9ea09c600b6bc4fcbef9d0",
     "res/values/colors.xml": "0d273583f0892d70ba2a52d42085901618a489eddcb980db227ee28f06136595",
     "res/values/strings.xml": "bc9ab5ebbfe58517c306da5d654ec8b254c8dd3e9ee3dcc731016d3bfc894871",
-    "res/values/styles.xml": "518120ebd6daceedbbfe68c93a5a5c4565623db89b57f8ec6e8ec8115ea91e3b",
+    "res/values/styles.xml": "a822211362bf16d2fc7b19d8fc4b1a70bcaff74d1dd9ae749d978b8fdc4f1771",
     "res/values-ar/strings.xml": "66b9a2ff070d288219f1b92aea29e7435435194e20cc8552a4d50273425f2365",
     "res/xml/data_extraction_rules.xml": "b4c151368d0cdf846b09d606d82bba57ef550bbb3783aa71bcd734a7ef1c2411",
     "res/xml/network_security_config.xml": "12c5ef810c159e709efd542129c2439100343e1e176502749d2bf3c1d929010b",
     "src/com/gymos/support/AnnouncementBridge.java": "3f04c50a253e894bedcea3145f5b646ed5a5e8d3e7e533124696da5db8a98087",
     "src/com/gymos/support/AnnouncementReceiver.java": "9614a8ebb62baef67d1258806437b16334fe83ade41ff2dac4c019cad7b63d5e",
     "src/com/gymos/support/FcmMessageService.java": "059285456a6714492e16eaca70f3a16e4fdb24556bc4227b8e280645147d3aa9",
-    "src/com/gymos/support/MainActivity.java": "efc7964e11bf0a86f68993af2f9904d11854c896ba34d560ea75a852d28f67d9",
+    "src/com/gymos/support/MainActivity.java": "b7fabac841fcae2c85f6b4cf23939092212f7125f1e82424cb30929ee0c00b1c",
     "src/com/gymos/support/NotificationBridge.java": "a3fa520e007b39fd7658a8f2c9124c20f7d3b611f07e2847e6a9db0f92763d2c"
   }
 }

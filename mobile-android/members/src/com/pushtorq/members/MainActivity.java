@@ -101,7 +101,7 @@ public final class MainActivity extends Activity {
  private void loadHome(){error.setVisibility(View.GONE);web.setVisibility(View.VISIBLE);web.loadUrl(HOME);}
  @Override protected void onNewIntent(android.content.Intent intent){super.onNewIntent(intent);setIntent(intent);if(intent==null)return;if(handleHandoffIntent(intent))return;if("com.pushtorq.members.OPEN_FCM".equals(intent.getAction()))loadHome();}
  private void showError(){if(splash!=null)splash.setVisibility(View.GONE);runOnUiThread(new Runnable(){@Override public void run(){progress.setVisibility(View.GONE);web.setVisibility(View.GONE);error.setVisibility(View.VISIBLE);}});}
- private void handleBack(){if(web!=null&&web.canGoBack())web.goBack();else finish();}
+ private void handleBack(){if(web!=null){web.evaluateJavascript("(function(){var b=document.querySelector('.modal-backdrop button[aria-label], .mobile-overlay');if(b){b.click();return true;}return false;})()",val->{if(!"true".equals(val)){if(web.canGoBack())web.goBack();else finish();}});}else finish();}
  @Override public void onBackPressed(){handleBack();}
  @Override protected void onPause(){CookieManager.getInstance().flush();if(web!=null){web.onPause();web.pauseTimers();}super.onPause();}
  @Override protected void onResume(){super.onResume();if(web!=null){web.resumeTimers();web.onResume();}}

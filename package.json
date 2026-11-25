@@ -74,7 +74,9 @@
   },
   "type": "module",
   "allowScripts": {
-    "unrs-resolver": false
+    "unrs-resolver": false,
+    "@firebase/util": false,
+    "protobufjs": false
   },
   "overrides": {
     "jose": "5.10.0"
