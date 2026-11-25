@@ -56,10 +56,12 @@ test('consumer routes: flag, auth, params, branch scope, role gate (packetQuerie
   for(const n of ['payments','dues','report-payments'])assert.ok(seen['reception:'+n+':403'],'reception refused on '+n);
   for(const [n] of R)assert.ok(seen['owner:'+n+':200'],'owner served on '+n);
 });
-test('visit-trend route: only the UI periods and a day within +-2 of the club clock',async()=>{
-  await seed('V');ctx('V');process.env.GYMOS_VISIT_TREND='1';
+test('visit-trend route: only the UI periods and a day within +-2 of the club clock',async t=>{
+  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-11-24T23:30:00Z') });
+  const state = await seed('V');ctx('V');process.env.GYMOS_VISIT_TREND='1';
   const call=async q=>(await import('../app/api/workspace/visit-trend/route.ts')).GET(new Request('https://example.test/api/workspace/visit-trend?'+new URLSearchParams(q),{headers:{'X-GymOS-Tenant':'t-V'}}));
-  const own=new Date().toISOString().slice(0,10),shift=n=>new Date(Date.parse(own)+n*864e5).toISOString().slice(0,10);
+  const {dayAt}=await import('../app/lib/domain.ts');
+  const own=dayAt(new Date().toISOString(),state.settings.timezone),shift=n=>new Date(Date.parse(own)+n*864e5).toISOString().slice(0,10);
   assert.equal((await call({branch:'a',today:own,period:'7'})).status,200);assert.equal((await call({branch:'a',today:own,period:'14'})).status,200);
   for(const p of ['1','3660','8','0','x',''])assert.equal((await call({branch:'a',today:own,period:p})).status,400,'period '+p);
   for(const d of [shift(-3),shift(3),'2026-03-05','x'])assert.equal((await call({branch:'a',today:d,period:'7'})).status,400,'day '+d);
