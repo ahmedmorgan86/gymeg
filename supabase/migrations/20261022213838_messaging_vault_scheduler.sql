@@ -32,18 +32,27 @@ $$;
 REVOKE ALL ON FUNCTION gymos.messaging_cron_valid(text) FROM PUBLIC,anon,authenticated;
 GRANT EXECUTE ON FUNCTION gymos.messaging_cron_valid(text) TO gymos_app;
 DO $$ BEGIN IF NOT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='gymos' AND table_name='whatsapp_connections' AND column_name='last_run_at') THEN ALTER TABLE gymos.whatsapp_connections ADD COLUMN last_run_at timestamptz; END IF; END $$;
+-- A named schedule upserts the caller's job and returns its ID. The migration
+-- transaction keeps the schedule and deactivation invisible until both succeed.
+CREATE OR REPLACE FUNCTION gymos.cron_install_disabled(p_name text,p_schedule text,p_command text)
+RETURNS void LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog AS $$
+DECLARE v_job bigint;
+BEGIN
+ IF to_regnamespace('cron') IS NULL THEN RETURN; END IF;
+ SELECT cron.schedule(p_name,p_schedule,p_command) INTO STRICT v_job;
+ PERFORM cron.alter_job(v_job,active=>false);
+END $$;
+REVOKE ALL ON FUNCTION gymos.cron_install_disabled(text,text,text) FROM PUBLIC,anon,authenticated,gymos_app;
+
 -- Install disabled; enable only after the matching production route is deployed.
 DO $$
 DECLARE job_url text; cron_secret text;
 BEGIN
- IF to_regclass('cron.job') IS NULL THEN RETURN; END IF;
+ IF to_regnamespace('cron') IS NULL THEN RETURN; END IF;
  IF to_regclass('vault.decrypted_secrets') IS NOT NULL THEN
   SELECT decrypted_secret INTO job_url FROM vault.decrypted_secrets WHERE name='gymos_whatsapp_cron_url';
   SELECT decrypted_secret INTO cron_secret FROM vault.decrypted_secrets WHERE name='gymos_whatsapp_cron';
  END IF;
  job_url:=coalesce(job_url,current_setting('app.whatsapp_cron_url',true),'https://gymos-enterprise.vercel.app');
- IF NOT EXISTS(SELECT 1 FROM cron.job WHERE jobname='gymos-whatsapp-worker') THEN
-  PERFORM cron.schedule('gymos-whatsapp-worker','*/5 * * * *',format($job$SELECT net.http_get(url:=%L,headers:=jsonb_build_object('Authorization','Bearer '||%L),timeout_milliseconds:=55000);$job$,job_url||'/api/cron/whatsapp',coalesce(cron_secret,'')));
- END IF;
- UPDATE cron.job SET active=false WHERE jobname='gymos-whatsapp-worker';
+ PERFORM gymos.cron_install_disabled('gymos-whatsapp-worker','*/5 * * * *',format($job$SELECT net.http_get(url:=%L,headers:=jsonb_build_object('Authorization','Bearer '||%L),timeout_milliseconds:=55000);$job$,job_url||'/api/cron/whatsapp',coalesce(cron_secret,'')));
 END $$;
