@@ -9,7 +9,7 @@ const click=async label=>{await React.act(async()=>{[...document.querySelectorAl
 test('support enrollment requires tap, waits for permission, registers without branch, and offers optout without sending push',async()=>{
  await React.act(async()=>root.render(React.createElement(Controls,{ar:false})));assert.equal(calls.length,0);
  await click('Enable support alerts');assert.match(document.body.textContent,/Allow Android notifications/);assert.equal(calls.length,1);
- granted=true;calls=[];await click('Enable support alerts');assert.match(document.body.textContent,/This device is registered/);assert.match(document.body.textContent,/Automatic support alerts are currently unavailable/);
+ granted=true;calls=[];await click('Enable support alerts');assert.match(document.body.textContent,/This device is registered/);assert.match(document.body.textContent,/registered for support session alerts/);
  const writes=calls.filter(x=>x.init?.method==='POST');assert.equal(writes.length,1);assert.equal(writes[0].url,'/api/fcm-subscriptions');assert.deepEqual(JSON.parse(writes[0].init.body),{action:'register',audience:'support',token:'x'.repeat(150)});
  calls=[];await click('Disable support alerts');assert.match(document.body.textContent,/disabled for this device/);assert.deepEqual(JSON.parse(calls.find(x=>x.init?.method==='POST').init.body),{action:'unregister',audience:'support',token:'x'.repeat(150)});
 });
