@@ -1,0 +1,48 @@
+name: PostgreSQL cron compatibility
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/*.sql'
+      - '.github/workflows/postgres-cron.yml'
+permissions:
+  contents: read
+jobs:
+  inactive-jobs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start disposable PostgreSQL with pg_cron
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-16-cron
+          bin=/usr/lib/postgresql/16/bin
+          cluster=$(mktemp -d)
+          "$bin/initdb" --auth=trust --no-locale "$cluster"
+          trap '"$bin/pg_ctl" -D "$cluster" stop -m immediate' EXIT
+          "$bin/pg_ctl" -D "$cluster" -w -l "$cluster/server.log" start \
+            -o "-p 55443 -c listen_addresses='' -c unix_socket_directories=$cluster -c shared_preload_libraries=pg_cron"
+          export PGHOST="$cluster" PGPORT=55443 PGDATABASE=postgres
+          "$bin/psql" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION pg_cron; REVOKE SELECT ON cron.job FROM PUBLIC; CREATE SCHEMA gymos; CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE gymos_app; CREATE ROLE migration_runner; GRANT USAGE ON SCHEMA gymos,cron TO migration_runner; GRANT EXECUTE ON FUNCTION cron.alter_job(bigint,text,text,text,text,boolean) TO migration_runner;'
+          python3 - <<'PY' > "$cluster/check.sql"
+          from pathlib import Path
+          import re
+          root = Path('supabase/migrations')
+          names = ('20261022213838_messaging_vault_scheduler.sql','20261026224250_unified_member_console.sql','20261117134000_backup_transfer_expiry_cleanup.sql','20261122050000_backup_sections.sql')
+          sources = [(root / name).read_text() for name in names]
+          print(re.search(r'CREATE OR REPLACE FUNCTION gymos\.cron_install_disabled[\s\S]+?REVOKE ALL ON FUNCTION gymos\.cron_install_disabled[^;]+;', sources[0]).group(0))
+          print('GRANT EXECUTE ON FUNCTION gymos.cron_install_disabled(text,text,text) TO migration_runner;')
+          blocks = []
+          for sql in sources:
+              call = sql.index('PERFORM gymos.cron_install_disabled(')
+              blocks.append(sql[sql.rindex('DO $$', 0, call):sql.index('END $$;', call)+len('END $$;')])
+          print("DO $$ BEGIN IF has_table_privilege('migration_runner','cron.job','SELECT') THEN RAISE EXCEPTION 'fixture unexpectedly has direct catalog access'; END IF; END $$;")
+          for _ in range(2):
+              print('BEGIN; SET LOCAL ROLE migration_runner;')
+              print('\n'.join(blocks))
+              print('COMMIT;')
+          print("DO $$ BEGIN IF (SELECT count(*) FROM cron.job) <> 4 OR EXISTS (SELECT 1 FROM cron.job WHERE active) THEN RAISE EXCEPTION 'expected exactly 4 inactive jobs'; END IF; END $$;")
+          print('SELECT jobname, active FROM cron.job ORDER BY jobname;')
+          PY
+          "$bin/psql" -v ON_ERROR_STOP=1 --file "$cluster/check.sql"
