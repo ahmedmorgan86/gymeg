@@ -24,7 +24,7 @@ jobs:
           "$bin/pg_ctl" -D "$cluster" -w -l "$cluster/server.log" start \
             -o "-p 55443 -c listen_addresses='' -c unix_socket_directories=$cluster -c shared_preload_libraries=pg_cron"
           export PGHOST="$cluster" PGPORT=55443 PGDATABASE=postgres
-          "$bin/psql" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION pg_cron; CREATE SCHEMA gymos; CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE gymos_app; CREATE ROLE migration_runner; GRANT USAGE ON SCHEMA gymos,cron TO migration_runner;'
+          "$bin/psql" -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION pg_cron; REVOKE SELECT ON cron.job FROM PUBLIC; CREATE SCHEMA gymos; CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE gymos_app; CREATE ROLE migration_runner; GRANT USAGE ON SCHEMA gymos,cron TO migration_runner;'
           python3 - <<'PY' > "$cluster/check.sql"
           from pathlib import Path
           import re
