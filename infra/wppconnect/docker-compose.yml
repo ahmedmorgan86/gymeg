@@ -1,0 +1,74 @@
+services:
+  wppconnect:
+    image: wppconnect/wppconnect-server:2.10.99
+    container_name: gymeg-wppconnect
+    restart: unless-stopped
+    environment:
+      PORT: "21465"
+      HOST: "http://wppconnect:21465"
+      SECRET_KEY: "${WPP_SECRET_KEY:?WPP_SECRET_KEY is required}"
+      WEBHOOK_URL: "http://gymeg-worker:3100/wpp-webhook"
+      WEBHOOK_ALLOWED_URLS: "http://gymeg-worker:3100/wpp-webhook"
+      TOKEN_STORE_TYPE: "file"
+      CUSTOM_USER_DATA_DIR: "/usr/src/wpp-server/userDataDir/"
+      MAX_LISTENERS: "25"
+      MANAGER_ENABLED: "false"
+      WEBHOOK_ALL_UNREAD_ON_START: "false"
+      WEBHOOK_LISTEN_ACKS: "true"
+      WEBHOOK_READ_MESSAGE: "true"
+    volumes:
+      - wppconnect_tokens:/usr/src/wpp-server/tokens
+      - wppconnect_user_data:/usr/src/wpp-server/userDataDir
+      - wppconnect_logs:/usr/src/wpp-server/log
+    networks:
+      - wpp_internal
+    # Not exposed to the public internet; only reachable on the internal Docker network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:21465/healthz || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  gymeg-worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    container_name: gymeg-wpp-worker
+    restart: unless-stopped
+    depends_on:
+      wppconnect:
+        condition: service_healthy
+    environment:
+      GYMEG_API_BASE_URL: "${GYMEG_API_BASE_URL:?GYMEG_API_BASE_URL is required}"
+      GYMEG_WPP_WORKER_SECRET: "${GYMEG_WPP_WORKER_SECRET:?GYMEG_WPP_WORKER_SECRET is required}"
+      WPP_SERVER_URL: "http://wppconnect:21465"
+      WPP_SECRET_KEY: "${WPP_SECRET_KEY:?WPP_SECRET_KEY is required}"
+      WORKER_POLL_INTERVAL_MS: "${WORKER_POLL_INTERVAL_MS:-15000}"
+      WEBHOOK_PORT: "3100"
+    networks:
+      - wpp_internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3100/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  wpp_internal:
+    driver: bridge
+
+volumes:
+  wppconnect_tokens: {}
+  wppconnect_user_data: {}
+  wppconnect_logs: {}
