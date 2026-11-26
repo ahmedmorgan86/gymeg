@@ -43,12 +43,13 @@ export async function POST(request: Request) {
         return reply({ ok: true, ignored: true });
       }
 
-      if (event === 'qrcode' && typeof payload.qrcode === 'string' && payload.qrcode.startsWith('data:image/')) {
+      if (event === 'qrcode' && typeof payload.qrcode === 'string' && payload.qrcode.length > 20) {
+        const qrUrl = payload.qrcode.startsWith('data:image/') ? payload.qrcode : `data:image/png;base64,${payload.qrcode}`;
         await client.query(
           `UPDATE gymos.whatsapp_provider_connections
            SET status = 'WAITING_FOR_QR', desired_action = 'none', qr_data_url = $3, qr_expires_at = now() + interval '90 seconds', updated_at = now()
            WHERE owner_id = $1 AND branch = $2`,
-          [conn.owner_id, conn.branch, payload.qrcode]
+          [conn.owner_id, conn.branch, qrUrl]
         );
       } else if (event === 'status-find') {
         const st = String(payload.status ?? '').toLowerCase();

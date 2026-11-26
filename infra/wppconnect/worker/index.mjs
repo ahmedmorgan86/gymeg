@@ -15,6 +15,7 @@ if (!GYMEG_BASE || !WORKER_SECRET || !WPP_SECRET) {
 }
 
 const sessionTokens = new Map();
+const activeHandshakes = new Map();
 
 function signRequest(bodyStr) {
   const ts = String(Date.now());
@@ -89,8 +90,9 @@ async function handleSessionCommand(cmd) {
   const { ownerId, branch, sessionId, action } = cmd;
   try {
     if (action === 'disconnect') {
-      await wppCall(sessionId, '/logout-session', 'POST', {});
-      await wppCall(sessionId, '/close-session', 'POST', {});
+      activeHandshakes.delete(sessionId);
+      await wppCall(sessionId, '/logout-session', 'POST', {}).catch(() => {});
+      await wppCall(sessionId, '/close-session', 'POST', {}).catch(() => {});
       await gymegFetch('/api/whatsapp/worker/report', 'POST', {
         kind: 'session',
         ownerId,
@@ -102,17 +104,16 @@ async function handleSessionCommand(cmd) {
     }
 
     if (action === 'connect' || action === 'status' || action === 'none') {
-      let startData = null;
       if (action === 'connect') {
-        const start = await wppCall(sessionId, '/start-session', 'POST', {
+        activeHandshakes.set(sessionId, { ownerId, branch });
+        await wppCall(sessionId, '/start-session', 'POST', {
           webhook: WEBHOOK_CALLBACK_URL,
-          waitQrCode: true,
+          waitQrCode: false,
         });
-        startData = start.data;
       }
       const st = await wppCall(sessionId, '/status-session', 'GET');
-      let mapped = mapWppStatus(st.data?.status || startData?.status);
-      let qrDataUrl = st.data?.qrcode || startData?.qrcode || null;
+      let mapped = mapWppStatus(st.data?.status);
+      let qrDataUrl = st.data?.qrcode || null;
       let phone = null;
 
       if (mapped === 'WAITING_FOR_QR' || qrDataUrl) {
@@ -122,6 +123,7 @@ async function handleSessionCommand(cmd) {
           qrDataUrl = qrRes.data?.qrcode || null;
         }
       } else if (mapped === 'CONNECTED') {
+        activeHandshakes.delete(sessionId);
         const host = await wppCall(sessionId, '/host-device', 'GET');
         phone = host.data?.response?.id?.user || host.data?.response?.wid?.user || null;
       }
@@ -182,8 +184,15 @@ async function pollOnce() {
   polling = true;
   try {
     const work = await gymegFetch('/api/whatsapp/worker/pull', 'GET');
+    const seen = new Set();
     for (const cmd of work.sessionCommands || []) {
+      seen.add(cmd.sessionId);
       await handleSessionCommand(cmd);
+    }
+    for (const [sid, info] of activeHandshakes.entries()) {
+      if (!seen.has(sid)) {
+        await handleSessionCommand({ ownerId: info.ownerId, branch: info.branch, sessionId: sid, action: 'status' });
+      }
     }
     for (const job of work.outboxJobs || []) {
       await handleOutboxJob(job);
