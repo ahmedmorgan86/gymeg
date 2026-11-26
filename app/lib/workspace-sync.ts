@@ -168,7 +168,7 @@ export class WorkspaceSyncManager {
               this.handleDisconnect();
             }
           });
-      } catch (e) {
+      } catch {
         this.handleDisconnect();
       }
     } else {

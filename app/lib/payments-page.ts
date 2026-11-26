@@ -17,7 +17,6 @@ export type Cursor={pos:number;id:string};
 export type SummaryData={status:'ok';version:string;trend:number[];monthSum:number}|{status:'stale'}|{status:'unavailable';reason?:string};
 export type ExportRow={payment:Record<string,unknown>;member:{name:unknown;demo:unknown}|null};
 export type ExportData={status:'ok';version:string;rows:ExportRow[];next:Cursor|null}|{status:'stale'}|{status:'unavailable';reason?:string};
-const DAY_RE=`'^\\d{4}-\\d\\d-\\d\\d$'`;
 const OFFSHAPE=`(jsonb_typeof(payload->'minor') IS DISTINCT FROM 'number' OR jsonb_typeof(payload->'voided') NOT IN ('boolean','null'))`;
 export async function readPaymentsSummary(scope:Scope,q:{owner:string;branch:string;today:string;period:number;deadlineMs?:number;now?:()=>number}):Promise<SummaryData>{
   if(!q.branch||q.branch.length>200||!/^\d{4}-\d\d-\d\d$/.test(q.today)||!Number.isSafeInteger(q.period)||q.period<1||q.period>PERIOD_MAX)throw new RangeError('invalid');

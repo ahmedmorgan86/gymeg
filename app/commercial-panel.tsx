@@ -6,7 +6,7 @@ import Copyright from './copyright';
 import Image from 'next/image';
 import Link from 'next/link';
 import {useRouter} from 'next/navigation';
-import {useEffect,useState,type FormEvent} from 'react';
+import {useEffect,useEffectEvent,useState,type FormEvent} from 'react';
 import {usePreference} from './use-preference';
 import {androidAppVariants,supportApkUrl,supportFallbackQrPath,supportInstallPath,managementApkUrl,managementFallbackQrPath,membersApkUrl,membersFallbackQrPath,resolveSupportApkUrl,resolveManagementApkUrl,resolveMembersApkUrl,generateQrDataUrl,type AndroidVariantId} from './lib/support-release';
 import type {Order,CommercialDirectory as Directory} from './lib/commercial-types';
@@ -58,14 +58,15 @@ export default function CommercialPanel({platform=false,initialData}:{platform?:
   return()=>{active=false;};
  },[platform,lang,initialData]);
 
+ const syncLoad=useEffectEvent(()=>{if(!busy&&document.visibilityState==='visible')void load().catch(()=>undefined);});
  useEffect(()=>{
   if(typeof window==='undefined')return;
   let active=true;
-  const sync=()=>{if(active&&!busy&&document.visibilityState==='visible')void load().catch(()=>undefined);};
+  const sync=()=>{if(active)syncLoad();};
   const timer=setInterval(sync,8000);
   window.addEventListener('focus',sync);window.addEventListener('online',sync);document.addEventListener('visibilitychange',sync);
   return()=>{active=false;clearInterval(timer);window.removeEventListener('focus',sync);window.removeEventListener('online',sync);document.removeEventListener('visibilitychange',sync);};
- },[platform,busy]);
+ },[platform]);
 
  async function send(body:Record<string,unknown>,endpoint='/api/commercial'){
   if(busy)return;

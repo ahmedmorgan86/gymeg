@@ -19,7 +19,7 @@ export default function MemberVisitPager({member,owner,ar,timeZone,pageSize=25,f
   }catch{break;}}
   if(ticket===started.current){setState('error');setDataKey(key);}
  },[member,owner,pageSize,key]);
- useEffect(()=>{const id=setTimeout(()=>void load(),0);return()=>{clearTimeout(id);started.current++;};},[load]);
+ useEffect(()=>{started.current++;const id=setTimeout(()=>void load(),0);return()=>{clearTimeout(id);};},[load]);
  const t=(a:string,e:string)=>ar?a:e;
  const stale=dataKey!==key,effState=stale?'loading':state,effRows=stale?[]:rows;
  const legacy=effState==='unsupported'&&fallback?[...fallback].sort((a,b)=>String((b as RowAt).at).localeCompare(String((a as RowAt).at))):null;

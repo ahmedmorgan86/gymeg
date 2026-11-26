@@ -1,5 +1,4 @@
 import {createHash,randomBytes} from 'node:crypto';
-import {syncMemberAccess} from '../../lib/sync-member-access';
 import {context,readSpaceSlice,reply,sameOrigin} from '../../lib/server-workspace';
 import {withScope} from '../../lib/database';
 import {assertRequestTenant} from '../../lib/request-tenant';

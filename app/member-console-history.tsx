@@ -18,7 +18,7 @@ export default function MemberConsoleHistory({member,owner,t,fallback,pageSize=2
   }catch{break;}}
   if(ticket===started.current){setState('error');setDataKey(key);}
  },[member,owner,pageSize,key]);
- useEffect(()=>{const id=setTimeout(()=>void load(),0);return()=>{clearTimeout(id);started.current++;};},[load]);
+ useEffect(()=>{started.current++;const id=setTimeout(()=>void load(),0);return()=>{clearTimeout(id);};},[load]);
  const stale=dataKey!==key,effState=stale?'loading':state,effRows=stale?[]:rows;
  const list=effState==='unavailable'&&fallback?fallback.slice().reverse():effRows;
  return <div data-testid="console-visit-history">{list.map(v=><article key={v.id} className={styles.history}><p>{t('الدخول:','Check-in:')} {v.at} · {t('المغادرة:','Check-out:')} {v.leftAt??t('جلسة مفتوحة','Open session')} · {v.exitType==='automatic'?t('خروج إداري تلقائي','Automatic administrative exit'):v.exitType==='device'?t('خروج من الجهاز','Device exit'):t('خروج يدوي / سجل سابق','Manual exit / earlier record')}</p>{v.sessions?.map((a,i)=><p key={i}>{a.at} ← {a.leftAt}</p>)}</article>)}

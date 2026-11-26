@@ -481,9 +481,9 @@ export default function Announcements({
       localStorage.setItem(storageKey(scope), JSON.stringify(stripped));
       syncWithNativePlatforms(updated, timezoneRef.current);
     } catch {
-      setStatusMessage({ text: t('تحذير: تعذر مزامنة البيانات في التخزين المحلي.', 'Warning: could not sync data to local storage.'), type: 'error' });
+      setStatusMessage({ text: ar ? 'تحذير: تعذر مزامنة البيانات في التخزين المحلي.' : 'Warning: could not sync data to local storage.', type: 'error' });
     }
-  }, [scope]);
+  }, [scope, ar]);
 
   const addLogEntry = useCallback((entry: ExecutionLog) => {
     setLogs(prev => {

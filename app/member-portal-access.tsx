@@ -1,5 +1,5 @@
 "use client";
-import {useState, useEffect} from 'react';
+import {useState, useEffect, useEffectEvent} from 'react';
 import {useConfirmDialog} from '../components/ui/use-confirm-dialog';
 
 type AccessProps = {member: string; owner: string; ar: boolean; busy: boolean; autoLoad?: boolean};
@@ -24,9 +24,13 @@ function MemberPhoneAccess({member, owner, ar, busy, autoLoad}: AccessProps) {
   const t = (a: string, e: string) => (ar ? a : e);
   const {confirm, dialog} = useConfirmDialog();
 
+  const runAutoLoad = useEffectEvent(() => {
+    void action('read');
+  });
+
   useEffect(() => {
     if (autoLoad) {
-      void action('read');
+      runAutoLoad();
     }
   }, [autoLoad]);
 

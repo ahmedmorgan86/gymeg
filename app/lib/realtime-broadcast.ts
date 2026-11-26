@@ -1,4 +1,3 @@
-import type {PoolClient} from 'pg';
 import {getPool} from './database';
 
 export interface BroadcastPayload {
@@ -49,7 +48,7 @@ export async function sendRealtimeBroadcast(
     });
 
     return res.ok;
-  } catch (err) {
+  } catch {
     // Non-fatal: Realtime is best-effort push notification. Durable event log guarantees recovery.
     return false;
   }
