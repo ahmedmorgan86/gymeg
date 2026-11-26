@@ -4,7 +4,7 @@ import { getPool } from '../../lib/database';
 import { isFirestorePersistence, getFirestoreDb } from '../../lib/firestore-db';
 import { memberSessionToken } from '../../lib/member-code';
 import { codeMemberIdentity } from '../../lib/member-code-session';
-import { createGatewayCheckout, signPaymentIntent, type PaymentProvider } from '../../lib/payment-gateway';
+import { createGatewayCheckout, decryptGatewaySecret, signPaymentIntent, type CheckoutIntent, type PaymentProvider } from '../../lib/payment-gateway';
 import { readMemberSpace, reply, sameOrigin } from '../../lib/server-workspace';
 
 export async function POST(request: Request) {
@@ -74,7 +74,8 @@ export async function POST(request: Request) {
         : gw.provider;
 
     const reference = `GYM-${randomUUID().slice(0, 12).toUpperCase()}`;
-    const intent = {
+    const intent: CheckoutIntent = {
+      kind: 'member_subscription',
       owner,
       memberId,
       branch,
@@ -86,15 +87,22 @@ export async function POST(request: Request) {
       exp: Date.now() + 30 * 60 * 1000,
     };
     const token = signPaymentIntent(intent);
-    const origin = new URL(request.url).origin;
+
+    // Strictly use THIS club's own Paymob keys (never fallback to platform's Paymob account)
+    const clubSecret = decryptGatewaySecret(gw.paymobSecretKeyEnc);
+    const clubPaymobKeys =
+      clubSecret && gw.paymobPublicKey && gw.paymobIntegrationId
+        ? { secretKey: clubSecret, publicKey: gw.paymobPublicKey, integrationId: gw.paymobIntegrationId }
+        : null;
+
     const checkout = await createGatewayCheckout({
       intent,
       token,
-      memberName: member.name,
-      memberPhone: member.phone,
-      planName: plan.name,
+      buyerName: member.name,
+      buyerPhone: member.phone,
+      itemName: plan.name,
       instapayAddress: gw.instapayAddress,
-      origin,
+      paymobKeys: clubPaymobKeys,
     });
 
     return reply({

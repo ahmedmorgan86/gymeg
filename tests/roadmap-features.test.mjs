@@ -4,7 +4,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { applyOperation, emptyState } from '../app/lib/domain.ts';
 import { parseDevicePreferences } from '../app/lib/device-preferences.ts';
-import { signPaymentIntent, verifyPaymentIntent, verifyWebhookSignature } from '../app/lib/payment-gateway.ts';
+import { decryptGatewaySecret, encryptGatewaySecret, signPaymentIntent, verifyPaymentIntent, verifyWebhookSignature } from '../app/lib/payment-gateway.ts';
+import { packet } from '../app/lib/workspace-packet.ts';
 import { memberView } from '../app/lib/member-view.ts';
 import { permitted } from '../app/lib/access.ts';
 
@@ -85,7 +86,25 @@ test('Online payment gateway: owner-only config, HMAC intent signing, and member
   assert.equal(view.onlinePayment.plans.length, 1);
 
   process.env.PAYMENT_INTENT_SECRET = 'test-secret-key-for-unit-test';
+  const encSecret = encryptGatewaySecret('egy_sk_test_club_secret');
+  assert.notEqual(encSecret, 'egy_sk_test_club_secret');
+  assert.equal(decryptGatewaySecret(encSecret), 'egy_sk_test_club_secret');
+
+  s = applyOperation(s, {
+    type: 'payment.gateway.save',
+    branch: 'main',
+    enabled: true,
+    provider: 'paymob',
+    paymobPublicKey: 'egy_pk_test_123',
+    paymobIntegrationId: '4447409',
+    paymobSecretKeyEnc: encSecret,
+  }, now, 'Owner', () => 'g2');
+  const pkt = packet({ state: s, revision: 1 }, { tenantId: 't1', owner: 'o1', role: 'owner', branches: null, user: { userId: 'u1', displayName: 'Owner' }, license: null });
+  assert.equal(pkt.state.settings.paymentGateway?.paymobSecretKeyEnc, undefined);
+  assert.equal(pkt.state.settings.paymentGateway?.hasPaymobSecret, true);
+
   const token = signPaymentIntent({
+    kind: 'member_subscription',
     owner: 'owner-1',
     memberId: 'm1',
     branch: 'main',
@@ -98,6 +117,7 @@ test('Online payment gateway: owner-only config, HMAC intent signing, and member
   });
   const verified = verifyPaymentIntent(token);
   assert.equal(verified?.reference, 'GYM-TEST123');
+  assert.equal(verified?.kind, 'member_subscription');
   assert.equal(verifyPaymentIntent(token + 'tamper'), null);
   assert.equal(verifyWebhookSignature('{"ok":1}', 'bad', 'secret'), false);
 });
