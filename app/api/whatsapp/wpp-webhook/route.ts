@@ -43,7 +43,31 @@ export async function POST(request: Request) {
         return reply({ ok: true, ignored: true });
       }
 
-      if (event === 'onmessage' && payload.fromMe !== true) {
+      if (event === 'qrcode' && typeof payload.qrcode === 'string' && payload.qrcode.startsWith('data:image/')) {
+        await client.query(
+          `UPDATE gymos.whatsapp_provider_connections
+           SET status = 'WAITING_FOR_QR', desired_action = 'none', qr_data_url = $3, qr_expires_at = now() + interval '90 seconds', updated_at = now()
+           WHERE owner_id = $1 AND branch = $2`,
+          [conn.owner_id, conn.branch, payload.qrcode]
+        );
+      } else if (event === 'status-find') {
+        const st = String(payload.status ?? '').toLowerCase();
+        if (st === 'islogged' || st === 'inchat') {
+          await client.query(
+            `UPDATE gymos.whatsapp_provider_connections
+             SET status = 'CONNECTED', desired_action = 'none', qr_data_url = NULL, last_connected_at = now(), last_error = NULL, updated_at = now()
+             WHERE owner_id = $1 AND branch = $2`,
+            [conn.owner_id, conn.branch]
+          );
+        } else if (st === 'qrreadsuccess') {
+          await client.query(
+            `UPDATE gymos.whatsapp_provider_connections
+             SET status = 'CONNECTING', qr_data_url = NULL, updated_at = now()
+             WHERE owner_id = $1 AND branch = $2`,
+            [conn.owner_id, conn.branch]
+          );
+        }
+      } else if (event === 'onmessage' && payload.fromMe !== true) {
         const rawFrom = String(payload.from ?? '').replace(/@c\.us$/i, '').replace(/\D/g, '');
         const normalized = whatsappPhone('+' + rawFrom);
         const phoneHash = normalized ? whatsappPhoneDigest(normalized) : null;

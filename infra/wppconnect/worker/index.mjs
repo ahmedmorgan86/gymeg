@@ -7,6 +7,7 @@ const WPP_URL = (process.env.WPP_SERVER_URL || 'http://wppconnect:21465').replac
 const WPP_SECRET = process.env.WPP_SECRET_KEY || '';
 const POLL_MS = Math.max(5000, Number(process.env.WORKER_POLL_INTERVAL_MS || 15000));
 const WEBHOOK_PORT = Number(process.env.WEBHOOK_PORT || 3100);
+const WEBHOOK_CALLBACK_URL = process.env.WEBHOOK_CALLBACK_URL || `http://gymeg-worker:${WEBHOOK_PORT}/wpp-webhook`;
 
 if (!GYMEG_BASE || !WORKER_SECRET || !WPP_SECRET) {
   console.error('[worker] Missing GYMEG_API_BASE_URL, GYMEG_WPP_WORKER_SECRET, or WPP_SECRET_KEY');
@@ -100,19 +101,22 @@ async function handleSessionCommand(cmd) {
       return;
     }
 
-    if (action === 'connect' || action === 'status') {
-      const start = await wppCall(sessionId, '/start-session', 'POST', {
-        webhook: `http://gymeg-worker:${WEBHOOK_PORT}/wpp-webhook`,
-        waitQrCode: false,
-      });
+    if (action === 'connect' || action === 'status' || action === 'none') {
+      let startData = null;
+      if (action === 'connect') {
+        const start = await wppCall(sessionId, '/start-session', 'POST', {
+          webhook: WEBHOOK_CALLBACK_URL,
+          waitQrCode: true,
+        });
+        startData = start.data;
+      }
       const st = await wppCall(sessionId, '/status-session', 'GET');
-      let mapped = mapWppStatus(st.data?.status || start.data?.status);
-      let qrDataUrl = null;
+      let mapped = mapWppStatus(st.data?.status || startData?.status);
+      let qrDataUrl = st.data?.qrcode || startData?.qrcode || null;
       let phone = null;
 
-      if (mapped === 'WAITING_FOR_QR' || start.data?.qrcode) {
+      if (mapped === 'WAITING_FOR_QR' || qrDataUrl) {
         mapped = 'WAITING_FOR_QR';
-        qrDataUrl = start.data?.qrcode || null;
         if (!qrDataUrl) {
           const qrRes = await wppCall(sessionId, '/qrcode-session', 'GET');
           qrDataUrl = qrRes.data?.qrcode || null;

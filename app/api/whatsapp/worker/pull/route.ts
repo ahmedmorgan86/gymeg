@@ -20,7 +20,8 @@ export async function GET(request: Request) {
 
     const sessionCommands = (
       await client.query(`
-        SELECT owner_id AS "ownerId", branch, session_id AS "sessionId", desired_action AS action
+        SELECT owner_id AS "ownerId", branch, session_id AS "sessionId",
+               CASE WHEN desired_action = 'none' THEN 'status' ELSE desired_action END AS action
         FROM gymos.whatsapp_provider_connections
         WHERE provider = 'wppconnect'
           AND (
