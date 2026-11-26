@@ -79,6 +79,7 @@
     "protobufjs": false
   },
   "overrides": {
-    "jose": "5.10.0"
+    "jose": "5.10.0",
+    "node-domexception": "file:./vendor/node-domexception"
   }
 }
