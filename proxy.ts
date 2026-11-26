@@ -12,6 +12,24 @@ function headerPath(pathname:string){
   return headerPaths.has(pathname)||headerPrefixes.some((p)=>pathname.startsWith(p));
 }
 
+function buildCsp(nonce:string){
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "media-src 'self' blob: data:",
+    "worker-src 'self' blob:",
+    "connect-src 'self' https://*.googleapis.com https://*.firebaseio.com wss://*.firebaseio.com https://*.supabase.co wss://*.supabase.co",
+    "frame-ancestors 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "object-src 'none'",
+    "upgrade-insecure-requests",
+  ].join('; ');
+}
+
 export async function proxy(request:NextRequest){
   if(supportWriteBlocked(request.method,request.nextUrl.pathname,request.cookies.has('gymos-support')))
     return NextResponse.json({error:'supportReadOnly'},{status:403,headers:{'Cache-Control':'no-store'}});
@@ -30,7 +48,13 @@ export async function proxy(request:NextRequest){
   // (RSC cookies()) reads the fresh token, and to the response so the
   // browser stores it.
   if(plan&&plan.action==='set')request.cookies.set('gymos_session',plan.value);
-  const response=NextResponse.next({request});
+  const nonce=Buffer.from(crypto.randomUUID()).toString('base64');
+  const csp=buildCsp(nonce);
+  const requestHeaders=new Headers(request.headers);
+  requestHeaders.set('x-nonce',nonce);
+  requestHeaders.set('Content-Security-Policy',csp);
+  const response=NextResponse.next({request:{headers:requestHeaders}});
+  response.headers.set('Content-Security-Policy',csp);
   // Robots policy is independent of refresh: a refreshed request to an app
   // surface still must not be indexed.
   const pathname=request.nextUrl.pathname;
