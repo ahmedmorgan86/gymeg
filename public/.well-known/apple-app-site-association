@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appIDs": ["TEAMID.com.gymeg.members"],
+        "components": [
+          { "/": "/member*" },
+          { "/": "/auth/mobile/callback/members*" }
+        ]
+      }
+    ]
+  }
+}
