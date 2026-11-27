@@ -18,7 +18,7 @@ services:
       MANAGER_ENABLED: "false"
       WEBHOOK_ALL_UNREAD_ON_START: "false"
       WEBHOOK_LISTEN_ACKS: "true"
-      WEBHOOK_READ_MESSAGE: "true"
+      WEBHOOK_READ_MESSAGE: "false"
     volumes:
       - wppconnect_tokens:/usr/src/wpp-server/tokens
       - wppconnect_user_data:/usr/src/wpp-server/userDataDir

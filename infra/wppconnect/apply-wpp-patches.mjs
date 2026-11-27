@@ -112,20 +112,27 @@ patchFile(
   }
 );
 
-// 5. Use clean minimal browserArgs + 180s autoClose so WhatsApp Web renders QR reliably.
+// 5. Use clean minimal browserArgs + 180s autoClose + disable auto-readMessage so phone still gets notifications.
 patchFile(
   'dist/config.js',
   (src) => {
-    if (src.includes('autoClose: 180000')) return src;
-    return src.replace(
-      /createOptions:\s*\{\s*browserArgs:\s*\[[\s\S]*?\],/,
-      `createOptions: {
+    let out = src;
+    if (!out.includes('autoClose: 180000')) {
+      out = out.replace(
+        /createOptions:\s*\{\s*browserArgs:\s*\[[\s\S]*?\],/,
+        `createOptions: {
     autoClose: 180000,
     browserArgs: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-web-security',
     '--disable-dev-shm-usage'],`
+      );
+    }
+    out = out.replace(
+      /readMessage:\s*true,/,
+      "readMessage: env.WEBHOOK_READ_MESSAGE === 'true',"
     );
+    return out;
   }
 );
