@@ -1,7 +1,10 @@
 import { getPool } from '../../../../lib/database';
 import { reply } from '../../../../lib/server-workspace';
 import { verifyWorkerRequest } from '../../../../lib/wppconnect';
-import { whatsappPhoneDigest } from '../../../../lib/whatsapp-server';
+import { syncManualRemindersToWppOutbox, whatsappPhoneDigest } from '../../../../lib/whatsapp-server';
+
+const lastAutoSync = new Map<string, number>();
+const AUTO_SYNC_INTERVAL_MS = 5 * 60_000;
 
 /**
  * Always-On Worker Pull endpoint:
@@ -87,7 +90,22 @@ export async function GET(request: Request) {
       });
     }
 
+    const connectedOwners = (
+      await client.query(
+        "SELECT DISTINCT owner_id FROM gymos.whatsapp_provider_connections WHERE provider = 'wppconnect' AND status = 'CONNECTED' LIMIT 20"
+      )
+    ).rows as Array<{ owner_id: string }>;
+
     await client.query('COMMIT');
+
+    const nowMs = Date.now();
+    for (const row of connectedOwners) {
+      if (nowMs - (lastAutoSync.get(row.owner_id) ?? 0) >= AUTO_SYNC_INTERVAL_MS) {
+        lastAutoSync.set(row.owner_id, nowMs);
+        await syncManualRemindersToWppOutbox(row.owner_id).catch(() => {});
+      }
+    }
+
     return reply({ sessionCommands, outboxJobs });
   } catch {
     await client.query('ROLLBACK');

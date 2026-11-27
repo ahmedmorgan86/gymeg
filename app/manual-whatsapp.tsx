@@ -1,5 +1,5 @@
 'use client';
-import {useState,useRef,useMemo} from 'react';
+import {useState,useRef,useMemo,useEffect} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
 import {dayAt} from './lib/domain';
 import {useLastVisits,LAZY_STRICT,LAST_VISITS_ON} from './use-last-visits';
@@ -205,6 +205,17 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
   const [busy,setBusy]=useState(false);
   const [notice,setNotice]=useState('');
   const [modalState,setModalState]=useState<SendModalState|null>(null);
+  const [wppConnected,setWppConnected]=useState(false);
+  const [sentKeys,setSentKeys]=useState<Record<string,boolean>>({});
+
+  useEffect(()=>{
+    let cancelled=false;
+    fetch(`/api/whatsapp?branch=${encodeURIComponent(branch)}`)
+      .then(r=>r.ok?r.json():null)
+      .then(d=>{if(!cancelled&&d?.wppConnection?.status==='CONNECTED')setWppConnected(true);else if(!cancelled)setWppConnected(false);})
+      .catch(()=>{});
+    return()=>{cancelled=true;};
+  },[branch]);
 
   const t=(a:string,b:string)=>ar?a:b;
   const now=new Date().toISOString();
@@ -291,6 +302,41 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
     }
     const text=whatsAppText(state,m,tmpl,now,ar);
     setModalState({member:m,kind:msgKind,templateId:tmplId,customText:text});
+  }
+
+  async function sendViaWpp(m:Member,msgKind:ManualWhatsAppTemplate['kind'],text:string,tmplId?:string){
+    if(busy)return;setBusy(true);
+    try{
+      const r=await fetch(`/api/whatsapp?branch=${encodeURIComponent(branch)}`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'wpp.sendReminder',memberId:m.id,phone:m.phone,text,templateId:tmplId??msgKind,kind:msgKind})
+      });
+      if(r.ok){
+        setSentKeys(prev=>({...prev,[`${m.id}|${tmplId??msgKind}`]:true}));
+        setNotice(t(`تمت جدولة إشعار ${m.name} للإرسال التلقائي عبر واتساب بنجاح.`, `Queued automatic WhatsApp reminder for ${m.name}.`));
+        setModalState(null);
+      }else{
+        setNotice(t('تعذر الإرسال الآلي؛ تأكد من أن رقم العضو يبدأ برمز الدولة (مثل +20).','Auto-send failed; ensure the phone includes country code (e.g. +20).'));
+      }
+    }finally{setBusy(false);}
+  }
+
+  async function runAllDueViaWpp(){
+    if(busy)return;setBusy(true);
+    try{
+      const r=await fetch(`/api/whatsapp?branch=${encodeURIComponent(branch)}`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'wpp.runReminders'})
+      });
+      const d=await r.json().catch(()=>({}));
+      if(r.ok){
+        setNotice(t(`تمت مزامنة وجدولة ${d.enqueued??0} تذكير مستحق للإرسال الآلي عبر WPPConnect.`, `Synced & queued ${d.enqueued??0} due reminder(s) for automatic WPPConnect delivery.`));
+      }else{
+        setNotice(t('تعذر تشغيل الإرسال الآلي للتذكيرات.','Failed to run automatic reminders.'));
+      }
+    }finally{setBusy(false);}
   }
 
   function launchWhatsApp(phone:string,text:string,mode:'app'|'web'){
@@ -392,8 +438,26 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
       <section className="card">
         {(lastFailed||lastStrict)&&<p className="operation-notice" role="status">{lastFailed?<>{t('تعذر تحميل آخر زيارة للأعضاء.','Could not load members\' last visits.')} <button className="button secondary" onClick={lastRetry}>{t('إعادة المحاولة','Retry')}</button></>:t('جارٍ التحميل…','Loading…')}</p>}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'14px'}}>
-          <h2 style={{margin:0}}>{t('قائمة المتابعات والتذكيرات المستحقة اليوم','Due Follow-ups & Reminders')}</h2>
-          
+          <div>
+            <h2 style={{margin:0}}>{t('قائمة المتابعات والتذكيرات المستحقة اليوم','Due Follow-ups & Reminders')}</h2>
+            {wppConnected&&(
+              <small style={{display:'inline-block',marginTop:4,color:'#16a34a',fontWeight:700}}>
+                {t('🤖 الإرسال التلقائي عبر WPPConnect مفعّل ومتصل — يتم إرسال التذكيرات المستحقة تلقائياً كل 5 دقائق','🤖 Automatic WPPConnect sending active — due reminders auto-dispatch every 5 minutes')}
+              </small>
+            )}
+          </div>
+          <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
+            {wppConnected&&due.length>0&&(
+              <button
+                type="button"
+                className="button primary"
+                disabled={busy}
+                onClick={()=>void runAllDueViaWpp()}
+                style={{padding:'6px 12px',fontSize:'0.82rem',margin:0}}
+              >
+                {t('⚡ إرسال كل المستحقات آلياً','⚡ Auto-Send All Due')}
+              </button>
+            )}
           {/* Filter Pills */}
           <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
             <button
@@ -417,6 +481,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
                 {l[ar?0:1]} ({count})
               </button>;
             })}
+          </div>
           </div>
         </div>
 
@@ -451,9 +516,21 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
               </div>
 
               <div style={{display:'flex',gap:'8px',flexWrap:'wrap',alignItems:'center'}}>
+                {wppConnected&&(
+                  <button
+                    type="button"
+                    className="button primary"
+                    disabled={busy||sentKeys[`${m.id}|${x.template}`]}
+                    onClick={()=>void sendViaWpp(m,x.kind,whatsAppText(state,m,tmpl,now,ar),x.template)}
+                    style={{display:'flex',alignItems:'center',gap:'6px'}}
+                  >
+                    <span>⚡</span>
+                    <span>{sentKeys[`${m.id}|${x.template}`]?t('تمت الجدولة ✓','Queued ✓'):t('إرسال آلي','Auto-Send')}</span>
+                  </button>
+                )}
                 <button
                   type="button"
-                  className="button primary"
+                  className={wppConnected?'button secondary':'button primary'}
                   onClick={()=>openComposer(m,x.kind,x.template)}
                   style={{display:'flex',alignItems:'center',gap:'6px'}}
                 >
@@ -637,8 +714,20 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
             </div>
           </div>
 
-          {/* Action buttons: App vs Web */}
-          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'10px',marginTop:'18px'}}>
+          {/* Action buttons: Auto-send (WPPConnect) + App vs Web */}
+          <div style={{display:'grid',gridTemplateColumns:wppConnected?'1fr 1fr 1fr':'1fr 1fr',gap:'10px',marginTop:'18px'}}>
+            {wppConnected&&(
+              <button
+                type="button"
+                className="button primary"
+                disabled={busy}
+                onClick={()=>void sendViaWpp(modalState.member,modalState.kind,modalState.customText,modalState.templateId)}
+                style={{padding:'12px',fontSize:'0.95rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
+              >
+                <span>⚡</span>
+                <span>{t('إرسال آلي (WPPConnect)','Auto-Send (WPPConnect)')}</span>
+              </button>
+            )}
             <button
               type="button"
               className="button primary"

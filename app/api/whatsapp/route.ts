@@ -4,7 +4,7 @@ import { context, readSpaceCore, readSpaceMeta, reply, sameOrigin } from '../../
 import { assertRequestTenant } from '../../lib/request-tenant';
 import { withScope } from '../../lib/database';
 import { whatsappPhone, whatsappRule } from '../../lib/whatsapp';
-import { runWhatsApp } from '../../lib/whatsapp-server';
+import { runWhatsApp, syncManualRemindersToWppOutbox } from '../../lib/whatsapp-server';
 import { autoReplyRuleSchema, deriveWppSessionId } from '../../lib/wppconnect';
 import { isFirestorePersistence } from '../../lib/firestore-db';
 import { connectWhatsApp, disconnectWhatsApp, runWhatsAppFirestore, saveWhatsAppRule, whatsappEncryptionReady, whatsappSettings } from '../../lib/firestore-whatsapp';
@@ -198,6 +198,29 @@ export async function POST(request: Request) {
       return reply({ ok: true, id });
     }
 
+    if (body.action === 'wpp.sendReminder') {
+      const phone = whatsappPhone(String(body.phone ?? ''));
+      const text = String(body.text ?? '').trim().slice(0, 1500);
+      const memberId = String(body.memberId ?? '').trim().slice(0, 100);
+      const templateId = String(body.templateId ?? body.kind ?? 'manual').trim().slice(0, 100);
+      if (!phone || !text || !memberId) return reply({ error: 'invalid' }, 400);
+      const id = createHash('sha256').update(JSON.stringify([ctx.owner, 'manual-send', branch, templateId, memberId, randomUUID()])).digest('hex');
+      await withScope(ctx.owner, (c) =>
+        c.query(
+          `INSERT INTO gymos.whatsapp_outbox(owner_id, id, branch, member_id, rule_id, occurrence, status, provider, session_id, message_type, payload)
+           VALUES($1, $2, $3, $4, $5, $6, 'pending', 'wppconnect', $7, 'rule', $8)`,
+          [ctx.owner, id, branch, memberId, templateId, new Date().toISOString().slice(0, 10), sessionId, JSON.stringify({ to: phone, text })]
+        )
+      );
+      return reply({ ok: true, id });
+    }
+
+    if (body.action === 'wpp.runReminders') {
+      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch);
+      const ran = await runWhatsApp(ctx.owner, branch);
+      return reply({ ok: true, enqueued: synced.enqueued, sent: ran.sent });
+    }
+
     if (body.action === 'inbox.messages') {
       const inboxId = String(body.inboxId ?? '');
       if (!inboxId) return reply({ error: 'invalid' }, 400);
@@ -258,6 +281,29 @@ export async function POST(request: Request) {
         )
       );
       return reply({ ok: true, id });
+    }
+
+    if (body.action === 'wpp.sendReminder') {
+      const phone = whatsappPhone(String(body.phone ?? ''));
+      const text = String(body.text ?? '').trim().slice(0, 1500);
+      const memberId = String(body.memberId ?? '').trim().slice(0, 100);
+      const templateId = String(body.templateId ?? body.kind ?? 'manual').trim().slice(0, 100);
+      if (!phone || !text || !memberId) return reply({ error: 'invalid' }, 400);
+      const id = createHash('sha256').update(JSON.stringify([ctx.owner, 'manual-send', branch, templateId, memberId, randomUUID()])).digest('hex');
+      await withScope(ctx.owner, (c) =>
+        c.query(
+          `INSERT INTO gymos.whatsapp_outbox(owner_id, id, branch, member_id, rule_id, occurrence, status, provider, session_id, message_type, payload)
+           VALUES($1, $2, $3, $4, $5, $6, 'pending', 'wppconnect', $7, 'rule', $8)`,
+          [ctx.owner, id, branch, memberId, templateId, new Date().toISOString().slice(0, 10), sessionId, JSON.stringify({ to: phone, text })]
+        )
+      );
+      return reply({ ok: true, id });
+    }
+
+    if (body.action === 'wpp.runReminders') {
+      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch);
+      const ran = await runWhatsApp(ctx.owner, branch);
+      return reply({ ok: true, enqueued: synced.enqueued, sent: ran.sent });
     }
 
     if (body.action === 'autoreply.delete') {
