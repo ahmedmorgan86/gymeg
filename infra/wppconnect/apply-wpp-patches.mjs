@@ -111,3 +111,21 @@ patchFile(
     );
   }
 );
+
+// 5. Use clean minimal browserArgs + 180s autoClose so WhatsApp Web renders QR reliably.
+patchFile(
+  'dist/config.js',
+  (src) => {
+    if (src.includes('autoClose: 180000')) return src;
+    return src.replace(
+      /createOptions:\s*\{\s*browserArgs:\s*\[[\s\S]*?\],/,
+      `createOptions: {
+    autoClose: 180000,
+    browserArgs: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-web-security',
+    '--disable-dev-shm-usage'],`
+    );
+  }
+);
