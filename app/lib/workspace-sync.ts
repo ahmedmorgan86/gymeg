@@ -220,10 +220,15 @@ export class WorkspaceSyncManager {
     this.setStatus('syncing');
 
     try {
+      const initial = this.options.getCurrentPacket();
+      if (!initial) {
+        this.options.onSnapshotRequired();
+        return false;
+      }
+      let packet = initial;
       let hasMore = true;
       while (hasMore && !this.unmounted) {
-        const current = this.options.getCurrentPacket();
-        const currentRev = current?.revision ?? this.currentRevision;
+        const currentRev = packet.revision;
         const url = `/api/workspace/changes?after=${currentRev}`;
         const res = await fetch(url, {
           method: 'GET',
@@ -246,28 +251,28 @@ export class WorkspaceSyncManager {
 
         const data: DeltaResponse = await res.json();
 
-        if (data.requiresSnapshot) {
+        if (data.requiresSnapshot || data.fromRevision !== currentRev ||
+            !Number.isSafeInteger(data.toRevision) || data.toRevision < currentRev ||
+            (data.hasMore && data.toRevision === currentRev) ||
+            !Array.isArray(data.events) ||
+            data.events.some(event => event.revision <= currentRev || event.revision > data.toRevision)) {
           this.options.onSnapshotRequired();
           return false;
         }
 
-        if (data.events && data.events.length > 0) {
-          const current = this.options.getCurrentPacket();
-          if (current) {
-            const updated = applyWorkspaceDeltas(current, data.events);
-            if (updated) {
-              this.options.onPacketUpdate(updated);
-              this.currentRevision = data.toRevision;
-            }
-          }
-        }
-
-        if (!data.events || data.events.length === 0) {
-          this.currentRevision = Math.max(this.currentRevision, data.toRevision);
+        if (data.toRevision > currentRev) {
+          const updated = applyWorkspaceDeltas(packet, data.events);
+          if (!updated) return false;
+          // The server covers revisions even when the caller cannot see their events.
+          packet = { ...updated, revision: data.toRevision };
         }
         hasMore = data.hasMore;
       }
 
+      if (this.unmounted) return false;
+      if (this.options.getCurrentPacket() !== initial) return false;
+      if (packet !== initial) this.options.onPacketUpdate(packet);
+      this.currentRevision = packet.revision;
       this.setStatus('connected');
       return true;
     } catch {
@@ -275,6 +280,7 @@ export class WorkspaceSyncManager {
       return false;
     } finally {
       this.syncing = false;
+      if (!this.unmounted && this.status === 'syncing') this.setStatus(prevStatus);
     }
   }
 
