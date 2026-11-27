@@ -316,6 +316,10 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
         setSentKeys(prev=>({...prev,[`${m.id}|${tmplId??msgKind}`]:true}));
         setNotice(t(`تمت جدولة إشعار ${m.name} للإرسال التلقائي عبر واتساب بنجاح.`, `Queued automatic WhatsApp reminder for ${m.name}.`));
         setModalState(null);
+      }else if(r.status===409){
+        setSentKeys(prev=>({...prev,[`${m.id}|${tmplId??msgKind}`]:true}));
+        setNotice(t(`تم إرسال هذا التذكير لـ ${m.name} بالفعل اليوم ✓`, `This reminder was already sent to ${m.name} today ✓`));
+        setModalState(null);
       }else{
         setNotice(t('تعذر الإرسال الآلي؛ تأكد من أن رقم العضو يبدأ برمز الدولة (مثل +20).','Auto-send failed; ensure the phone includes country code (e.g. +20).'));
       }
