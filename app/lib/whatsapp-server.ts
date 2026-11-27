@@ -5,7 +5,7 @@ import {readWhatsAppJobPage} from './whatsapp-job-page';
 import {isFirestorePersistence} from './firestore-db';
 import {deadlineScope,enqueueWhatsAppPage,remaining,WhatsAppDeferred} from './whatsapp-demand-run';
 import {dueMessages,whatsappRule,whatsappPhone,templateMessage} from './whatsapp';
-import {defaultWhatsApp,LEGACY_DUMMY_BODY,manualWhatsAppDue,whatsAppText} from './manual-whatsapp';
+import {defaultWhatsApp,LEGACY_DUMMY_BODY,localizeWhatsAppTemplate,manualWhatsAppDue,whatsAppText} from './manual-whatsapp';
 import {dayAt} from './domain';
 import {normalizeLicense} from './commercial';
 import {licenseState,type License} from './licensing';
@@ -75,7 +75,7 @@ export async function consumeWhatsAppWebhook(payload:unknown,query:WebhookQuery=
   return result;
 }
 
-export async function syncManualRemindersToWppOutbox(owner: string, branch?: string, nowIso = new Date().toISOString()) {
+export async function syncManualRemindersToWppOutbox(owner: string, branch?: string, nowIso = new Date().toISOString(), ar = true) {
   if (isFirestorePersistence()) return { enqueued: 0 };
   const connections = await withScope(owner, async (c) => {
     const l = (await c.query('SELECT l.* FROM gymos.tenant_licenses l JOIN gymos.tenants t ON t.id=l.tenant_id WHERE t.storage_key=$1', [owner])).rows[0] as License | undefined;
@@ -93,7 +93,6 @@ export async function syncManualRemindersToWppOutbox(owner: string, branch?: str
 
   const { state } = await readSpaceCore(owner);
   const today = dayAt(nowIso, state.settings.timezone);
-  const ar = true;
   let enqueued = 0;
 
   for (const conn of connections) {
@@ -107,10 +106,11 @@ export async function syncManualRemindersToWppOutbox(owner: string, branch?: str
       if (digest && (await whatsappOptedOut(owner, digest))) continue;
 
       const tmplObj = state.manualWhatsApp?.find((t) => t.id === item.template && t.branch === conn.branch);
-      const tmpl =
+      const rawTmpl =
         tmplObj && tmplObj.body.trim() !== LEGACY_DUMMY_BODY
           ? tmplObj
           : { body: defaultWhatsApp(item.kind, ar), name: tmplObj?.name ?? item.name, kind: item.kind };
+      const tmpl = localizeWhatsAppTemplate(rawTmpl, ar);
       const text = whatsAppText(state, member, tmpl, nowIso, ar);
       const id = createHash('sha256')
         .update(JSON.stringify(['manual-auto', owner, conn.branch, item.template, item.member, today]))

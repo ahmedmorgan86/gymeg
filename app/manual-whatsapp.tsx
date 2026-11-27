@@ -3,7 +3,7 @@ import {useState,useRef,useMemo,useEffect} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
 import {dayAt} from './lib/domain';
 import {useLastVisits,LAZY_STRICT,LAST_VISITS_ON} from './use-last-visits';
-import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,WHATSAPP_TEMPLATE_PRESETS,type ManualWhatsAppTemplate,type WhatsAppPresetCategory} from './lib/manual-whatsapp';
+import {defaultWhatsApp,localizeWhatsAppTemplate,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,WHATSAPP_TEMPLATE_PRESETS,type ManualWhatsAppTemplate,type WhatsAppPresetCategory} from './lib/manual-whatsapp';
 
 const labels={
   welcome:['ترحيب بعضو جديد','Welcome new member'],
@@ -273,12 +273,11 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
   const rawTemplates=useMemo(()=>(state.manualWhatsApp??[]).filter(x=>x.branch===branch),[state.manualWhatsApp,branch]);
   const templates=useMemo(()=>{
     return rawTemplates.map(t=>{
-      const isLegacy=t.body.includes('تاريخ عضويتك {expires}. يسعدنا مساعدتك')||t.body.trim()===LEGACY_DUMMY_BODY;
-      const isLegacyName=t.name.startsWith('قالب ')||t.name===t.kind;
+      const localized=localizeWhatsAppTemplate(t,ar);
+      const isLegacyName=localized.name.startsWith('قالب ')||localized.name===localized.kind||localized.name===labels[localized.kind][ar?1:0];
       return {
-        ...t,
-        name:isLegacyName?labels[t.kind][ar?0:1]:t.name,
-        body:isLegacy?defaultWhatsApp(t.kind,ar):t.body
+        ...localized,
+        name:isLegacyName?labels[localized.kind][ar?0:1]:localized.name
       };
     });
   },[rawTemplates,ar]);
@@ -406,7 +405,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
       const r=await fetch(`/api/whatsapp?branch=${encodeURIComponent(branch)}`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({action:'wpp.runReminders'})
+        body:JSON.stringify({action:'wpp.runReminders',lang:ar?'ar':'en'})
       });
       const d=await r.json().catch(()=>({}));
       if(r.ok){

@@ -222,7 +222,8 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'wpp.runReminders') {
-      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch);
+      const ar = body.lang !== 'en';
+      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch, new Date().toISOString(), ar);
       const ran = await runWhatsApp(ctx.owner, branch);
       return reply({ ok: true, enqueued: synced.enqueued, sent: ran.sent });
     }
@@ -307,7 +308,8 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'wpp.runReminders') {
-      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch);
+      const ar = body.lang !== 'en';
+      const synced = await syncManualRemindersToWppOutbox(ctx.owner, branch, new Date().toISOString(), ar);
       const ran = await runWhatsApp(ctx.owner, branch);
       return reply({ ok: true, enqueued: synced.enqueued, sent: ran.sent });
     }

@@ -253,6 +253,18 @@ export function manualWhatsAppOperation(s:GymState,op:Operation,newId:()=>string
  if(old)Object.assign(old,row);else s.manualWhatsApp.push(row);manualWhatsAppSchema.parse(s.manualWhatsApp);return true;
 }
 export const LEGACY_DUMMY_BODY = 'أهلًا {name}، معك فريق {gym} - {branch}. تاريخ عضويتك {expires}. يسعدنا مساعدتك.';
+export function localizeWhatsAppTemplate<T extends Pick<ManualWhatsAppTemplate,'body'|'name'|'kind'>>(tmpl:T,ar:boolean):T{
+ const trimmed=tmpl.body.trim();
+ if(trimmed===LEGACY_DUMMY_BODY||trimmed===defaultWhatsApp(tmpl.kind,!ar).trim()){
+  return{...tmpl,name:tmpl.name===`قالب ${tmpl.kind}`||tmpl.name===tmpl.kind||tmpl.name.trim()!==''?tmpl.name:tmpl.kind,body:defaultWhatsApp(tmpl.kind,ar)};
+ }
+ const preset=WHATSAPP_TEMPLATE_PRESETS.find(p=>p.bodyAr.trim()===trimmed||p.bodyEn.trim()===trimmed);
+ if(preset){
+  const isPresetTitle=tmpl.name.trim()===preset.titleAr||tmpl.name.trim()===preset.titleEn;
+  return{...tmpl,name:isPresetTitle?(ar?preset.titleAr:preset.titleEn):tmpl.name,body:ar?preset.bodyAr:preset.bodyEn};
+ }
+ return tmpl;
+}
 export function whatsAppText(s:GymState,m:Member,template:Pick<ManualWhatsAppTemplate,'body'|'name'>&{kind?:ManualWhatsAppTemplate['kind']},now:string,ar:boolean=true){
  const balance=(s.invoices??[]).filter(i=>i.member===m.id&&i.branch===m.branch).reduce((n,i)=>n+invoiceOutstanding(s,i),0);
  const fields:Record<string,string>={name:m.name,gym:s.settings.name,branch:s.branches.find(b=>b.id===m.branch)?.name??'',expires:m.expires,balance:(balance/100).toFixed(2)+' '+s.settings.currency,date:dayAt(now,s.settings.timezone),occasion:template.name};
