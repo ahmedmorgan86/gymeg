@@ -6,6 +6,7 @@ const components=new URL('../components/',import.meta.url).href;
 registerHooks({
   resolve(spec,ctx,next){
     if(spec==='server-only')return{url:'data:text/javascript,export{}',shortCircuit:true};
+    if(spec==='next/dynamic')return next('next/dynamic.js',ctx);
     if(spec==='next/image')return{url:'data:text/javascript,export default "img";',shortCircuit:true};
     if(['next/link','next/navigation'].includes(spec))return{url:'data:text/javascript,export const useRouter=()=>({push(){},refresh(){}});export default "a";',shortCircuit:true};
     if(spec.startsWith('@/')){
