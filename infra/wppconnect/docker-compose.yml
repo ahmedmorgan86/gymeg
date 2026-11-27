@@ -1,6 +1,9 @@
 services:
   wppconnect:
-    image: wppconnect/wppconnect-server:2.10.99
+    build:
+      context: .
+      dockerfile: wppconnect.Dockerfile
+    image: gymeg-wppconnect:2.10.99-patched
     container_name: gymeg-wppconnect
     restart: unless-stopped
     environment:

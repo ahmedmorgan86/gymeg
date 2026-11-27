@@ -116,16 +116,25 @@ async function handleSessionCommand(cmd) {
       let qrDataUrl = st.data?.qrcode || null;
       let phone = null;
 
-      if (mapped === 'WAITING_FOR_QR' || qrDataUrl) {
+      if (mapped !== 'CONNECTED') {
+        const connCheck = await wppCall(sessionId, '/check-connection-session', 'GET').catch(() => null);
+        if (connCheck?.ok && connCheck.data?.status === true) {
+          mapped = 'CONNECTED';
+          qrDataUrl = null;
+        }
+      }
+
+      if (mapped === 'CONNECTED') {
+        activeHandshakes.delete(sessionId);
+        qrDataUrl = null;
+        const host = await wppCall(sessionId, '/host-device', 'GET').catch(() => null);
+        phone = host?.data?.response?.id?.user || host?.data?.response?.wid?.user || null;
+      } else if (mapped === 'WAITING_FOR_QR' || qrDataUrl) {
         mapped = 'WAITING_FOR_QR';
         if (!qrDataUrl) {
           const qrRes = await wppCall(sessionId, '/qrcode-session', 'GET');
           qrDataUrl = qrRes.data?.qrcode || null;
         }
-      } else if (mapped === 'CONNECTED') {
-        activeHandshakes.delete(sessionId);
-        const host = await wppCall(sessionId, '/host-device', 'GET');
-        phone = host.data?.response?.id?.user || host.data?.response?.wid?.user || null;
       }
 
       await gymegFetch('/api/whatsapp/worker/report', 'POST', {
