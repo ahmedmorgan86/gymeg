@@ -441,6 +441,16 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
     {activeTab==='due'&&(
       <section className="card">
         {(lastFailed||lastStrict)&&<p className="operation-notice" role="status">{lastFailed?<>{t('تعذر تحميل آخر زيارة للأعضاء.','Could not load members\' last visits.')} <button className="button secondary" onClick={lastRetry}>{t('إعادة المحاولة','Retry')}</button></>:t('جارٍ التحميل…','Loading…')}</p>}
+        {(['welcome','renewal','expired','absence','birthday'] as const).some(k=>!templates.some(x=>x.kind===k&&x.enabled))&&(
+          <div style={{display:'flex',flexWrap:'wrap',alignItems:'center',justifyContent:'space-between',gap:'10px',padding:'10px 14px',borderRadius:10,background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.35)',marginBottom:'14px'}}>
+            <small style={{fontWeight:600,lineHeight:'1.5'}}>
+              {t('💡 بعض حالات الأعضاء (قرب الانتهاء، المنتهي، الغياب، عيد الميلاد) لا تظهر لأن قوالبها غير مفعلة لهذا الفرع بعد.','💡 Some member statuses (renewal, expired, absence, birthday) are hidden because their templates are not enabled for this branch yet.')}
+            </small>
+            <button type="button" className="button primary" disabled={busy} onClick={()=>void upgradeAllTemplatesToRecommended()} style={{padding:'6px 12px',fontSize:'0.82rem',margin:0}}>
+              {t('✨ تفعيل قوالب جميع الحالات الآن','✨ Enable All Status Templates')}
+            </button>
+          </div>
+        )}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'10px',marginBottom:'14px'}}>
           <div>
             <h2 style={{margin:0}}>{t('قائمة المتابعات والتذكيرات المستحقة اليوم','Due Follow-ups & Reminders')}</h2>
