@@ -128,7 +128,8 @@ async function handleSessionCommand(cmd) {
         activeHandshakes.delete(sessionId);
         qrDataUrl = null;
         const host = await wppCall(sessionId, '/host-device', 'GET').catch(() => null);
-        phone = host?.data?.response?.id?.user || host?.data?.response?.wid?.user || null;
+        const rawPhone = host?.data?.response?.phoneNumber || host?.data?.response?.id?.user || host?.data?.response?.wid?.user || null;
+        phone = rawPhone ? String(rawPhone).replace(/@c\.us$/i, '') : null;
       } else if (mapped === 'WAITING_FOR_QR' || qrDataUrl) {
         mapped = 'WAITING_FOR_QR';
         if (!qrDataUrl) {

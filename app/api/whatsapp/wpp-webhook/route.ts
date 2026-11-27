@@ -67,6 +67,20 @@ export async function POST(request: Request) {
              WHERE owner_id = $1 AND branch = $2`,
             [conn.owner_id, conn.branch]
           );
+        } else if (
+          st === 'autoclosecalled' ||
+          st === 'phonenotconnected' ||
+          st === 'qrreaderror' ||
+          st === 'qrreadfail' ||
+          st === 'disconnectedmobile' ||
+          st === 'browserclose'
+        ) {
+          await client.query(
+            `UPDATE gymos.whatsapp_provider_connections
+             SET status = 'DISCONNECTED', desired_action = 'none', qr_data_url = NULL, last_error = $3, updated_at = now()
+             WHERE owner_id = $1 AND branch = $2`,
+            [conn.owner_id, conn.branch, st]
+          );
         }
       } else if (event === 'onmessage' && payload.fromMe !== true) {
         const rawFrom = String(payload.from ?? '').replace(/@c\.us$/i, '').replace(/\D/g, '');

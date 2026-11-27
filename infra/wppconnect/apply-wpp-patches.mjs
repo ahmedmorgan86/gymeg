@@ -117,11 +117,12 @@ patchFile(
   'dist/config.js',
   (src) => {
     let out = src;
-    if (!out.includes('autoClose: 180000')) {
+    if (!out.includes('deviceSyncTimeout: 180000')) {
       out = out.replace(
-        /createOptions:\s*\{\s*browserArgs:\s*\[[\s\S]*?\],/,
+        /createOptions:\s*\{[\s\S]*?browserArgs:\s*\[[\s\S]*?\],/,
         `createOptions: {
     autoClose: 180000,
+    deviceSyncTimeout: 180000,
     browserArgs: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
