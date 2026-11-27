@@ -71,7 +71,7 @@ test('WorkspaceSyncManager: a visits-only delta on an omitted packet yields a NE
   const {WorkspaceSyncManager}=await import('../app/lib/workspace-sync.ts');
   const prev=packet(cur(),ctx(),undefined,['visits']);let updated=null,snap=false;
   const realFetch=globalThis.fetch;
-  globalThis.fetch=async()=>new Response(JSON.stringify({events:[{id:'e1',revision:prev.revision+1,eventType:'entity.upsert',collection:'visits',entityId:'vz',payload:{id:'vz',member:'m0',branch:'a',day:'2026-03-15',at:'2026-03-15T09:00:00.000Z'}}],toRevision:prev.revision+1,hasMore:false}),{status:200});
+  globalThis.fetch=async()=>new Response(JSON.stringify({requiresSnapshot:false,fromRevision:prev.revision,events:[{id:'e1',revision:prev.revision+1,eventType:'entity.upsert',collection:'visits',entityId:'vz',payload:{id:'vz',member:'m0',branch:'a',day:'2026-03-15',at:'2026-03-15T09:00:00.000Z'}}],toRevision:prev.revision+1,hasMore:false}),{status:200});
   try{
     const sm=new WorkspaceSyncManager({tenantId:'t-A',owner:'t-A',initialRevision:prev.revision,getCurrentPacket:()=>prev,onPacketUpdate:p=>{updated=p;},onSnapshotRequired:()=>{snap=true;}});
     await sm.pullDeltas();sm.destroy();
