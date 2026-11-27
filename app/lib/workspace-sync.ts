@@ -107,6 +107,7 @@ export class WorkspaceSyncManager {
   private status: SyncStatus = 'connecting';
   private currentRevision: number;
   private syncing = false;
+  private inFlightPull: Promise<boolean> | null = null;
   private channel: RealtimeChannelLike | null = null;
   private unmounted = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -214,6 +215,22 @@ export class WorkspaceSyncManager {
    * Fetches missed delta changes from the Delta API.
    */
   public async pullDeltas(): Promise<boolean> {
+    if (this.unmounted) return false;
+    if (this.inFlightPull) {
+      await this.inFlightPull;
+      if (this.unmounted) return false;
+      if (this.inFlightPull) return this.inFlightPull;
+    }
+    const task = this.runPullDeltas().finally(() => {
+      if (this.inFlightPull === task) {
+        this.inFlightPull = null;
+      }
+    });
+    this.inFlightPull = task;
+    return task;
+  }
+
+  private async runPullDeltas(): Promise<boolean> {
     if (this.syncing || this.unmounted) return false;
     this.syncing = true;
     const prevStatus = this.status;
@@ -270,7 +287,10 @@ export class WorkspaceSyncManager {
       }
 
       if (this.unmounted) return false;
-      if (this.options.getCurrentPacket() !== initial) return false;
+      const latest = this.options.getCurrentPacket();
+      if (latest !== initial) {
+        return Boolean(latest && latest.revision >= packet.revision);
+      }
       if (packet !== initial) this.options.onPacketUpdate(packet);
       this.currentRevision = packet.revision;
       this.setStatus('connected');
