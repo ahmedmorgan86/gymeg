@@ -3,7 +3,7 @@ import {useState,useRef,useMemo,useEffect} from 'react';
 import type {GymState,Operation,Member} from './lib/domain';
 import {dayAt} from './lib/domain';
 import {useLastVisits,LAZY_STRICT,LAST_VISITS_ON} from './use-last-visits';
-import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,type ManualWhatsAppTemplate} from './lib/manual-whatsapp';
+import {defaultWhatsApp,manualWhatsAppDue,whatsAppText,LEGACY_DUMMY_BODY,WHATSAPP_TEMPLATE_PRESETS,type ManualWhatsAppTemplate,type WhatsAppPresetCategory} from './lib/manual-whatsapp';
 
 const labels={
   welcome:['ترحيب بعضو جديد','Welcome new member'],
@@ -52,6 +52,9 @@ function TemplateEditor({
     ?edit.body
     :defaultWhatsApp(templateKind,ar);
   const [text,setText]=useState(initialText);
+  const [nameVal,setNameVal]=useState(edit?.name??labels[templateKind][ar?0:1]);
+  const [offsetVal,setOffsetVal]=useState(edit?.offset??7);
+  const [presetCat,setPresetCat]=useState<'all'|WhatsAppPresetCategory>('all');
   const textareaRef=useRef<HTMLTextAreaElement>(null);
 
   const variables=[
@@ -94,10 +97,56 @@ function TemplateEditor({
   }
 
   return <form onSubmit={e=>{e.preventDefault();onSave(new FormData(e.currentTarget));}}>
+    {!edit&&(
+      <div style={{background:'var(--surface-soft,#f8fafc)',border:'1px solid var(--line)',borderRadius:10,padding:'12px 14px',marginBottom:'14px'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'8px',marginBottom:'8px'}}>
+          <b style={{fontSize:'0.92rem'}}>{t('📚 مكتبة القوالب الجاهزة (اضغط لاختيار قالب وتعديله)','📚 Ready-made Template Library (Click to load)')}</b>
+          <div style={{display:'flex',gap:'6px',flexWrap:'wrap'}}>
+            {([
+              ['all',t('الكل','All')],
+              ['statuses',t('حالات الأعضاء','Statuses')],
+              ['religious',t('مناسبات دينية','Religious')],
+              ['holidays',t('أعياد ومناسبات','Holidays')],
+              ['offers',t('عروض وتخفيضات','Offers')]
+            ] as const).map(([cat,lbl])=>(
+              <button
+                key={cat}
+                type="button"
+                className={`button ${presetCat===cat?'primary':'secondary'}`}
+                style={{padding:'3px 9px',fontSize:'0.78rem',margin:0}}
+                onClick={()=>setPresetCat(cat)}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:'6px',maxHeight:'150px',overflowY:'auto'}}>
+          {WHATSAPP_TEMPLATE_PRESETS.filter(p=>presetCat==='all'||p.category===presetCat).map(p=>(
+            <button
+              key={p.id}
+              type="button"
+              className="button secondary"
+              style={{padding:'5px 10px',fontSize:'0.8rem',margin:0,textAlign:'start'}}
+              onClick={()=>{
+                onChangeKind(p.kind);
+                setNameVal(ar?p.titleAr:p.titleEn);
+                setText(ar?p.bodyAr:p.bodyEn);
+                setOffsetVal(p.offset);
+              }}
+            >
+              {ar?p.titleAr:p.titleEn}
+            </button>
+          ))}
+        </div>
+      </div>
+    )}
+
     <label>{t('نوع القالب والحالة','Template kind & scenario')}
       <select value={templateKind} onChange={e=>{
         const nextKind=e.target.value as ManualWhatsAppTemplate['kind'];
         onChangeKind(nextKind);
+        setNameVal(labels[nextKind][ar?0:1]);
         setText(defaultWhatsApp(nextKind,ar));
       }}>
         {Object.entries(labels).map(([value,label])=><option key={value} value={value}>{label[ar?0:1]}</option>)}
@@ -105,7 +154,7 @@ function TemplateEditor({
     </label>
 
     <label>{t('اسم القالب أو المناسبة','Template or occasion name')}
-      <input name="name" defaultValue={edit?.name??labels[templateKind][ar?0:1]} required maxLength={100}/>
+      <input name="name" value={nameVal} onChange={e=>setNameVal(e.target.value)} required maxLength={100}/>
     </label>
 
     <div>
@@ -167,12 +216,12 @@ function TemplateEditor({
     </div>
 
     <label>{t('فترة التطبيق (أيام قبل الانتهاء أو بعد الغياب)','Follow-up offset (days)')}
-      <input name="offset" type="number" min={1} max={90} defaultValue={edit?.offset??7} required/>
+      <input name="offset" type="number" min={1} max={90} value={offsetVal} onChange={e=>setOffsetVal(Number(e.target.value)||1)} required/>
     </label>
 
     {templateKind==='occasion'&&(
       <label>{t('تاريخ المناسبة','Occasion date')}
-        <input name="date" type="date" defaultValue={edit?.date} required/>
+        <input name="date" type="date" defaultValue={edit?.date??dayAt(new Date().toISOString(),'Africa/Cairo')} required/>
       </label>
     )}
 
@@ -263,6 +312,31 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
         setEdit(null);
         setNotice(t('تم حفظ القالب بنجاح.','Template saved successfully.'));
       }
+    }finally{setBusy(false);}
+  }
+
+  async function importOccasionAndOfferPresets(){
+    if(busy)return;setBusy(true);
+    try{
+      const todayStr=dayAt(now,state.settings.timezone);
+      const existingNames=new Set(rawTemplates.map(x=>x.name.trim()));
+      let added=0;
+      for(const p of WHATSAPP_TEMPLATE_PRESETS.filter(x=>x.category!=='statuses')){
+        const title=ar?p.titleAr:p.titleEn;
+        if(existingNames.has(title))continue;
+        if(rawTemplates.length+added>=95)break;
+        const ok=await mutate({
+          type:'whatsapp.manual.save',
+          name:title,
+          kind:p.kind,
+          body:ar?p.bodyAr:p.bodyEn,
+          enabled:true,
+          offset:p.offset,
+          ...(p.kind==='occasion'?{date:todayStr}:{})
+        });
+        if(ok)added++;
+      }
+      setNotice(t(`تمت إضافة ${added} قالب للمناسبات الدينية والأعياد والعروض إلى مكتبة الفرع! 🎉`,`Added ${added} holiday, religious & offer template(s) to this branch! 🎉`));
     }finally{setBusy(false);}
   }
 
@@ -632,9 +706,14 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
             <b style={{display:'block',fontSize:'1rem'}}>{t('تحديث وتوحيد قوالب الفرع الذكية','Sync & Upgrade Branch Templates')}</b>
             <small style={{opacity:.75}}>{t('ضبط كل قالب بنصه النموذجي المخصص لكل حالة بدلاً من النصوص العامة أو القديمة.','Set each scenario with its dedicated motivating text instead of generic text.')}</small>
           </div>
-          <button type="button" className="button primary" disabled={busy} onClick={upgradeAllTemplatesToRecommended} style={{fontSize:'0.85rem'}}>
-            {t('🔄 تحديث وضبط جميع القوالب للفرع الآن','🔄 Reset & Upgrade All Templates Now')}
-          </button>
+          <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+            <button type="button" className="button primary" disabled={busy} onClick={upgradeAllTemplatesToRecommended} style={{fontSize:'0.85rem'}}>
+              {t('🔄 تحديث وضبط جميع قوالب الحالات','🔄 Reset & Upgrade Status Templates')}
+            </button>
+            <button type="button" className="button secondary" disabled={busy} onClick={()=>void importOccasionAndOfferPresets()} style={{fontSize:'0.85rem'}}>
+              {t('🎁 إضافة قوالب الأعياد الدينية والعروض','🎁 Add Religious, Holiday & Offer Presets')}
+            </button>
+          </div>
         </div>
 
         <h2 style={{marginTop:0}}>{edit?t('✏️ تعديل قالب واتساب','✏️ Edit WhatsApp Template'):t('⚙️ إعداد وتخصيص قوالب الرسائل والمناسبات','⚙️ Configure & Customize Templates')}</h2>
