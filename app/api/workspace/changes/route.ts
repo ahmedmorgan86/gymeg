@@ -36,7 +36,7 @@ export async function GET(request: Request) {
       const revision = await firestoreReadRevision(ctx.owner);
       if (after >= revision) {
         return reply({
-          requiresSnapshot: false,
+          requiresSnapshot: after > revision,
           fromRevision: after,
           toRevision: revision,
           hasMore: false,
@@ -64,7 +64,7 @@ export async function GET(request: Request) {
       const hasMore = docs.length > limit;
       const usable = hasMore ? docs.slice(0, limit) : docs;
       const lastCovered = usable.length ? usable[usable.length - 1].revision : after;
-      if (usable.length !== lastCovered - after) {
+      if (usable.length !== lastCovered - after || (!hasMore && lastCovered < revision)) {
         return reply({
           requiresSnapshot: true,
           fromRevision: after,
@@ -141,7 +141,7 @@ export async function GET(request: Request) {
       const authoritative = (await client.query('SELECT revision FROM gymos.gym_states WHERE user_id=$1', [ctx.owner])).rows[0] as {revision: number | string} | undefined;
       const authRev = authoritative ? Number(authoritative.revision) : null;
       if (authRev !== null && after >= authRev) {
-        return {requiresSnapshot: false, fromRevision: after, toRevision: after, hasMore: false, events: []};
+        return {requiresSnapshot: after > authRev, fromRevision: after, toRevision: authRev, hasMore: false, events: []};
       }
       if (authRev !== null && (maxRev === null || maxRev < authRev)) {
         return {requiresSnapshot: true, fromRevision: after, toRevision: authRev, hasMore: false, events: []};
