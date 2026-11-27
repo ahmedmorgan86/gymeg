@@ -358,6 +358,47 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
     }finally{setBusy(false);}
   }
 
+  async function toggleTemplateEnabled(tmpl:ManualWhatsAppTemplate){
+    if(busy)return;setBusy(true);
+    try{
+      const raw=rawTemplates.find(x=>x.id===tmpl.id)??tmpl;
+      const nextEnabled=!raw.enabled;
+      if(await mutate({
+        type:'whatsapp.manual.save',
+        id:raw.id,
+        name:raw.name,
+        kind:raw.kind,
+        body:raw.body,
+        enabled:nextEnabled,
+        offset:raw.offset,
+        ...(raw.date?{date:raw.date}:{})
+      })){
+        setNotice(nextEnabled?t('تم تفعيل القالب.','Template enabled.'):t('تم إيقاف القالب.','Template disabled.'));
+      }
+    }finally{setBusy(false);}
+  }
+
+  async function enableAllTemplates(){
+    if(busy)return;setBusy(true);
+    try{
+      const disabled=rawTemplates.filter(x=>!x.enabled);
+      let count=0;
+      for(const raw of disabled){
+        if(await mutate({
+          type:'whatsapp.manual.save',
+          id:raw.id,
+          name:raw.name,
+          kind:raw.kind,
+          body:raw.body,
+          enabled:true,
+          offset:raw.offset,
+          ...(raw.date?{date:raw.date}:{})
+        }))count++;
+      }
+      setNotice(t(`تم تفعيل ${count} قالب بنجاح ✅`,`Enabled ${count} template(s) successfully ✅`));
+    }finally{setBusy(false);}
+  }
+
 
 
   function openComposer(m:Member,msgKind:ManualWhatsAppTemplate['kind'],tmplId?:string){
@@ -712,6 +753,11 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
             <button type="button" className="button secondary" disabled={busy} onClick={()=>void importOccasionAndOfferPresets()} style={{fontSize:'0.85rem'}}>
               {t('🎁 إضافة قوالب الأعياد الدينية والعروض','🎁 Add Religious, Holiday & Offer Presets')}
             </button>
+            {templates.some(x=>!x.enabled)&&(
+              <button type="button" className="button primary" disabled={busy} onClick={()=>void enableAllTemplates()} style={{fontSize:'0.85rem'}}>
+                {t('✅ تفعيل جميع القوالب','✅ Enable All Templates')}
+              </button>
+            )}
           </div>
         </div>
 
@@ -748,9 +794,14 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
               </p>
               <small style={{display:'block',opacity:.7,marginTop:'4px'}}>{t('فترة التطبيق: ','Offset: ')}{x.offset} {t('أيام','days')}</small>
             </div>
-            <button className="button secondary" onClick={()=>{setEdit(x);setTemplateKind(x.kind);window.scrollTo({top:0,behavior:'smooth'});}}>
-              {t('تعديل القالب','Edit')}
-            </button>
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
+              <button type="button" className="button secondary" disabled={busy} onClick={()=>void toggleTemplateEnabled(x)}>
+                {x.enabled?t('إيقاف','Disable'):t('تفعيل','Enable')}
+              </button>
+              <button type="button" className="button secondary" onClick={()=>{setEdit(x);setTemplateKind(x.kind);window.scrollTo({top:0,behavior:'smooth'});}}>
+                {t('تعديل القالب','Edit')}
+              </button>
+            </div>
           </article>)}
           {!templates.length&&<p style={{color:'var(--muted)'}}>{t('لا توجد قوالب مخصصة محفوظة بعد؛ يتم استخدام القوالب النموذجية الافتراضية المدمجة.','No custom templates yet; built-in recommended templates are used.')}</p>}
         </div>
