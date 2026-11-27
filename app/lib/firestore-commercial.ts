@@ -169,7 +169,8 @@ export async function firebaseAction(user: ChatGPTUser, body: Record<string, unk
     const complimentary = await firebasePlatform(user);
     const userClubs = await db.collection('tenant_memberships').where('user_id', '==', user.userId).get();
     if (!complimentary && userClubs.docs.filter(doc => doc.data().role === 'owner' && doc.data().revoked === false).length >= 20) throw new CommercialError('clubLimit', 403);
-    const state = emptyState(); state.settings.name = name;
+    const { seedNewClubDefaults } = await import('./club-defaults');
+    const state = seedNewClubDefaults(emptyState(), now); state.settings.name = name;
     const created = await db.runTransaction(async tx => {
       const existing = await tx.get(tenantRef(id));
       const plan = await tx.get(db.collection('commercial_plans').doc('custom'));
