@@ -19,6 +19,12 @@ async function access(request: Request) {
   return { ctx, branch };
 }
 
+function normalizePhoneInput(raw: string) {
+  const cleaned = raw.replace(/[\s()-]/g, '').replace(/^00/, '+');
+  if (/^01[0125][0-9]{8}$/.test(cleaned)) return '20' + cleaned.slice(1);
+  return whatsappPhone(raw);
+}
+
 export async function GET(request: Request) {
   try {
     const { ctx, branch } = await access(request);
@@ -184,7 +190,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'wpp.test') {
-      const phone = whatsappPhone(String(body.phone ?? ''));
+      const phone = normalizePhoneInput(String(body.phone ?? ''));
       const text = String(body.text ?? '').trim().slice(0, 1000);
       if (!phone || !text) return reply({ error: 'invalid' }, 400);
       const id = createHash('sha256').update(JSON.stringify([ctx.owner, 'test', branch, phone, randomUUID()])).digest('hex');
@@ -199,7 +205,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'wpp.sendReminder') {
-      const phone = whatsappPhone(String(body.phone ?? ''));
+      const phone = normalizePhoneInput(String(body.phone ?? ''));
       const text = String(body.text ?? '').trim().slice(0, 1500);
       const memberId = String(body.memberId ?? '').trim().slice(0, 100);
       const templateId = String(body.templateId ?? body.kind ?? 'manual').trim().slice(0, 100);
@@ -284,7 +290,7 @@ export async function POST(request: Request) {
     }
 
     if (body.action === 'wpp.sendReminder') {
-      const phone = whatsappPhone(String(body.phone ?? ''));
+      const phone = normalizePhoneInput(String(body.phone ?? ''));
       const text = String(body.text ?? '').trim().slice(0, 1500);
       const memberId = String(body.memberId ?? '').trim().slice(0, 100);
       const templateId = String(body.templateId ?? body.kind ?? 'manual').trim().slice(0, 100);

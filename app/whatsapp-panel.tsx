@@ -227,8 +227,9 @@ function AutomaticWhatsAppPanel({
                   style={{ marginTop: 14 }}
                   onSubmit={async (e) => {
                     e.preventDefault();
-                    const f = new FormData(e.currentTarget);
-                    if (await send({ action: 'wpp.test', phone: f.get('phone'), text: f.get('text') })) e.currentTarget.reset();
+                    const form = e.currentTarget;
+                    const f = new FormData(form);
+                    if (await send({ action: 'wpp.test', phone: f.get('phone'), text: f.get('text') })) form.reset();
                   }}
                 >
                   <h3>{t('إرسال رسالة اختبار', 'Send test message')}</h3>

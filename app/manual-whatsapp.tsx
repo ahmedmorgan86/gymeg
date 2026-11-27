@@ -496,8 +496,8 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
             const tmpl: Pick<ManualWhatsAppTemplate,'body'|'name'|'kind'>=(templateObj&&templateObj.body.trim()!==LEGACY_DUMMY_BODY)
               ?templateObj
               :{body:defaultWhatsApp(x.kind,ar),name:templateObj?.name??labels[x.kind][ar?0:1],kind:x.kind};
-            return <article className="preference-row" key={x.member+'|'+x.template} style={{padding:'12px 16px',borderRadius:10,border:'1px solid var(--line)',background:'var(--surface)'}}>
-              <div style={{flex:1,minWidth:0}}>
+            return <article className="preference-row" key={x.member+'|'+x.template} style={{padding:'12px 16px',borderRadius:10,border:'1px solid var(--line)',background:'var(--surface)',display:'flex',flexWrap:'wrap',gap:'12px',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{flex:'1 1 220px',minWidth:0}}>
                 <div style={{display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px',flexWrap:'wrap'}}>
                   <strong style={{fontSize:'1rem'}}>{m.name}</strong>
                   <span style={{fontSize:'0.75rem',padding:'2px 8px',borderRadius:6,background:'var(--purple-soft,#ede9fe)',color:'var(--purple,#7c3aed)',fontWeight:700}}>
@@ -590,8 +590,8 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
         <div style={{display:'grid',gap:'8px'}}>
           {members.filter(m=>matchesSearch(m.name+' '+m.phone,search)).slice(0,50).map(m=>{
             const phone=m.phone;
-            return <article className="preference-row" key={m.id} style={{padding:'10px 14px',borderRadius:8,border:'1px solid var(--line)'}}>
-              <div>
+            return <article className="preference-row" key={m.id} style={{padding:'10px 14px',borderRadius:8,border:'1px solid var(--line)',display:'flex',flexWrap:'wrap',gap:'12px',alignItems:'center',justifyContent:'space-between'}}>
+              <div style={{flex:'1 1 220px',minWidth:0}}>
                 <b>{m.name}</b>
                 <small style={{display:'block',opacity:.75,direction:'ltr'}}><bdi>{phone}</bdi></small>
                 <small style={{fontSize:'0.75rem',color:'var(--muted)'}}>{t('تاريخ الانتهاء: ','Expires: ')}{m.expires}</small>
@@ -672,7 +672,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
     {/* Send & In-App WhatsApp Dispatcher Modal */}
     {modalState&&(
       <div className="modal-backdrop" onClick={()=>setModalState(null)}>
-        <div className="modal" onClick={e=>e.stopPropagation()} style={{maxWidth:'580px',width:'95%'}}>
+        <div className="modal" onClick={e=>e.stopPropagation()} style={{boxSizing:'border-box',maxWidth:'min(580px, calc(100vw - 24px))',width:'100%',maxHeight:'90vh',overflowY:'auto',overflowX:'hidden'}}>
           <div className="modal-top">
             <h2 style={{margin:0,fontSize:'1.3rem'}}>
               {t('إرسال رسالة واتساب إلى: ','Send WhatsApp message to: ')}
@@ -719,14 +719,14 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
           </div>
 
           {/* Action buttons: Auto-send (WPPConnect) + App vs Web */}
-          <div style={{display:'grid',gridTemplateColumns:wppConnected?'1fr 1fr 1fr':'1fr 1fr',gap:'10px',marginTop:'18px'}}>
+          <div style={{display:'flex',flexWrap:'wrap',gap:'10px',marginTop:'18px'}}>
             {wppConnected&&(
               <button
                 type="button"
                 className="button primary"
                 disabled={busy}
                 onClick={()=>void sendViaWpp(modalState.member,modalState.kind,modalState.customText,modalState.templateId)}
-                style={{padding:'12px',fontSize:'0.95rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
+                style={{flex:'1 1 160px',padding:'12px',fontSize:'0.92rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
               >
                 <span>⚡</span>
                 <span>{t('إرسال آلي (WPPConnect)','Auto-Send (WPPConnect)')}</span>
@@ -736,7 +736,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
               type="button"
               className="button primary"
               onClick={()=>launchWhatsApp(modalState.member.phone,modalState.customText,'app')}
-              style={{padding:'12px',fontSize:'0.95rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
+              style={{flex:'1 1 160px',padding:'12px',fontSize:'0.92rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
             >
               <span>📲</span>
               <span>{t('فتح برنامج واتساب (المثبت)','Open WhatsApp App')}</span>
@@ -746,7 +746,7 @@ export default function ManualWhatsApp({state,owner,branch,ar,mutate}:Props){
               type="button"
               className="button secondary"
               onClick={()=>launchWhatsApp(modalState.member.phone,modalState.customText,'web')}
-              style={{padding:'12px',fontSize:'0.95rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
+              style={{flex:'1 1 160px',padding:'12px',fontSize:'0.92rem',display:'flex',alignItems:'center',justifyContent:'center',gap:'8px'}}
             >
               <span>🌐</span>
               <span>{t('فتح واتساب ويب (المتصفح)','Open WhatsApp Web')}</span>
