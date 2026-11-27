@@ -30,6 +30,7 @@ test('/changes: an event log that does not reach the authoritative revision give
   const ok=await get('G',5);assert.equal(ok.status,200);assert.equal(ok.body.requiresSnapshot,false);assert.ok(ok.body.events.length>0);assert.equal(ok.body.toRevision,6);
   // up to date: empty, no snapshot
   const same=await get('G',6);assert.deepEqual([same.body.requiresSnapshot,same.body.events.length],[false,0]);
+  const ahead=await get('G',9);assert.deepEqual([ahead.body.requiresSnapshot,ahead.body.toRevision],[true,6]);
   // force the events insert to fail inside persistSpace's savepoint: the revision still advances, no event row is written
   await real.query("CREATE OR REPLACE FUNCTION gymos.qa_fail_events() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced events failure'; END $$");
   await real.query("CREATE TRIGGER qa_fail_events BEFORE INSERT ON gymos.workspace_events FOR EACH ROW EXECUTE FUNCTION gymos.qa_fail_events()");
