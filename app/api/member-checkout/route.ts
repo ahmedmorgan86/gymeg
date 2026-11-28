@@ -95,6 +95,7 @@ export async function POST(request: Request) {
         ? { secretKey: clubSecret, publicKey: gw.paymobPublicKey, integrationId: gw.paymobIntegrationId }
         : null;
 
+    const origin = new URL(request.url).origin;
     const checkout = await createGatewayCheckout({
       intent,
       token,
@@ -102,6 +103,8 @@ export async function POST(request: Request) {
       buyerPhone: member.phone,
       itemName: plan.name,
       instapayAddress: gw.instapayAddress,
+      notificationUrl: `${origin}/api/payments/webhook`,
+      redirectionUrl: `${origin}/`,
       paymobKeys: clubPaymobKeys,
     });
 

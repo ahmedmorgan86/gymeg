@@ -68,6 +68,7 @@ export async function POST(request: Request) {
           }
         : null;
 
+    const origin = new URL(request.url).origin;
     const checkout = await createGatewayCheckout({
       intent,
       token,
@@ -75,6 +76,8 @@ export async function POST(request: Request) {
       buyerPhone: '+201000000000',
       buyerEmail: user.email,
       itemName: `GymEG License (${order.mode})`,
+      notificationUrl: `${origin}/api/payments/webhook`,
+      redirectionUrl: `${origin}/clubs`,
       paymobKeys: platformKeys,
     });
 

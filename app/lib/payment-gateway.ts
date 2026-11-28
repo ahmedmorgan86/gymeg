@@ -142,9 +142,11 @@ export async function createGatewayCheckout(params: {
   buyerEmail?: string;
   itemName: string;
   instapayAddress?: string;
+  notificationUrl?: string;
+  redirectionUrl?: string;
   paymobKeys?: { secretKey: string; publicKey: string; integrationId: string } | null;
 }): Promise<{ checkoutUrl: string | null; mode: 'live' | 'instapay' | 'pending_keys' }> {
-  const { intent, token, buyerName, buyerPhone, buyerEmail, itemName, instapayAddress, paymobKeys } = params;
+  const { intent, token, buyerName, buyerPhone, buyerEmail, itemName, instapayAddress, notificationUrl, redirectionUrl, paymobKeys } = params;
 
   if (intent.provider === 'paymob' && paymobKeys?.secretKey && paymobKeys?.publicKey && paymobKeys?.integrationId) {
     const [firstName, ...rest] = buyerName.trim().split(/\s+/);
@@ -172,6 +174,8 @@ export async function createGatewayCheckout(params: {
           },
           special_reference: intent.reference,
           extras: { gymeg_intent: token },
+          ...(notificationUrl ? { notification_url: notificationUrl } : {}),
+          ...(redirectionUrl ? { redirection_url: redirectionUrl } : {}),
         }),
         signal: AbortSignal.timeout(10000),
       });
