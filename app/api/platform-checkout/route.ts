@@ -13,10 +13,11 @@ export async function POST(request: Request) {
 
     const raw = await request.text();
     if (raw.length > 2048) return reply({ error: 'limit' }, 413);
-    const body = JSON.parse(raw) as { tenantId?: unknown; orderId?: unknown };
+    const body = JSON.parse(raw) as { tenantId?: unknown; orderId?: unknown; provider?: unknown };
     if (typeof body.tenantId !== 'string' || typeof body.orderId !== 'string') {
       return reply({ error: 'invalid' }, 400);
     }
+    const provider = body.provider === 'instapay' ? 'instapay' : 'paymob';
 
     const client = await getPool().connect();
     let order: { id: string; tenant_id: string; plan_id: string; mode: string; amount_minor: number; currency: string; status: string } | undefined;
@@ -52,13 +53,14 @@ export async function POST(request: Request) {
       mode: order.mode,
       amountMinor: order.amount_minor,
       currency: order.currency || 'EGP',
-      provider: 'paymob',
+      provider,
       reference,
       exp: Date.now() + 30 * 60 * 1000,
     };
     const token = signPaymentIntent(intent);
 
-    // Strictly uses the PLATFORM owner's Paymob account configured in Vercel env vars
+    // Strictly uses the PLATFORM owner's Paymob / InstaPay account configured in Vercel env vars
+    const platformInstapay = (process.env.PLATFORM_INSTAPAY_ADDRESS || process.env.NEXT_PUBLIC_PLATFORM_INSTAPAY_ADDRESS || '').trim() || undefined;
     const platformKeys =
       process.env.PAYMOB_SECRET_KEY && process.env.PAYMOB_PUBLIC_KEY && process.env.PAYMOB_INTEGRATION_ID
         ? {
@@ -76,6 +78,7 @@ export async function POST(request: Request) {
       buyerPhone: '+201000000000',
       buyerEmail: user.email,
       itemName: `GymEG License (${order.mode})`,
+      instapayAddress: platformInstapay,
       notificationUrl: `${origin}/api/payments/webhook`,
       redirectionUrl: `${origin}/clubs`,
       paymobKeys: platformKeys,
@@ -84,10 +87,12 @@ export async function POST(request: Request) {
     return reply({
       ok: true,
       reference,
+      provider,
       amountMinor: order.amount_minor,
       currency: intent.currency,
       mode: checkout.mode,
       checkoutUrl: checkout.checkoutUrl,
+      instapayAddress: platformInstapay ?? null,
     });
   } catch {
     return reply({ error: 'unavailable' }, 503);
