@@ -79,10 +79,11 @@ export async function POST(request: Request) {
         signal: AbortSignal.timeout(25000)
       });
       const data = await upstream.json().catch(() => ({}));
-      if (!upstream.ok || !data?.tashkeelText) {
+      const vocalized = data?.vocalizedText || data?.tashkeelText || data?.text;
+      if (!upstream.ok || !vocalized) {
         return reply({ error: data?.error || 'tts_upstream_error', message: data?.messageAr || data?.message }, upstream.status >= 400 ? upstream.status : 502);
       }
-      return reply({ ok: true, text: String(data.tashkeelText) });
+      return reply({ ok: true, text: String(vocalized) });
     }
 
     const voice = VALID_VOICE_IDS.has(input.voice) ? input.voice : 'Puck';
