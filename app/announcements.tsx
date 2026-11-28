@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import {
   Pause,
   Play,
@@ -354,6 +354,23 @@ export default function Announcements({
 
   // Audio unlock state for browser autoplay policy
   const [isAudioUnlocked, setIsAudioUnlocked] = useState<boolean>(() => audioUnlocker.isUnlocked());
+  const isNativeAudioHost = useSyncExternalStore(
+    () => () => {},
+    () => {
+      const nativeHost = window as unknown as {
+        chrome?: { webview?: { postMessage?: (message: unknown) => void } };
+        GymOSAndroid?: { syncAnnouncements?: (json: string) => void };
+        webkit?: { messageHandlers?: { gymosAnnouncementBridge?: unknown } };
+      };
+      return !shouldRunBrowserAnnouncementScheduler({
+        windows: Boolean(nativeHost.chrome?.webview?.postMessage),
+        androidBridge: Boolean(nativeHost.GymOSAndroid?.syncAnnouncements),
+        ios: Boolean(nativeHost.webkit?.messageHandlers?.gymosAnnouncementBridge),
+        userAgent: navigator.userAgent
+      });
+    },
+    () => false
+  );
 
   // Playback control state
   const [currentPlayback, setCurrentPlayback] = useState<{
@@ -1126,8 +1143,8 @@ export default function Announcements({
         style={{
           margin: '1rem 0',
           padding: '1rem 1.25rem',
-          border: isAudioUnlocked ? '1px solid #16a34a' : '2px solid #eab308',
-          background: isAudioUnlocked ? 'rgba(22, 163, 74, 0.08)' : 'rgba(234, 179, 8, 0.12)',
+          border: isNativeAudioHost || isAudioUnlocked ? '1px solid #16a34a' : '2px solid #eab308',
+          background: isNativeAudioHost || isAudioUnlocked ? 'rgba(22, 163, 74, 0.08)' : 'rgba(234, 179, 8, 0.12)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
@@ -1136,23 +1153,29 @@ export default function Announcements({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {isAudioUnlocked ? (
+          {isNativeAudioHost || isAudioUnlocked ? (
             <CheckCircle size={24} style={{ color: '#22c55e', flexShrink: 0 }} />
           ) : (
             <AlertTriangle size={24} style={{ color: '#eab308', flexShrink: 0 }} />
           )}
           <div>
             <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 'bold' }}>
-              {isAudioUnlocked ? t('الصوت مسموح في هذه الجلسة', 'Audio is allowed in this session') : t('تفعيل الصوت لهذه الجلسة', 'Enable audio for this session')}
+              {isNativeAudioHost
+                ? t('مُجدول الصوت الأصلي مفعّل في الخلفية', 'Native background audio scheduler active')
+                : isAudioUnlocked
+                  ? t('الصوت مسموح في هذه الجلسة', 'Audio is allowed in this session')
+                  : t('تفعيل الصوت لهذه الجلسة', 'Enable audio for this session')}
             </h4>
             <p style={{ margin: '0.25rem 0 0', fontSize: '0.85rem', color: '#cbd5e1' }}>
-              {isAudioUnlocked
-                ? t('تم السماح بالصوت في الجلسة الحالية فقط. اترك الصفحة مفتوحة وفي الواجهة؛ لا يمكن ضمان التشغيل إذا أوقف المتصفح الصفحة بالخلفية.', 'Audio is allowed for the current session only. Leave the page open and in the foreground; playback cannot be guaranteed if the browser pauses the page in the background.')
-                : t('اضغط الزر لتجربة تفعيل الصوت في هذه الجلسة. المتصفح قد يمنع النداء المجدول، ولا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.', 'Press the button to enable audio in this session. The browser may block the scheduled announcement and does not guarantee playback after the page is closed or sent to the background.')}
+              {isNativeAudioHost
+                ? t('التطبيق يدير النداءات الصوتية تلقائيًا على مستوى النظام، ويستمر التشغيل في الخلفية حتى عند إغلاق النافذة.', 'The app manages voice announcements natively at the system level and keeps playing in the background even when minimized or closed to tray.')
+                : isAudioUnlocked
+                  ? t('تم السماح بالصوت في الجلسة الحالية فقط. اترك الصفحة مفتوحة وفي الواجهة؛ لا يمكن ضمان التشغيل إذا أوقف المتصفح الصفحة بالخلفية.', 'Audio is allowed for the current session only. Leave the page open and in the foreground; playback cannot be guaranteed if the browser pauses the page in the background.')
+                  : t('اضغط الزر لتجربة تفعيل الصوت في هذه الجلسة. المتصفح قد يمنع النداء المجدول، ولا يضمن التشغيل بعد إغلاق الصفحة أو إيقافها بالخلفية.', 'Press the button to enable audio in this session. The browser may block the scheduled announcement and does not guarantee playback after the page is closed or sent to the background.')}
             </p>
           </div>
         </div>
-        {!isAudioUnlocked && (
+        {!isNativeAudioHost && !isAudioUnlocked && (
           <button
             type="button"
             className="button primary"
