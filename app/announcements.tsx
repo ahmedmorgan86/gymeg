@@ -33,6 +33,71 @@ import {
   composeAnnouncementAudio
 } from './lib/announcement-composer';
 import { audioUnlocker, safePlayAudio } from './lib/audio-unlocker';
+import { DEFAULT_CLOSING_ANNOUNCEMENTS } from './lib/club-defaults';
+
+type TextAnnouncementItem = {
+  id: string;
+  titleAr: string;
+  titleEn: string;
+  text: string;
+  lang: 'ar' | 'en';
+  time: string;
+  enabled: boolean;
+  rate: number;
+};
+
+const textStorageKey = (scope: string) => `gymos.text-announcements.v1.${scope}`;
+
+function buildInitialTextAnnouncements(state: GymState, branch: string, scope: string): TextAnnouncementItem[] {
+  const savedMap = new Map<string, Partial<TextAnnouncementItem>>();
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(textStorageKey(scope));
+      if (raw) {
+        for (const item of JSON.parse(raw) as TextAnnouncementItem[]) {
+          if (item?.id) savedMap.set(item.id, item);
+        }
+      }
+    } catch {}
+  }
+
+  const defaults: TextAnnouncementItem[] = DEFAULT_CLOSING_ANNOUNCEMENTS.map((item, idx) => {
+    const id = `default-${branch}-${item.key}`;
+    const saved = savedMap.get(id);
+    const server = (state.announcements ?? []).find(a => a.branch === branch && a.id === id);
+    const defaultTime = idx === 0 ? '21:00' : '21:15';
+    return {
+      id,
+      titleAr: idx === 0 ? 'تنبيه قبل إغلاق النادي بنصف ساعة' : 'تنبيه قبل إغلاق النادي بربع ساعة',
+      titleEn: idx === 0 ? '30-minute closing reminder' : '15-minute closing reminder',
+      text: saved?.text ?? server?.text ?? item.text,
+      lang: 'ar',
+      time: saved?.time ?? defaultTime,
+      enabled: saved?.enabled ?? server?.enabled ?? false,
+      rate: saved?.rate ?? server?.rate ?? 0.95
+    };
+  });
+
+  const defaultIds = new Set(defaults.map(d => d.id));
+  const extras: TextAnnouncementItem[] = (state.announcements ?? [])
+    .filter(a => a.branch === branch && !defaultIds.has(a.id) && typeof a.text === 'string' && a.text.trim().length > 0)
+    .map(a => {
+      const saved = savedMap.get(a.id);
+      const hhmm = typeof a.at === 'string' && a.at.length >= 16 ? a.at.slice(11, 16) : '12:00';
+      return {
+        id: a.id,
+        titleAr: a.lang === 'ar' ? 'نداء صوتي مجدول' : 'Scheduled voice announcement',
+        titleEn: 'Scheduled voice announcement',
+        text: saved?.text ?? a.text ?? '',
+        lang: a.lang === 'en' ? 'en' : 'ar',
+        time: saved?.time ?? hhmm,
+        enabled: saved?.enabled ?? a.enabled,
+        rate: saved?.rate ?? a.rate ?? 0.95
+      };
+    });
+
+  return [...defaults, ...extras];
+}
 import { scheduledMinuteSamples, scheduledWallClockParts } from './lib/announcement-schedule';
 import { shouldRunBrowserAnnouncementScheduler } from './lib/announcement-runtime';
 import { DEFAULT_CHIME_BASE64 } from './lib/default-chime-data';
@@ -339,6 +404,21 @@ export default function Announcements({
       return [];
     }
   });
+  const [textItems, setTextItems] = useState<TextAnnouncementItem[]>(() =>
+    buildInitialTextAnnouncements(state, branch, scope)
+  );
+  const textItemsRef = useRef(textItems);
+  useEffect(() => {
+    textItemsRef.current = textItems;
+  }, [textItems]);
+  const updateTextItems = useCallback((next: TextAnnouncementItem[]) => {
+    setTextItems(next);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(textStorageKey(scope), JSON.stringify(next));
+      } catch {}
+    }
+  }, [scope]);
   const [logs, setLogs] = useState<ExecutionLog[]>(() => {
     if (typeof window === 'undefined') return [];
     try {
@@ -849,6 +929,45 @@ export default function Announcements({
     itemsRef.current = items;
   }, [items]);
 
+  const playTextAnnouncement = useCallback(async (item: TextAnnouncementItem) => {
+    const currentGen = ++playbackGeneration.current;
+    try {
+      const chimeBlob = await retrieveBlob(DEFAULT_CHIME_PART.id);
+      if (chimeBlob) await playPartWithFade(chimeBlob, 80, 0, 0, currentGen);
+      if (currentGen !== playbackGeneration.current) return;
+
+      const winHost = (window as unknown as { chrome?: { webview?: { postMessage?: (msg: unknown) => void } } }).chrome?.webview;
+      if (winHost?.postMessage) {
+        winHost.postMessage({
+          type: 'gymos-desktop',
+          action: 'speak',
+          id: item.id,
+          text: item.text,
+          voice: '',
+          rate: item.rate
+        });
+      } else if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        await new Promise<void>((resolve) => {
+          try {
+            window.speechSynthesis.cancel();
+            const utt = new SpeechSynthesisUtterance(item.text);
+            utt.lang = item.lang === 'en' ? 'en-US' : 'ar-EG';
+            utt.rate = item.rate;
+            utt.onend = () => resolve();
+            utt.onerror = () => resolve();
+            window.speechSynthesis.speak(utt);
+            setTimeout(resolve, 25000);
+          } catch {
+            resolve();
+          }
+        });
+      }
+
+      if (currentGen !== playbackGeneration.current) return;
+      if (chimeBlob) await playPartWithFade(chimeBlob, 80, 0, 0, currentGen);
+    } catch {}
+  }, []);
+
   // Scheduled timer polling every second (continuous background scheduler)
   useEffect(() => {
     // Windows and iOS own the schedule in their native hosts. Running this
@@ -902,6 +1021,18 @@ export default function Announcements({
         }
         return false;
       });
+
+      const dueTextItems = textItemsRef.current.filter(item => {
+        if (!item.enabled) return false;
+        if (normalizeTimeStr(item.time) !== currentTime) return false;
+        const occurrenceKey = `text|${item.id}|${todayDate}|${currentTime}`;
+        if (firedOccurrences.current.has(occurrenceKey)) return false;
+        firedOccurrences.current.add(occurrenceKey);
+        return true;
+      });
+      for (const item of dueTextItems) {
+        void playTextAnnouncement(item);
+      }
 
       dueItems.forEach(due => {
         const key = `${due.id}|${todayDate}|${currentTime}`;
@@ -1695,6 +1826,51 @@ export default function Announcements({
           </div>
         </section>
       )}
+
+      {/* Default & Text Voice Announcements (Closing Reminders) */}
+      <h2 style={{ marginTop: '2rem', marginBottom: '0.5rem' }}>{t('نداءات إغلاق النادي الجاهزة (صوت تلقائي)', 'Ready Club Closing Voice Announcements')} ({textItems.length})</h2>
+      <p style={{ marginTop: 0, marginBottom: '1rem', fontSize: '0.9rem', opacity: 0.8 }}>
+        {t('نداءات بالعامية المصرية جاهزة للتشغيل الفوري أو التفعيل اليومي في مواعيد إغلاق النادي.', 'Pre-built Egyptian Arabic closing reminders ready for instant playback or daily scheduling.')}
+      </p>
+      <div className="dashboard-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(320px, 100%), 1fr))', gap: '1rem', marginBottom: '2rem' }}>
+        {textItems.map(item => (
+          <article className="card announcement-card" key={item.id} style={{ padding: '1rem' }}>
+            <div className="card-head" style={{ marginBottom: '0.75rem' }}>
+              <div>
+                <h3 style={{ margin: 0 }}>{ar ? item.titleAr : item.titleEn}</h3>
+                <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
+                  {item.lang === 'ar' ? t('العربية المصرية · يوميًا', 'Egyptian Arabic · Daily') : t('الإنجليزية · يوميًا', 'English · Daily')}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={item.enabled ? 'badge' : 'badge secondary'}
+                style={{ cursor: 'pointer', border: 'none', padding: '0.3rem 0.6rem' }}
+                onClick={() => updateTextItems(textItems.map(x => x.id === item.id ? { ...x, enabled: !x.enabled } : x))}
+              >
+                {item.enabled ? t('مفعل', 'Enabled') : t('معطل', 'Disabled')}
+              </button>
+            </div>
+            <p style={{ fontSize: '0.9rem', lineHeight: 1.6, margin: '0.5rem 0 0.75rem', background: 'rgba(255,255,255,0.04)', padding: '0.65rem 0.8rem', borderRadius: 8 }}>
+              {item.text}
+            </p>
+            <div className="card-head" style={{ gap: '0.75rem', flexWrap: 'wrap', borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '0.75rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', margin: 0, fontSize: '0.85rem' }}>
+                <span>{t('موعد التشغيل:', 'Time:')}</span>
+                <input
+                  type="time"
+                  value={item.time}
+                  onChange={e => updateTextItems(textItems.map(x => x.id === item.id ? { ...x, time: e.target.value } : x))}
+                  style={{ width: 'auto', padding: '0.25rem 0.45rem' }}
+                />
+              </label>
+              <button type="button" className="button secondary" onClick={() => void playTextAnnouncement(item)}>
+                <Play size={14} /> {t('تشغيل تجريبي', 'Test play')}
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
 
       {/* List of Announcements Cards */}
       <h2 style={{ marginTop: '2rem', marginBottom: '1rem' }}>{t('قائمة النداءات المجدولة', 'Scheduled announcements')} ({items.length})</h2>
