@@ -72,16 +72,29 @@ export async function POST(request: Request) {
     }
 
     if (input.action === 'tashkeel') {
-      const upstream = await fetch(`${VOX_STUDIO_BASE}/api/tashkeel`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: input.text }),
-        signal: AbortSignal.timeout(25000)
-      });
-      const data = await upstream.json().catch(() => ({}));
+      let upstream: Response | null = null;
+      let data: Record<string, unknown> = {};
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          upstream = await fetch(`${VOX_STUDIO_BASE}/api/tashkeel`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: input.text }),
+            signal: AbortSignal.timeout(45000)
+          });
+          data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
+          if (upstream.ok && (data?.vocalizedText || data?.tashkeelText || data?.text)) break;
+          if (upstream.status < 500 && upstream.status !== 429) break;
+        } catch {
+          upstream = null;
+        }
+      }
       const vocalized = data?.vocalizedText || data?.tashkeelText || data?.text;
-      if (!upstream.ok || !vocalized) {
-        return reply({ error: data?.error || 'tts_upstream_error', message: data?.messageAr || data?.message }, upstream.status >= 400 ? upstream.status : 502);
+      if (!upstream || !upstream.ok || !vocalized) {
+        return reply(
+          { error: String(data?.error || 'tts_upstream_error'), message: typeof data?.messageAr === 'string' ? data.messageAr : typeof data?.message === 'string' ? data.message : undefined },
+          upstream && upstream.status >= 400 ? upstream.status : 502
+        );
       }
       return reply({ ok: true, text: String(vocalized) });
     }
