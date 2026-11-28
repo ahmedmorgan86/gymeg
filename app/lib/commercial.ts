@@ -108,7 +108,7 @@ export async function commercialWork(client:PoolClient,platform:boolean,user:Cha
    try{await client.query('UPDATE gymos.commercial_audit SET tenant_id=NULL WHERE tenant_id=$1',[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_audit');}
    await client.query('RELEASE SAVEPOINT sp_audit');
    await client.query(`SAVEPOINT sp_tenant`);
-   try{await client.query('DELETE FROM gymos.tenants WHERE id=$1',[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_tenant');await client.query('UPDATE gymos.tenants SET name=$1 WHERE id=$2',['[deleted] '+existing.name.slice(0,100),id]);}
+   try{await client.query('DELETE FROM gymos.tenants WHERE id=$1',[id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_tenant');try{await client.query('UPDATE gymos.tenants SET name=$1 WHERE id=$2',['[deleted] '+existing.name.slice(0,100),id]);}catch{await client.query('ROLLBACK TO SAVEPOINT sp_tenant');}}
    await client.query('RELEASE SAVEPOINT sp_tenant');
    return{ok:true};
   }
