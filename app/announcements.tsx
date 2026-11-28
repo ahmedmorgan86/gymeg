@@ -44,6 +44,7 @@ type TextAnnouncementItem = {
   time: string;
   enabled: boolean;
   rate: number;
+  audioUrl?: string;
 };
 
 const textStorageKey = (scope: string) => `gymos.text-announcements.v1.${scope}`;
@@ -74,7 +75,8 @@ function buildInitialTextAnnouncements(state: GymState, branch: string, scope: s
       lang: 'ar',
       time: saved?.time ?? defaultTime,
       enabled: saved?.enabled ?? server?.enabled ?? false,
-      rate: saved?.rate ?? server?.rate ?? 0.95
+      rate: saved?.rate ?? server?.rate ?? 0.95,
+      audioUrl: idx === 0 ? '/audio/closing-30m.wav' : '/audio/closing-15m.wav'
     };
   });
 
@@ -936,31 +938,45 @@ export default function Announcements({
       if (chimeBlob) await playPartWithFade(chimeBlob, 80, 0, 0, currentGen);
       if (currentGen !== playbackGeneration.current) return;
 
-      const winHost = (window as unknown as { chrome?: { webview?: { postMessage?: (msg: unknown) => void } } }).chrome?.webview;
-      if (winHost?.postMessage) {
-        winHost.postMessage({
-          type: 'gymos-desktop',
-          action: 'speak',
-          id: item.id,
-          text: item.text,
-          voice: '',
-          rate: item.rate
-        });
-      } else if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-        await new Promise<void>((resolve) => {
-          try {
-            window.speechSynthesis.cancel();
-            const utt = new SpeechSynthesisUtterance(item.text);
-            utt.lang = item.lang === 'en' ? 'en-US' : 'ar-EG';
-            utt.rate = item.rate;
-            utt.onend = () => resolve();
-            utt.onerror = () => resolve();
-            window.speechSynthesis.speak(utt);
-            setTimeout(resolve, 25000);
-          } catch {
-            resolve();
+      let playedAudioFile = false;
+      if (item.audioUrl) {
+        try {
+          const res = await fetch(item.audioUrl);
+          if (res.ok) {
+            const voiceBlob = await res.blob();
+            await playPartWithFade(voiceBlob, 100, 0, 0, currentGen);
+            playedAudioFile = true;
           }
-        });
+        } catch {}
+      }
+
+      if (!playedAudioFile) {
+        const winHost = (window as unknown as { chrome?: { webview?: { postMessage?: (msg: unknown) => void } } }).chrome?.webview;
+        if (winHost?.postMessage) {
+          winHost.postMessage({
+            type: 'gymos-desktop',
+            action: 'speak',
+            id: item.id,
+            text: item.text,
+            voice: '',
+            rate: item.rate
+          });
+        } else if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+          await new Promise<void>((resolve) => {
+            try {
+              window.speechSynthesis.cancel();
+              const utt = new SpeechSynthesisUtterance(item.text);
+              utt.lang = item.lang === 'en' ? 'en-US' : 'ar-EG';
+              utt.rate = item.rate;
+              utt.onend = () => resolve();
+              utt.onerror = () => resolve();
+              window.speechSynthesis.speak(utt);
+              setTimeout(resolve, 25000);
+            } catch {
+              resolve();
+            }
+          });
+        }
       }
 
       if (currentGen !== playbackGeneration.current) return;
@@ -1839,7 +1855,11 @@ export default function Announcements({
               <div>
                 <h3 style={{ margin: 0 }}>{ar ? item.titleAr : item.titleEn}</h3>
                 <span style={{ fontSize: '0.82rem', color: '#94a3b8' }}>
-                  {item.lang === 'ar' ? t('العربية المصرية · يوميًا', 'Egyptian Arabic · Daily') : t('الإنجليزية · يوميًا', 'English · Daily')}
+                  {item.audioUrl
+                    ? t('صوت شبابي مصري (VoxArabic) · يوميًا', 'Egyptian youthful voice (VoxArabic) · Daily')
+                    : item.lang === 'ar'
+                      ? t('العربية المصرية · يوميًا', 'Egyptian Arabic · Daily')
+                      : t('الإنجليزية · يوميًا', 'English · Daily')}
                 </span>
               </div>
               <button
