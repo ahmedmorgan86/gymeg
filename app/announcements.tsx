@@ -34,6 +34,7 @@ import {
 } from './lib/announcement-composer';
 import { audioUnlocker, safePlayAudio } from './lib/audio-unlocker';
 import { DEFAULT_CLOSING_ANNOUNCEMENTS } from './lib/club-defaults';
+import VoxStudioPanel from './vox-studio-panel';
 
 type TextAnnouncementItem = {
   id: string;
@@ -1526,6 +1527,12 @@ export default function Announcements({
                   onChange={e => e.target.files?.[0] && void handleFileUpload('main', e.target.files[0])}
                 />
               </label>
+
+              <VoxStudioPanel
+                owner={owner}
+                ar={ar}
+                onAudioGenerated={file => handleFileUpload('main', file)}
+              />
 
               {editing.main ? (
                 <div
