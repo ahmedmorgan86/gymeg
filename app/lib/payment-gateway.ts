@@ -87,6 +87,53 @@ export function verifyWebhookSignature(rawBody: string, headerSig: string | null
   }
 }
 
+export function verifyPaymobHmac512(
+  obj: Record<string, unknown>,
+  hmacQuery: string | null,
+  hmacSecret: string | undefined
+): boolean {
+  if (!hmacQuery || !hmacSecret || !obj || typeof obj !== 'object') return false;
+  try {
+    const order = (obj.order && typeof obj.order === 'object' ? obj.order : {}) as Record<string, unknown>;
+    const sourceData = (obj.source_data && typeof obj.source_data === 'object' ? obj.source_data : {}) as Record<string, unknown>;
+    const str = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+    const concatenated = [
+      str(obj.amount_cents),
+      str(obj.created_at),
+      str(obj.currency),
+      str(obj.error_occured),
+      str(obj.has_parent_transaction),
+      str(obj.id),
+      str(obj.integration_id),
+      str(obj.is_3d_secure),
+      str(obj.is_auth),
+      str(obj.is_capture),
+      str(obj.is_refunded),
+      str(obj.is_standalone_payment),
+      str(obj.is_voided),
+      str(order.id),
+      str(obj.owner),
+      str(obj.pending),
+      str(sourceData.pan),
+      str(sourceData.sub_type),
+      str(sourceData.type),
+      str(obj.success),
+    ].join('');
+    const expected = createHmac('sha512', hmacSecret).update(concatenated).digest('hex');
+    const a = Buffer.from(hmacQuery.toLowerCase());
+    const b = Buffer.from(expected.toLowerCase());
+    return a.length === b.length && timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+export function instaPayCheckoutUrl(instapayAddress: string): string {
+  const trimmed = instapayAddress.trim();
+  if (/^https:\/\/ipn\.eg\//i.test(trimmed)) return trimmed;
+  return `https://ipn.eg/S/${encodeURIComponent(trimmed)}`;
+}
+
 export async function createGatewayCheckout(params: {
   intent: CheckoutIntent;
   token: string;
@@ -101,35 +148,41 @@ export async function createGatewayCheckout(params: {
 
   if (intent.provider === 'paymob' && paymobKeys?.secretKey && paymobKeys?.publicKey && paymobKeys?.integrationId) {
     const [firstName, ...rest] = buyerName.trim().split(/\s+/);
-    const res = await fetch('https://accept.paymob.com/v1/intention/', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${paymobKeys.secretKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount: intent.amountMinor,
-        currency: intent.currency || 'EGP',
-        payment_methods: [Number(paymobKeys.integrationId)],
-        items: [{ name: itemName.slice(0, 50), amount: intent.amountMinor, quantity: 1 }],
-        billing_data: {
-          first_name: firstName || 'Customer',
-          last_name: rest.join(' ') || 'GymEG',
-          phone_number: buyerPhone || '+201000000000',
-          email: buyerEmail || 'billing@gymeg.app',
+    const integrationIds = paymobKeys.integrationId
+      .split(',')
+      .map(s => Number(s.trim()))
+      .filter(n => Number.isFinite(n) && n > 0);
+    if (integrationIds.length > 0) {
+      const res = await fetch('https://accept.paymob.com/v1/intention/', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Token ${paymobKeys.secretKey}`,
+          'Content-Type': 'application/json',
         },
-        special_reference: intent.reference,
-        extras: { gymeg_intent: token },
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (res.ok) {
-      const data = (await res.json()) as { client_secret?: string };
-      if (data.client_secret) {
-        return {
-          mode: 'live',
-          checkoutUrl: `https://accept.paymob.com/unifiedcheckout/?publicKey=${encodeURIComponent(paymobKeys.publicKey)}&clientSecret=${encodeURIComponent(data.client_secret)}`,
-        };
+        body: JSON.stringify({
+          amount: intent.amountMinor,
+          currency: intent.currency || 'EGP',
+          payment_methods: integrationIds,
+          items: [{ name: itemName.slice(0, 50), amount: intent.amountMinor, quantity: 1 }],
+          billing_data: {
+            first_name: firstName || 'Customer',
+            last_name: rest.join(' ') || 'GymEG',
+            phone_number: buyerPhone || '+201000000000',
+            email: buyerEmail || 'billing@gymeg.app',
+          },
+          special_reference: intent.reference,
+          extras: { gymeg_intent: token },
+        }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { client_secret?: string };
+        if (data.client_secret) {
+          return {
+            mode: 'live',
+            checkoutUrl: `https://accept.paymob.com/unifiedcheckout/?publicKey=${encodeURIComponent(paymobKeys.publicKey)}&clientSecret=${encodeURIComponent(data.client_secret)}`,
+          };
+        }
       }
     }
   }
@@ -137,7 +190,7 @@ export async function createGatewayCheckout(params: {
   if (intent.provider === 'instapay' && instapayAddress) {
     return {
       mode: 'instapay',
-      checkoutUrl: `https://ipn.eg/S/${encodeURIComponent(instapayAddress)}`,
+      checkoutUrl: instaPayCheckoutUrl(instapayAddress),
     };
   }
 

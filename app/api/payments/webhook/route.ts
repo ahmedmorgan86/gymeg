@@ -3,7 +3,7 @@ import { getPool } from '../../../lib/database';
 import { applyOperation, dayAt } from '../../../lib/domain';
 import { persistSpace } from '../../../lib/entity-store';
 import { licenseGrant, type License, type LicenseMode } from '../../../lib/licensing';
-import { decryptGatewaySecret, verifyPaymentIntent, verifyWebhookSignature } from '../../../lib/payment-gateway';
+import { decryptGatewaySecret, verifyPaymobHmac512, verifyPaymentIntent, verifyWebhookSignature } from '../../../lib/payment-gateway';
 import { readSpace, reply } from '../../../lib/server-workspace';
 
 export async function POST(request: Request) {
@@ -11,27 +11,67 @@ export async function POST(request: Request) {
     const raw = await request.text();
     if (raw.length > 65536) return reply({ error: 'limit' }, 413);
 
-    const body = JSON.parse(raw) as {
+    const parsed = JSON.parse(raw) as {
+      type?: string;
+      obj?: Record<string, unknown>;
       intent?: string;
       status?: string;
       paidMinor?: number;
       transactionId?: string;
     };
-    if (body.status !== 'paid' || typeof body.intent !== 'string') {
-      return reply({ ok: true, ignored: true });
+
+    const isPaymobCallback = parsed.type === 'TRANSACTION' && parsed.obj && typeof parsed.obj === 'object';
+    let intentToken: string | undefined;
+    let paidMinor: number | undefined;
+    let transactionId: string | undefined;
+
+    if (isPaymobCallback) {
+      const obj = parsed.obj!;
+      if (obj.success !== true || obj.pending === true || obj.is_voided === true || obj.is_refunded === true) {
+        return reply({ ok: true, ignored: true });
+      }
+      const claims = (obj.payment_key_claims && typeof obj.payment_key_claims === 'object' ? obj.payment_key_claims : {}) as Record<string, unknown>;
+      const claimsExtra = (claims.extra && typeof claims.extra === 'object' ? claims.extra : {}) as Record<string, unknown>;
+      const order = (obj.order && typeof obj.order === 'object' ? obj.order : {}) as Record<string, unknown>;
+      const orderData = (order.data && typeof order.data === 'object' ? order.data : {}) as Record<string, unknown>;
+      const orderExtra = (orderData.extra && typeof orderData.extra === 'object' ? orderData.extra : {}) as Record<string, unknown>;
+
+      intentToken =
+        typeof claimsExtra.gymeg_intent === 'string'
+          ? claimsExtra.gymeg_intent
+          : typeof orderExtra.gymeg_intent === 'string'
+            ? orderExtra.gymeg_intent
+            : undefined;
+      if (typeof intentToken !== 'string') {
+        return reply({ ok: true, ignored: true });
+      }
+      paidMinor = typeof obj.amount_cents === 'number' ? obj.amount_cents : undefined;
+      transactionId = obj.id !== undefined ? String(obj.id) : undefined;
+    } else {
+      if (parsed.status !== 'paid' || typeof parsed.intent !== 'string') {
+        return reply({ ok: true, ignored: true });
+      }
+      intentToken = parsed.intent;
+      paidMinor = parsed.paidMinor;
+      transactionId = parsed.transactionId;
     }
 
-    const intent = verifyPaymentIntent(body.intent);
+    const intent = verifyPaymentIntent(intentToken);
     if (!intent) return reply({ error: 'invalidIntent' }, 400);
-    if (typeof body.paidMinor === 'number' && body.paidMinor < intent.amountMinor) {
+    if (typeof paidMinor === 'number' && paidMinor < intent.amountMinor) {
       return reply({ error: 'underpaid' }, 400);
     }
 
     const sigHeader = request.headers.get('x-gymeg-webhook-signature');
+    const hmacQuery = new URL(request.url).searchParams.get('hmac');
+    const verifySig = (secret: string | undefined) =>
+      isPaymobCallback
+        ? verifyPaymobHmac512(parsed.obj!, hmacQuery, secret)
+        : verifyWebhookSignature(raw, sigHeader, secret);
 
     if (intent.kind === 'platform_license') {
       const platformSecret = process.env.PAYMOB_HMAC_SECRET || process.env.PAYMENT_WEBHOOK_SECRET || process.env.CRON_SECRET;
-      if (!verifyWebhookSignature(raw, sigHeader, platformSecret)) {
+      if (!verifySig(platformSecret)) {
         return reply({ error: 'forbidden' }, 403);
       }
       if (!intent.tenantId || !intent.orderId) return reply({ error: 'invalidIntent' }, 400);
@@ -56,7 +96,7 @@ export async function POST(request: Request) {
           ord.tenant_id,
         ]);
         await client.query("UPDATE gymos.activation_requests SET status='approved',transfer_ref=$1,paid_minor=$2,reviewed_at=now() WHERE id=$3", [
-          String(body.transactionId || intent.reference),
+          String(transactionId || intent.reference),
           intent.amountMinor,
           ord.id,
         ]);
@@ -74,7 +114,7 @@ export async function POST(request: Request) {
     if (!intent.memberId || !intent.branch) return reply({ error: 'invalidIntent' }, 400);
     const current = await readSpace(intent.owner);
     const clubHmac = decryptGatewaySecret(current.state.settings.paymentGateway?.paymobHmacSecretEnc) || process.env.PAYMENT_WEBHOOK_SECRET || process.env.CRON_SECRET;
-    if (!verifyWebhookSignature(raw, sigHeader, clubHmac)) {
+    if (!verifySig(clubHmac)) {
       return reply({ error: 'forbidden' }, 403);
     }
 
@@ -98,10 +138,10 @@ export async function POST(request: Request) {
         method: intent.provider === 'instapay' ? 'transfer' : 'card',
       },
       now,
-      `Online (${intent.provider}) #${body.transactionId || intent.reference}`,
+      `Online (${intent.provider}) #${transactionId || intent.reference}`,
       () => randomUUID()
     );
-    nextState.receipts.push({ id: receiptKey, digest: String(body.transactionId || intent.reference) });
+    nextState.receipts.push({ id: receiptKey, digest: String(transactionId || intent.reference) });
     if (nextState.receipts.length > 1000) nextState.receipts.shift();
 
     const saved = await persistSpace(intent.owner, current, nextState);
